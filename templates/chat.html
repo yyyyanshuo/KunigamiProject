@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>桐奈 ✿ Chat</title>
+<!-- 这是在 chat.html 的 <head> 标签内 -->
+<style>
+  body {
+    font-family: "Segoe UI", "PingFang SC", "Helvetica Neue", sans-serif;
+    background: linear-gradient(135deg, #fff3f8 0%, #ffe9e1 100%);
+    margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh;
+  }
+  .chat-container {
+    flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; scroll-behavior: smooth;
+  }
+
+  /* 1. 外层包装 */
+  .message-wrapper {
+    display: flex; flex-direction: column; margin: 8px 0; max-width: 78%;
+  }
+  .message-wrapper.user { align-self: flex-end; }
+  .message-wrapper.assistant { align-self: flex-start; }
+
+  /* 2. 气泡 */
+  .bubble {
+    padding: 12px 16px; border-radius: 16px; line-height: 1.5; word-wrap: break-word;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08); animation: fadeIn 0.3s ease;
+  }
+  .message-wrapper.user .bubble {
+    background: linear-gradient(135deg, #ffb6b9, #ffc9c9); color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+  .message-wrapper.assistant .bubble {
+    background: #fff; color: #444; border-bottom-left-radius: 4px; border: 1px solid #ffb6b9;
+  }
+
+  /* 3. 外部控制容器 */
+  .controls-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 4px;
+  }
+
+  /* 4. 交叉对齐 */
+  .message-wrapper.user .controls-container { flex-direction: row; }
+  .message-wrapper.assistant .controls-container { flex-direction: row-reverse; }
+
+  /* 5. 时间戳和复制按钮 */
+  .timestamp {
+    font-size: 11px;
+    color: #aaa;
+    padding: 0 5px;
+  }
+  .copy-btn {
+    background: transparent; border: none; cursor: pointer;
+    width: 26px; height: 26px; padding: 5px;
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  }
+  .copy-btn img {
+    width: 14px; height: 14px; opacity: 0.5; transition: opacity 0.2s;
+  }
+  .copy-btn:hover img { opacity: 0.8; }
+  .copy-btn.copied img { opacity: 1; }
+
+  /* --- 【新增】日期分隔符的样式 --- */
+  .date-separator {
+    align-self: center; /* 居中显示 */
+    margin: 20px 0;     /* 上下留出足够的间距 */
+    padding: 4px 12px;
+    background-color: rgba(0, 0, 0, 0.05); /* 一个淡淡的背景色 */
+    border-radius: 12px; /* 圆角 */
+    color: #aaa;         /* 柔和的文字颜色 */
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  /* 6. 其他 */
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  .input-container { display: flex; align-items: center; padding: 12px; border-top: 1px solid #ffdce0; background-color: #fff; }
+  #messageInput { flex: 1; padding: 10px 14px; border: 1px solid #ffd1d1; border-radius: 20px; outline: none; font-size: 15px; background: #fff8f9; transition: border-color 0.2s; }
+  #messageInput:focus { border-color: #ff9b9e; }
+  #sendBtn { margin-left: 8px; background: linear-gradient(135deg, #ffb6b9, #ff9b73); color: white; border: none; border-radius: 20px; padding: 10px 18px; cursor: pointer; font-weight: bold; box-shadow: 0 3px 6px rgba(255,140,140,0.3); transition: all 0.2s; }
+  #sendBtn:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(255,140,140,0.4); }
+</style>
+</head>
+<body>
+
+<div class="chat-container" id="chatContainer">
+  <div class="bubble assistant">
+    ✿ こんにちは～ 我是桐奈の小聊天助手 💌
+  </div>
+</div>
+
+<div class="input-container">
+  <input id="messageInput" type="text" placeholder="输入消息…" />
+  <button id="sendBtn">发送</button>
+</div>
+
+<!-- 这是在 chat.html 的 <body> 标签底部 -->
+<script>
+  const chatContainer = document.getElementById('chatContainer');
+  const input = document.getElementById('messageInput');
+  const btn = document.getElementById('sendBtn');
+  const copyIconPath = '/static/copy-icon.svg';
+  const checkIconPath = '/static/check-icon.svg';
+
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // 完整的 appendBubble 函数，以防万一
+  function appendBubble(text, role, timestampStr = null, showControls = true) {
+    const wrapper = document.createElement('div');
+    wrapper.classList.add('message-wrapper', role);
+    const bubble = document.createElement('div');
+    bubble.classList.add('bubble');
+    bubble.innerHTML = text.replace(/\n/g, "<br>");
+    wrapper.appendChild(bubble);
+
+    if (showControls) {
+      const controls = document.createElement('div');
+      controls.classList.add('controls-container');
+      const timestamp = document.createElement('div');
+      timestamp.classList.add('timestamp');
+      if (timestampStr) {
+        const date = new Date(timestampStr);
+        timestamp.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      } else {
+        const now = new Date();
+        timestamp.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+      const copyBtn = document.createElement('button');
+      copyBtn.classList.add('copy-btn');
+      const icon = document.createElement('img');
+      icon.src = copyIconPath;
+      copyBtn.appendChild(icon);
+      copyBtn.addEventListener('click', () => {
+        const fullText = wrapper.dataset.fulltext || text;
+        navigator.clipboard.writeText(fullText).then(() => {
+          icon.src = checkIconPath;
+          copyBtn.classList.add('copied');
+          setTimeout(() => {
+            icon.src = copyIconPath;
+            copyBtn.classList.remove('copied');
+          }, 1500);
+        });
+      });
+      controls.appendChild(timestamp);
+      controls.appendChild(copyBtn);
+      wrapper.appendChild(controls);
+    }
+
+    chatContainer.appendChild(wrapper);
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+  }
+
+  // --- 我们需要稍微升级一下 displayBubbleGroup ---
+  async function displayBubbleGroup(bubbleTexts, fullText, role, timestamp, isUserInput = false, isHistory = false) {
+    for (const [index, text] of bubbleTexts.entries()) {
+      const isLast = (index === bubbleTexts.length - 1);
+
+      // 【关键】如果是历史记录，我们不希望有任何延迟
+      if (!isHistory) {
+          if (isUserInput && index > 0) {
+            await sleep(600);
+          } else if (!isUserInput) {
+            let typingDelay = text.length * 50; // 加快一点历史感
+            typingDelay = Math.max(100, Math.min(typingDelay, 500));
+            await sleep(typingDelay);
+          }
+      }
+
+      appendBubble(text, role, isLast ? timestamp : null, isLast);
+
+      if (isLast) {
+          const allWrappers = chatContainer.querySelectorAll('.message-wrapper');
+          const lastWrapper = allWrappers[allWrappers.length - 1];
+          if (lastWrapper) {
+              lastWrapper.dataset.fulltext = fullText;
+          }
+      }
+    }
+  }
+
+  // --- 【核心修正】在加载历史时，增加日期分隔符 ---
+  window.addEventListener('DOMContentLoaded', async () => {
+    chatContainer.innerHTML = '';
+    try {
+      const res = await fetch('/api/history');
+      const history = await res.json();
+      if (history.length === 0) {
+        appendBubble('✿ こんにちは～ 我是桐奈の小聊天助手 💌', 'assistant');
+      } else {
+        // 1. 我们的“记忆”变量，初始为 null
+        let lastMessageDate = null;
+
+        // 2. 用有序的 for...of 循环来处理历史
+        for (const msg of history) {
+          const currentMessageDate = new Date(msg.timestamp);
+
+          // 3. 比较日期是否变化
+          //    如果这是第一条消息(lastMessageDate为null)，或者当前日期与上一条不同
+          if ( !lastMessageDate ||
+               lastMessageDate.getDate() !== currentMessageDate.getDate() ||
+               lastMessageDate.getMonth() !== currentMessageDate.getMonth() ||
+               lastMessageDate.getFullYear() !== currentMessageDate.getFullYear() )
+          {
+            // 4. 创建并插入日期分隔符
+            const separator = document.createElement('div');
+            separator.classList.add('date-separator');
+            // 使用 toLocaleDateString 来显示一个漂亮的、本地化的日期格式
+            separator.textContent = currentMessageDate.toLocaleDateString([], {
+              year: 'numeric', month: 'long', day: 'numeric', weekday: 'long'
+            });
+            chatContainer.appendChild(separator);
+          }
+
+          // 5. 显示当前这组气泡 (无延迟，瞬间加载)
+          const bubbles = msg.content.split('/').map(p => p.trim()).filter(Boolean);
+          await displayBubbleGroup(bubbles, msg.content, msg.role, currentMessageDate, false, true);
+
+          // 6. 更新“记忆”，为下一次循环做准备
+          lastMessageDate = currentMessageDate;
+        }
+      }
+    } catch (e) {
+      appendBubble('[历史记录加载失败]', 'assistant');
+    }
+  });
+
+  btn.addEventListener('click', sendMessage);
+  input.addEventListener('keypress', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
+</script>
+
+</body>
+</html>
