@@ -166,8 +166,8 @@
           if (isUserInput && index > 0) {
             await sleep(600);
           } else if (!isUserInput) {
-            let typingDelay = text.length * 50; // 加快一点历史感
-            typingDelay = Math.max(100, Math.min(typingDelay, 500));
+            let typingDelay = text.length * 200; // 加快一点历史感
+            typingDelay = Math.max(500, Math.min(typingDelay, 3000));
             await sleep(typingDelay);
           }
       }
@@ -229,6 +229,43 @@
       appendBubble('[历史记录加载失败]', 'assistant');
     }
   });
+
+  // --- 【这才是最终正确的 sendMessage 函数！】 ---
+  async function sendMessage() {
+    const originalText = input.value.trim();
+    if (!originalText) return;
+
+    input.value = '';
+    btn.disabled = true;
+    btn.textContent = "发送中…";
+
+    // 把剧本交给用户组的导演
+    const userBubbles = originalText.split('/').map(p => p.trim()).filter(Boolean);
+    await displayBubbleGroup(userBubbles, originalText, 'user', new Date(), true, false);
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message: originalText})
+      });
+      const data = await res.json();
+
+      // 把剧本交给 AI 组的导演
+      if (data.replies && data.replies.length > 0) {
+        const fullReplyText = data.replies.join(' / ');
+        await displayBubbleGroup(data.replies, fullReplyText, 'assistant', new Date(), false, false);
+      } else {
+        appendBubble(data.reply || '[无回复]', 'assistant');
+      }
+
+    } catch (e) {
+      appendBubble('[连接失败，请稍后重试]', 'assistant');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "发送";
+    }
+  }
 
   btn.addEventListener('click', sendMessage);
   input.addEventListener('keypress', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
