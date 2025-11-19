@@ -57,14 +57,34 @@ def index():
 @app.route("/api/history", methods=["GET"])
 def get_history():
     """提供给前端，用于加载所有历史聊天记录"""
+    # 1. 从 URL 参数获取页码和每页数量，设置默认值
+    page = request.args.get('page', 1, type=int)
+    limit = request.args.get('limit', 20, type=int)  # 比如每次加载20条
+    offset = (page - 1) * limit
+
     conn = sqlite3.connect(DATABASE_FILE)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    # --- 修改点在这里！我们把 timestamp 字段也 SELECT 出来 ---
-    cursor.execute("SELECT role, content, timestamp FROM messages ORDER BY timestamp ASC")
-    messages = [dict(row) for row in cursor.fetchall()]
+
+    # 2. 【核心】使用 LIMIT 和 OFFSET 来实现分页查询
+    # 我们按时间倒序查，这样拿到的就是最新的数据
+    cursor.execute("SELECT role, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+                   (limit, offset))
+
+    # 3. 把结果反转，这样前端收到的就是按时间正序的了
+    messages = [dict(row) for row in cursor.fetchall()][::-1]
+
+    # 4. （可选但推荐）同时告诉前端总共有多少条消息，方便它判断是否已加载完
+    cursor.execute("SELECT COUNT(id) FROM messages")
+    total_messages = cursor.fetchone()[0]
+
     conn.close()
-    return jsonify(messages)
+
+    # 5. 返回一个包含数据和总数的对象
+    return jsonify({
+        "messages": messages,
+        "total": total_messages
+    })
 
 # 这是在 app.py 文件中
 
