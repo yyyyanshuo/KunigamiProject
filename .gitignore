@@ -1,0 +1,7 @@
+.env
+chat_history.db
+.idea/
+__pycache__/
+*.pyc
+.DS_Store
+debug_network.py
