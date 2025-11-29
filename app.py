@@ -68,8 +68,7 @@ def get_history():
 
     # 2. 【核心】使用 LIMIT 和 OFFSET 来实现分页查询
     # 我们按时间倒序查，这样拿到的就是最新的数据
-    cursor.execute("SELECT role, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-                   (limit, offset))
+    cursor.execute("SELECT id, role, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT ? OFFSET ?", (limit, offset))
 
     # 3. 把结果反转，这样前端收到的就是按时间正序的了
     messages = [dict(row) for row in cursor.fetchall()][::-1]
@@ -173,6 +172,8 @@ def chat():
         cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
                        ("assistant", cleaned_reply_text, assistant_timestamp))
         conn.commit()
+        cursor.execute("SELECT last_insert_rowid()")
+        ai_msg_id = cursor.fetchone()[0]
         conn.close()
 
         reply_bubbles = list(filter(None, [part.strip() for part in cleaned_reply_text.split('/')]))
@@ -190,6 +191,25 @@ def chat():
         #    注意：我们没有写入数据库，因为交互没有完成！
         return jsonify({"error": "AI call or DB write failed", "details": str(e)}), 500
 
+# 3. 【新增】在 app.py 末尾添加这两个新接口
+@app.route("/api/messages/<int:msg_id>", methods=["DELETE"])
+def delete_message(msg_id):
+    conn = sqlite3.connect(DATABASE_FILE)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM messages WHERE id = ?", (msg_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "success"})
+
+@app.route("/api/messages/<int:msg_id>", methods=["PUT"])
+def edit_message(msg_id):
+    new_content = request.json.get("content", "")
+    conn = sqlite3.connect(DATABASE_FILE)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE messages SET content = ? WHERE id = ?", (new_content, msg_id))
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "success", "content": new_content})
 
 # 这是在 app.py 文件中的 call_openrouter 函数
 

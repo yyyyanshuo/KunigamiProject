@@ -11,21 +11,122 @@
     background: linear-gradient(135deg, #fff3f8 0%, #ffe9e1 100%);
     margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh;
   }
+
+  /* --- 【新增】顶部导航栏样式 --- */
+  .chat-header {
+    position: relative; /* 关键 */
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px;
+    background-color: rgba(255, 255, 255, 0.85); /* 半透明背景 */
+    backdrop-filter: blur(10px); /* 毛玻璃特效 */
+    border-bottom: 1px solid #ffe5e8;
+    z-index: 100;
+    flex-shrink: 0; /* 防止被挤压 */
+  }
+
+  /* 左右按钮通用样式 */
+  .header-btn {
+    background: none; border: none; cursor: pointer; padding: 8px;
+    display: flex; align-items: center; justify-content: center;
+    color: #ff9b9e; border-radius: 50%; transition: background 0.2s;
+  }
+  .header-btn:hover { background-color: rgba(0,0,0,0.05); }
+  .header-btn svg { width: 24px; height: 24px; fill: currentColor; }
+
+  /* 中间文字区域 */
+  .header-title-box {
+    position: absolute; /* 关键：脱离文档流 */
+    left: 50%;
+    transform: translateX(-50%); /* 完美的水平居中 */
+    text-align: center; display: flex; flex-direction: column; align-items: center;
+    pointer-events: none; /* 防止遮挡下方的点击（虽然这里header高层级没事，加个保险） */
+  }
+  .header-name { font-size: 16px; font-weight: bold; color: #444; }
+  .header-status { font-size: 11px; color: #999; display: flex; align-items: center; gap: 4px; margin-top: 2px;}
+  .status-dot { width: 8px; height: 8px; background-color: #4cd964; border-radius: 50%; display: inline-block; }
+
   .chat-container {
     flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; scroll-behavior: smooth;
   }
 
-  /* 1. 外层包装 */
-  .message-wrapper {
-    display: flex; flex-direction: column; margin: 8px 0; max-width: 78%;
+  /* --- 【重构】头像 + 气泡组 布局 --- */
+  .message-group {
+    display: flex;
+    margin: 8px 0; /* 每组对话的上下间距 */
+    align-items: flex-start; /* 顶对齐：头像始终在消息组的最上方 */
+    /*max-width: 90%;*/
+    max-width: 100%;    /* <-- 改为 100% */
   }
-  .message-wrapper.user { align-self: flex-end; }
-  .message-wrapper.assistant { align-self: flex-start; }
+
+  /* 用户：右对齐，反向排列(头像在右) */
+  .message-group.user {
+    align-self: flex-end;
+    flex-direction: row-reverse;
+    margin-left: 50px;
+  }
+
+  /* 助手：左对齐，正向排列(头像在左) */
+  .message-group.assistant {
+    align-self: flex-start;
+    flex-direction: row;
+    margin-right: 50px;
+  }
+
+  /* --- 头像样式 --- */
+  .avatar-img {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    object-fit: cover;
+    flex-shrink: 0; /* 防止头像被挤压 */
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    margin-top: 2px;
+    margin-bottom: 2px;
+  }
+  .message-group.user .avatar-img { margin-left: 10px;}
+  .message-group.assistant .avatar-img { margin-right: 10px; }
+
+  /* --- 气泡垂直堆叠容器 --- */
+  .bubble-stack {
+    display: flex; flex-direction: column;
+    min-width: 0; /* 修复Flex子元素溢出问题 */
+  }
+  /* 用户气泡靠右 */
+  .message-group.user .bubble-stack { align-items: flex-end; }
+  /* 助手气泡靠左 */
+  .message-group.assistant .bubble-stack { align-items: flex-start; }
+
+  /* --- 微调原有样式 --- */
+  /* 覆盖之前的 wrapper 样式，让它适应新容器 */
+  /* --- Fix 4: 防止气泡被底部按钮撑大，恢复自然宽度 --- */
+  .message-wrapper {
+    display: flex; flex-direction: column; margin: 2px 0;
+    max-width: 100%; /* 这里的 100% 是相对于 stack 的 */
+  }
 
   /* 2. 气泡 */
   .bubble {
-    padding: 12px 16px; border-radius: 16px; line-height: 1.5; word-wrap: break-word;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.08); animation: fadeIn 0.3s ease;
+    padding: 10px 14px; /* 内边距稍微调小一点点 */
+    border-radius: 16px;
+    line-height: 1.5;
+    word-wrap: break-word;
+    font-size: 14.5px; /* 原来可能是 16px，改小 */
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    animation: fadeIn 0.3s ease;
+
+    /* --- 【新增】这两行是关键 --- */
+    width: fit-content;  /* 强制气泡宽度只适应文字内容 */
+    max-width: 100%;     /* 防止文字太长时不换行 */
+  }
+  /* --- 【Fix】强制用户气泡和控件靠右对齐 --- */
+  .message-wrapper.user {
+    align-items: flex-end !important; /* 关键：加上 !important 提高优先级 */
+    text-align: right; /* 双重保险 */
+  }
+
+  /* 对应的，助手气泡靠左对齐 */
+  .message-wrapper.assistant {
+    align-items: flex-start !important;
+    text-align: left;
   }
   .message-wrapper.user .bubble {
     background: linear-gradient(135deg, #ffb6b9, #ffc9c9); color: #fff;
@@ -35,17 +136,44 @@
     background: #fff; color: #444; border-bottom-left-radius: 4px; border: 1px solid #ffb6b9;
   }
 
-  /* 3. 外部控制容器 */
+  /* 3. 外部控制容器 (修改版：一直显示 + 水平对齐) */
   .controls-container {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
+    align-items: center; /* 【关键】让时间戳和按钮在同一水平线上垂直居中 */
+    gap: 6px;            /* 按钮和时间戳之间的间距 */
     margin-top: 4px;
+    opacity: 1 !important; /* 【关键】强制一直显示，不再透明 */
+    visibility: visible;
   }
 
-  /* 4. 交叉对齐 */
-  .message-wrapper.user .controls-container { flex-direction: row; }
-  .message-wrapper.assistant .controls-container { flex-direction: row-reverse; }
+  /* 4. 左右对齐逻辑 (修改版) */
+
+  /* 用户的消息：控件靠右对齐 */
+  .message-wrapper.user .controls-container {
+    justify-content: flex-end;
+    flex-direction: row; /* 保持 [时间戳] [按钮组] 的顺序，或者您可以改成 row-reverse 让按钮在最外侧 */
+  }
+
+  /* 助手的消息：控件靠左对齐 */
+  .message-wrapper.assistant .controls-container {
+    justify-content: flex-start;
+    flex-direction: row;
+  }
+
+  /* 【注意】请把之前这行删掉或注释掉，否则可能会有冲突 */
+  /* .message-group:hover .controls-container { opacity: 1; } */
+
+  /* 所有的操作按钮通用样式 */
+  .action-btn {
+    background: transparent; border: none; cursor: pointer;
+    width: 24px; height: 24px; padding: 4px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    color: #aaa; transition: all 0.2s;
+  }
+  .action-btn:hover { background-color: rgba(0,0,0,0.05); color: #ff9b9e; }
+  .action-btn svg { width: 14px; height: 14px; fill: currentColor; }
+
+  /* 移除原来 .copy-btn 的部分样式，统一用 .action-btn */
 
   /* 5. 时间戳和复制按钮 */
   .timestamp {
@@ -53,16 +181,6 @@
     color: #aaa;
     padding: 0 5px;
   }
-  .copy-btn {
-    background: transparent; border: none; cursor: pointer;
-    width: 26px; height: 26px; padding: 5px;
-    border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  }
-  .copy-btn img {
-    width: 14px; height: 14px; opacity: 0.5; transition: opacity 0.2s;
-  }
-  .copy-btn:hover img { opacity: 0.8; }
-  .copy-btn.copied img { opacity: 1; }
 
   /* --- 【新增】日期分隔符的样式 --- */
   .date-separator {
@@ -99,9 +217,68 @@
   #load-more-container {
     display: none !important;
   }
+
+  /* --- 【新增】多选模式样式 --- */
+
+  /* 多选模式下，消息变成可点击手型 */
+  body.selection-mode .message-group {
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s;
+  }
+
+  /* 禁用多选模式下的内部按钮交互，防止误触 */
+  body.selection-mode .message-group button { pointer-events: none; }
+
+  /* 选中状态 */
+  .message-group.selected {
+    background-color: rgba(255, 182, 185, 0.15); /* 淡淡的粉色背景 */
+    border-radius: 12px;
+    outline: 2px solid #ffb6b9; /* 粉色边框 */
+  }
+
+  /* 在选中项右上角加个勾勾 (可选，为了好看) */
+  .message-group.selected::after {
+    content: '✔';
+    position: absolute; top: -8px; right: -8px;
+    width: 20px; height: 20px; background: #ffb6b9; color: #fff;
+    border-radius: 50%; font-size: 12px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  }
 </style>
 </head>
 <body>
+
+<!-- 【新增】顶部导航栏 -->
+<header class="chat-header">
+  <!-- 左边：退出按钮 -->
+  <button class="header-btn" onclick="alert('点击了退出')">
+    <!-- 这里用一个简单的 SVG 返回箭头 -->
+    <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+  </button>
+
+  <!-- 中间：人名 + 状态 -->
+  <div class="header-title-box">
+    <div class="header-name">私のヒーロー</div>
+    <div class="header-status">
+      <span class="status-dot"></span> <!-- 绿色小圆点 -->
+      <span>手机在线</span>
+    </div>
+  </div>
+
+  <!-- 右边：【新增】把两个按钮包起来，方便右对齐 -->
+  <div class="header-right-group" style="display:flex; gap:4px;">
+    <!-- 多选按钮 -->
+    <button class="header-btn" id="toggleSelectBtn" onclick="toggleSelectionMode()">
+      <svg viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
+    </button>
+    <!-- 详情按钮 -->
+    <button class="header-btn" onclick="alert('点击了详情')">
+      <svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+    </button>
+  </div>
+</header>
 
 <!-- 【新增】加载更多历史记录的按钮 -->
 <div id="load-more-container" style="text-align: center; padding: 10px; display: none;">
@@ -117,6 +294,43 @@
 <div class="input-container">
   <textarea id="messageInput" placeholder="输入消息…" rows="1"></textarea>
   <button id="sendBtn">发送</button>
+</div>
+
+<!-- 【新增】编辑弹窗 -->
+<div id="editModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
+  <div style="background:#fff; padding:20px; border-radius:12px; width:80%; max-width:500px; box-shadow:0 4px 12px rgba(0,0,0,0.2);">
+    <h3 style="margin:0 0 10px 0; color:#444;">编辑消息</h3>
+    <textarea id="editInput" rows="5" style="width:100%; box-sizing: border-box; border:1px solid #ddd; border-radius:8px; padding:10px; font-size:14px; resize:vertical;"></textarea>
+    <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:10px;">
+      <button onclick="closeEditModal()" style="padding:6px 12px; border:none; background:#f0f0f0; border-radius:6px; cursor:pointer;">取消</button>
+      <button id="saveEditBtn" style="padding:6px 12px; border:none; background:#ffb6b9; color:#fff; border-radius:6px; cursor:pointer;">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 【新增】底部多选操作栏 -->
+<div id="selectionBar" style="display:none; position:fixed; bottom:0; left:0; width:100%; background:#fff; padding:16px; box-shadow:0 -2px 10px rgba(0,0,0,0.1); z-index:200; align-items:center; justify-content:space-between; box-sizing:border-box;">
+  <span id="selectCount" style="color:#666; font-weight:bold;">已选择 0 条</span>
+  <div style="display:flex; gap:10px;">
+    <button onclick="toggleSelectionMode()" style="padding:8px 16px; border:1px solid #ddd; background:#fff; border-radius:20px; cursor:pointer;">取消</button>
+    <button onclick="exportSelectedMessages()" style="padding:8px 20px; border:none; background:linear-gradient(135deg, #ffb6b9, #ff9b73); color:white; border-radius:20px; cursor:pointer; font-weight:bold;">生成记录</button>
+  </div>
+</div>
+
+<!-- 【新增】导出结果弹窗 -->
+<div id="exportResultModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:2000; align-items:center; justify-content:center;">
+  <div style="background:#fff; padding:20px; border-radius:12px; width:85%; max-width:600px; height: 60vh; display:flex; flex-direction:column; box-shadow:0 4px 20px rgba(0,0,0,0.2);">
+    <h3 style="margin:0 0 10px 0; color:#444; flex-shrink:0;">导出预览</h3>
+    <p style="margin:0 0 10px 0; color:#888; font-size:12px; flex-shrink:0;">您可以直接复制下方内容，或者点击按钮一键复制。</p>
+
+    <!-- 文本域 -->
+    <textarea id="exportResultInput" style="flex:1; width:100%; box-sizing:border-box; border:1px solid #ddd; border-radius:8px; padding:12px; font-size:13px; resize:none; line-height:1.6; background:#fafafa;"></textarea>
+
+    <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:15px; flex-shrink:0;">
+      <button onclick="document.getElementById('exportResultModal').style.display='none'" style="padding:8px 16px; border:none; background:#f0f0f0; border-radius:6px; cursor:pointer;">关闭</button>
+      <button id="copyResultBtn" style="padding:8px 20px; border:none; background:linear-gradient(135deg, #4cd964, #2ac1bc); color:white; border-radius:6px; cursor:pointer; font-weight:bold;">复制全部</button>
+    </div>
+  </div>
 </div>
 
 <!-- 【最终的、绝对正确的 <script> 标签】-->
@@ -135,88 +349,172 @@
 
     function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-    function renderMessageGroup({ content, role, timestamp }, mode = 'append') {
-        const bubbles = content.split('/').map(p => p.trim()).filter(Boolean);
-        if (bubbles.length === 0 && mode === 'append') { // 允许欢迎语这种单条空内容
-             bubbles.push(content);
-        } else if (bubbles.length === 0) {
-            return;
-        }
+    function renderMessageGroup({ id, content, role, timestamp }, mode = 'append') {
+      // 1. 处理空消息
+      const bubbles = content.split('/').map(p => p.trim()).filter(Boolean);
+      if (bubbles.length === 0 && mode === 'append') bubbles.push(content);
+      if (bubbles.length === 0) return;
 
-        const fullText = content;
-        const date = new Date(timestamp);
-        const fragment = document.createDocumentFragment();
-        bubbles.forEach((text, index) => {
-            const isLast = (index === bubbles.length - 1);
-            const wrapper = document.createElement('div');
-            wrapper.classList.add('message-wrapper', role);
-            wrapper.dataset.timestamp = date.toISOString();
-            const bubble = document.createElement('div');
-            bubble.classList.add('bubble');
-            bubble.innerHTML = text.replace(/\n/g, "<br>");
-            wrapper.appendChild(bubble);
-            if (isLast) {
-                wrapper.dataset.fulltext = fullText;
-                const controls = document.createElement('div');
-                controls.classList.add('controls-container');
-                const timestampEl = document.createElement('div');
-                timestampEl.classList.add('timestamp');
-                timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                const copyBtn = document.createElement('button');
-                copyBtn.classList.add('copy-btn');
-                const icon = document.createElement('img');
-                icon.src = copyIconPath;
-                copyBtn.appendChild(icon);
-                copyBtn.addEventListener('click', () => {
-                  if (navigator.clipboard) {
-                    navigator.clipboard.writeText(fullText).then(() => {
-                        icon.src = checkIconPath; copyBtn.classList.add('copied');
-                        setTimeout(() => { icon.src = copyIconPath; copyBtn.classList.remove('copied'); }, 1500);
-                    });
-                } });
-                controls.appendChild(timestampEl);
-                controls.appendChild(copyBtn);
-                wrapper.appendChild(controls);
+      const fullText = content;
+      const date = new Date(timestamp);
+
+      // --- 2. 创建最外层的 Group 容器 ---
+      const group = document.createElement('div');
+      group.classList.add('message-group', role); // 加上 user 或 assistant 类
+      group.dataset.timestamp = date.toISOString();
+      group.dataset.id = id;
+
+      // --- 3. 创建头像 ---
+      const avatar = document.createElement('img');
+      avatar.classList.add('avatar-img');
+      // 根据角色自动选择图片
+      avatar.src = role === 'user' ? '/static/avatar_user.jpg' : '/static/avatar_assistant.jpg';
+
+      // --- 4. 创建气泡栈 (Bubble Stack) ---
+      const stack = document.createElement('div');
+      stack.classList.add('bubble-stack');
+
+      // --- 5. 循环生成气泡并放入栈中 (原有逻辑微调) ---
+      bubbles.forEach((text, index) => {
+        const isLast = (index === bubbles.length - 1);
+        const wrapper = document.createElement('div');
+        wrapper.classList.add('message-wrapper', role); // 保留原有样式类以便兼容CSS
+
+        const bubble = document.createElement('div');
+        bubble.classList.add('bubble');
+        bubble.innerHTML = text.replace(/\n/g, "<br>");
+
+        wrapper.appendChild(bubble);
+
+        // 如果是最后一个气泡，添加时间戳和复制按钮
+        if (isLast) {
+          wrapper.dataset.fulltext = fullText;
+          const controls = document.createElement('div');
+          controls.classList.add('controls-container');
+
+          const timestampEl = document.createElement('div');
+          timestampEl.classList.add('timestamp');
+          timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+          // 2. 编辑按钮 (SVG 图标: 笔)
+          const editBtn = document.createElement('button');
+          editBtn.className = 'action-btn';
+          editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+          editBtn.onclick = () => openEditModal(id, fullText, group);
+
+          // 3. 删除按钮 (SVG 图标: 垃圾桶)
+          const delBtn = document.createElement('button');
+          delBtn.className = 'action-btn';
+          delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+          delBtn.onclick = () => deleteMessage(id, group);
+
+          // 4. 复制按钮 (保持原逻辑，加上 class)
+          const copyBtn = document.createElement('button');
+          copyBtn.className = 'action-btn';
+          copyBtn.innerHTML = `<img src="${copyIconPath}" style="width:14px;height:14px;opacity:0.6;">`;
+          copyBtn.onclick = () => {
+            if (navigator.clipboard) {
+              navigator.clipboard.writeText(fullText).then(() => {
+                icon.src = checkIconPath; copyBtn.classList.add('copied');
+                setTimeout(() => { icon.src = copyIconPath; copyBtn.classList.remove('copied'); }, 1500);
+              });
             }
-            fragment.appendChild(wrapper);
-        });
-        if (mode === 'prepend') { chatContainer.prepend(fragment); }
-        else { chatContainer.appendChild(fragment); }
+          }
+
+          controls.appendChild(timestampEl);
+          if(id) { // 只有有 ID 的消息才能编辑/删除
+            controls.appendChild(editBtn);
+            controls.appendChild(delBtn);
+          }
+          controls.appendChild(copyBtn);
+          wrapper.appendChild(controls);
+        }
+        stack.appendChild(wrapper);
+      });
+
+      // --- 6. 组装并插入 ---
+      group.appendChild(avatar); // 插入头像
+      group.appendChild(stack);  // 插入气泡栈
+
+      if (mode === 'prepend') {
+        chatContainer.prepend(group);
+      } else {
+        chatContainer.appendChild(group);
+      }
+    }
+
+    // --- 【新增】全局日期重排函数 (彻底解决日期重复/Invalid问题) ---
+    function refreshDateSeparators() {
+      // 1. 先把旧的分隔符统统删掉，防止重复
+      document.querySelectorAll('.date-separator').forEach(el => el.remove());
+
+      // 2. 获取页面上所有的消息组 (按自然顺序)
+      const groups = document.querySelectorAll('.message-group');
+      let lastDateKey = null;
+
+      groups.forEach(group => {
+        const ts = group.dataset.timestamp;
+        if (!ts) return;
+
+        // 解析日期
+        const date = new Date(ts);
+        // 生成一个用来对比的 Key，例如 "2025-11-28"
+        const dateKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+
+        // 3. 如果这一条的日期 和 上一条不一样，就加个分隔符
+        if (dateKey !== lastDateKey) {
+          const sep = document.createElement('div');
+          sep.classList.add('date-separator');
+          // 设置显示的格式
+          sep.textContent = date.toLocaleDateString([], {year:'numeric', month:'long', day:'numeric', weekday:'long'});
+
+          // 【关键】插入到当前消息组的前面
+          group.parentNode.insertBefore(sep, group);
+
+          lastDateKey = dateKey; // 更新记录
+        }
+      });
     }
 
     async function loadHistory(page = 1) {
-        if (isLoading) return;
-        isLoading = true;
-        loadMoreBtn.textContent = '加載中...';
-        try {
-            const res = await fetch(`/api/history?page=${page}&limit=${messagesPerPage}`);
-            const data = await res.json();
-            if (data.messages && data.messages.length > 0) {
-                const oldScrollHeight = chatContainer.scrollHeight;
-                let topDate = chatContainer.querySelector('.message-wrapper') ? new Date(chatContainer.querySelector('.message-wrapper').dataset.timestamp) : null;
-                for (const msg of data.messages.reverse()) {
-                    const currentDate = new Date(msg.timestamp);
-                    if (topDate && (topDate.getDate() !== currentDate.getDate() || topDate.getMonth() !== currentDate.getMonth() || topDate.getFullYear() !== currentDate.getFullYear())) {
-                        const separator = document.createElement('div');
-                        separator.classList.add('date-separator');
-                        separator.textContent = topDate.toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
-                        chatContainer.prepend(separator);
-                    }
-                    renderMessageGroup(msg, 'prepend');
-                    topDate = currentDate;
-                }
-                if (page === 1) { chatContainer.scrollTop = chatContainer.scrollHeight; }
-                else { chatContainer.scrollTop = chatContainer.scrollHeight - oldScrollHeight; }
-                totalMessages = data.total;
-                currentPage = page;
-                if ((currentPage * messagesPerPage) < totalMessages) { loadMoreContainer.style.display = 'block'; }
-                else { loadMoreContainer.style.display = 'none'; }
-            } else {
-                if (page === 1) { renderMessageGroup({ content: '✿ こんにちは～ 我是桐奈の小聊天助手 💌', role: 'assistant', timestamp: new Date() }); }
-                loadMoreContainer.style.display = 'none';
-            }
-        } catch (e) { console.error("Failed to load history:", e); }
-        finally { isLoading = false; loadMoreBtn.textContent = '加載更早的記錄'; }
+      if (isLoading) return;
+      isLoading = true;
+      loadMoreBtn.textContent = '加載中...';
+      try {
+        const res = await fetch(`/api/history?page=${page}&limit=${messagesPerPage}`);
+        const data = await res.json();
+        if (data.messages && data.messages.length > 0) {
+          const oldScrollHeight = chatContainer.scrollHeight;
+
+          // --- 1. 纯粹地渲染消息 (不在这里处理日期) ---
+          for (const msg of data.messages.reverse()) {
+            // 确保调用 renderMessageGroup 时不带日期逻辑，只负责生成 DOM
+            renderMessageGroup(msg, 'prepend');
+          }
+
+          // --- 2. 【核心】所有消息插进去后，统一洗牌整理日期 ---
+          refreshDateSeparators();
+
+          // --- 3. 恢复滚动位置 ---
+          if (page === 1) { chatContainer.scrollTop = chatContainer.scrollHeight; }
+          else {
+            // 重新计算滚动高度，保证视觉位置不变
+            chatContainer.scrollTop = chatContainer.scrollHeight - oldScrollHeight;
+          }
+
+          totalMessages = data.total;
+          currentPage = page;
+          if ((currentPage * messagesPerPage) < totalMessages) { loadMoreContainer.style.display = 'block'; }
+          else { loadMoreContainer.style.display = 'none'; }
+        } else {
+          if (page === 1) {
+            // 如果是新对话，显示个欢迎语
+            renderMessageGroup({ content: '✿ こんにちは～ 我是桐奈の小聊天助手 💌', role: 'assistant', timestamp: new Date() });
+          }
+          loadMoreContainer.style.display = 'none';
+        }
+      } catch (e) { console.error("Failed to load history:", e); }
+      finally { isLoading = false; loadMoreBtn.textContent = '加載更早的記錄'; }
     }
 
     async function sendMessage() {
@@ -240,17 +538,283 @@
                 const aiMsg = { content: fullReplyText, role: 'assistant', timestamp: new Date() };
                 await sleep(1000); // 模拟思考时间
                 renderMessageGroup(aiMsg, 'append');
+                // 在 sendMessage 函数末尾
+                refreshDateSeparators();
             } else { displayBubbleGroup([data.reply || '[无回复]'], data.reply || '[无回复]', 'assistant', new Date()); }
         } catch (e) { displayBubbleGroup(['[连接失败，请稍后重试]'], '[连接失败，请稍后重试]', 'assistant', new Date()); }
         finally { btn.disabled = false; btn.textContent = "发送"; chatContainer.scrollTop = chatContainer.scrollHeight; }
     }
 
-    window.addEventListener('DOMContentLoaded', () => { chatContainer.innerHTML = ''; loadHistory(1); });
+    // 2. 修改页面加载逻辑：加载完成后跳转到该 ID
+    window.addEventListener('DOMContentLoaded', async () => {
+      chatContainer.innerHTML = '';
+      await loadHistory(1); // 等待加载完成
+
+      // 【Fix 3】检查是否有需要跳转的消息
+      const jumpId = sessionStorage.getItem('jump_to_msg_id');
+      if (jumpId) {
+        const el = document.querySelector(`.message-group[data-id="${jumpId}"]`);
+        if (el) {
+          el.scrollIntoView({block: 'center', behavior: 'smooth'});
+          // 给个高亮特效提示用户
+          el.style.transition = 'background 0.5s';
+          el.style.backgroundColor = '#fffbeb';
+          setTimeout(() => el.style.backgroundColor = 'transparent', 1500);
+        }
+        sessionStorage.removeItem('jump_to_msg_id'); //以此清除
+      }
+    });
     loadMoreBtn.addEventListener('click', () => loadHistory(currentPage + 1));
     chatContainer.addEventListener('scroll', () => { if (chatContainer.scrollTop === 0 && !isLoading && (currentPage * messagesPerPage) < totalMessages) { loadHistory(currentPage + 1); } });
     btn.addEventListener('click', sendMessage);
     input.addEventListener('keypress', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
     input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${input.scrollHeight}px`; });
+
+    // --- 新增逻辑函数 ---
+    let currentEditId = null;
+    let currentEditGroup = null;
+
+    function openEditModal(id, content, groupElement) {
+      currentEditId = id;
+      currentEditGroup = groupElement;
+      const input = document.getElementById('editInput');
+      input.value = content; // 这里会显示包含 '/' 的原始内容
+      document.getElementById('editModal').style.display = 'flex';
+      input.focus();
+    }
+
+    function closeEditModal() {
+      document.getElementById('editModal').style.display = 'none';
+      currentEditId = null;
+      currentEditGroup = null;
+    }
+
+    document.getElementById('saveEditBtn').onclick = async () => {
+      if(!currentEditId) return;
+      const newContent = document.getElementById('editInput').value.trim();
+      if(!newContent) return alert("内容不能为空");
+
+      try {
+        const res = await fetch(`/api/messages/${currentEditId}`, {
+          method: 'PUT',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({content: newContent})
+        });
+        if(res.ok) {
+          sessionStorage.setItem('jump_to_msg_id', currentEditId);
+          location.reload();
+        }
+      } catch(e) { alert("修改失败"); }
+      closeEditModal();
+    };
+
+    async function deleteMessage(id, groupElement) {
+      if(!confirm("确定要删除这条消息吗？")) return;
+      try {
+        const res = await fetch(`/api/messages/${id}`, { method: 'DELETE' });
+        if(res.ok) {
+          // 删除成功，带动画移除 DOM
+          groupElement.style.transition = "all 0.3s";
+          groupElement.style.opacity = "0";
+          groupElement.style.transform = "translateX(20px)";
+          setTimeout(() => groupElement.remove(), 300);
+        }
+      } catch(e) { alert("删除失败"); }
+    }
+
+    // --- 【新增】多选生成 & 范围选择功能 ---
+    let isSelectionMode = false;
+    let lastCheckedIndex = null; // 【关键】记录上一次点击的位置
+    const selectionBar = document.getElementById('selectionBar');
+    const selectCountSpan = document.getElementById('selectCount');
+    const exportResultModal = document.getElementById('exportResultModal');
+    const exportResultInput = document.getElementById('exportResultInput');
+
+    // 1. 切换模式
+    function toggleSelectionMode() {
+      isSelectionMode = !isSelectionMode;
+      document.body.classList.toggle('selection-mode', isSelectionMode);
+      selectionBar.style.display = isSelectionMode ? 'flex' : 'none';
+      lastCheckedIndex = null; // 重置
+
+      if (!isSelectionMode) {
+        document.querySelectorAll('.message-group.selected').forEach(el => el.classList.remove('selected'));
+        updateSelectCount();
+        exportResultModal.style.display = 'none';
+      }
+    }
+
+    // --- 监听点击 & 长按 (兼容 PC Shift 和 手机长按) ---
+
+    // 封装范围选择的核心逻辑
+    function handleRangeSelect(targetGroup) {
+      if (!targetGroup) return;
+      const allGroups = Array.from(document.querySelectorAll('.message-group'));
+      const currentIndex = allGroups.indexOf(targetGroup);
+
+      if (lastCheckedIndex !== null) {
+        const start = Math.min(lastCheckedIndex, currentIndex);
+        const end = Math.max(lastCheckedIndex, currentIndex);
+        for (let i = start; i <= end; i++) {
+          allGroups[i].classList.add('selected');
+        }
+      }
+      lastCheckedIndex = currentIndex;
+      updateSelectCount();
+
+      // 手机震动反馈 (如果有)
+      if (navigator.vibrate) navigator.vibrate(50);
+    }
+
+    // 封装单选的核心逻辑
+    function handleSingleSelect(targetGroup) {
+      if (!targetGroup) return;
+      targetGroup.classList.toggle('selected');
+
+      const allGroups = Array.from(document.querySelectorAll('.message-group'));
+      lastCheckedIndex = allGroups.indexOf(targetGroup);
+      updateSelectCount();
+    }
+
+    // PC端 Click 事件
+    chatContainer.addEventListener('click', (e) => {
+      if (!isSelectionMode) return;
+      const group = e.target.closest('.message-group');
+      if (!group) return;
+
+      e.preventDefault(); e.stopPropagation();
+
+      if (e.shiftKey) {
+        handleRangeSelect(group); // Shift + 点击
+      } else {
+        handleSingleSelect(group); // 普通点击
+      }
+    });
+
+    // --- 手机端长按逻辑 ---
+    let touchTimer = null;
+    let touchTarget = null;
+
+    chatContainer.addEventListener('touchstart', (e) => {
+      if (!isSelectionMode) return;
+      const group = e.target.closest('.message-group');
+      if (group) {
+        touchTarget = group;
+        // 500ms 后触发长按
+        touchTimer = setTimeout(() => {
+          handleRangeSelect(group); // 长按 = 范围选择
+          touchTarget = null; // 触发后清空，防止touchend再次触发单选
+        }, 600);
+      }
+    }, {passive: false});
+
+    chatContainer.addEventListener('touchmove', () => {
+      // 如果手指滑动了，取消长按
+      if (touchTimer) clearTimeout(touchTimer);
+      touchTimer = null;
+      touchTarget = null;
+    });
+
+    chatContainer.addEventListener('touchend', (e) => {
+      if (!isSelectionMode) return;
+      // 如果 timer 还在，说明没到长按时间，算作普通点击
+      if (touchTimer) {
+        clearTimeout(touchTimer);
+        touchTimer = null;
+        // 只有当 touchTarget 还有值时才触发单选
+        // (如果不加判断，可能会和系统点击冲突，但这里我们主要靠自己逻辑)
+        if (touchTarget) {
+          e.preventDefault(); // 阻止默认的 click，完全由我们接管
+          handleSingleSelect(touchTarget);
+        }
+      }
+    });
+
+    // 禁用长按弹出系统菜单 (复制/粘贴等)，仅在多选模式下
+    chatContainer.addEventListener('contextmenu', (e) => {
+      if (isSelectionMode && e.target.closest('.message-group')) {
+        e.preventDefault();
+      }
+    });
+
+    function updateSelectCount() {
+      const count = document.querySelectorAll('.message-group.selected').length;
+      selectCountSpan.textContent = `已选择 ${count} 条`;
+    }
+
+    // 3. 导出生成逻辑 (修改为弹窗显示)
+    function exportSelectedMessages() {
+      const selectedEls = Array.from(document.querySelectorAll('.message-group.selected'));
+      if (selectedEls.length === 0) return alert("请先选择消息！");
+
+      // 按 DOM 顺序排序
+      selectedEls.sort((a, b) => {
+        return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
+      });
+
+      const roleMap = { 'user': '篠原桐奈', 'assistant': '國神錬介' };
+      const weekDays = ['日', '月', '火', '水', '木', '金', '土'];
+
+      let resultText = "";
+      let lastDateStr = "";
+
+      selectedEls.forEach(group => {
+        const role = group.classList.contains('user') ? 'user' : 'assistant';
+        const name = roleMap[role];
+        const timestampStr = group.dataset.timestamp;
+        if (!timestampStr) return;
+        const dateObj = new Date(timestampStr);
+
+        // 日期头
+        const year = dateObj.getFullYear();
+        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const day = String(dateObj.getDate()).padStart(2, '0');
+        const currentDateStr = `${year}-${month}-${day}`;
+
+        if (currentDateStr !== lastDateStr) {
+          const weekDay = weekDays[dateObj.getDay()];
+          resultText += `\n${currentDateStr}（${weekDay}）\n`;
+          lastDateStr = currentDateStr;
+        }
+
+        // 内容
+        const bubbles = group.querySelectorAll('.bubble');
+        let contentText = "";
+        bubbles.forEach((b, idx) => {
+          contentText += b.innerText.replace(/\n/g, " ");
+          if (idx < bubbles.length - 1) contentText += " / ";
+        });
+
+        // 时间
+        const hours = String(dateObj.getHours()).padStart(2, '0');
+        const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+        const timeStr = `${hours}:${minutes}`;
+
+        resultText += `${name}：${contentText}（${timeStr}）\n`;
+      });
+
+      // --- 【修改】显示弹窗，而不是直接复制 ---
+      exportResultInput.value = resultText.trim();
+      exportResultModal.style.display = 'flex';
+    }
+
+    // 4. 弹窗内的复制按钮事件
+    document.getElementById('copyResultBtn').addEventListener('click', () => {
+      const text = exportResultInput.value;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(() => {
+          const originalText = document.getElementById('copyResultBtn').textContent;
+          document.getElementById('copyResultBtn').textContent = "复制成功！";
+          setTimeout(() => {
+            document.getElementById('copyResultBtn').textContent = originalText;
+          }, 1500);
+        });
+      } else {
+        exportResultInput.select();
+        document.execCommand('copy'); // 兼容旧浏览器
+        alert("已尝试复制，如果失败请手动复制文本框内容。");
+      }
+    });
 </script>
 
 </body>
