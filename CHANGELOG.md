@@ -9,6 +9,31 @@
 ### Added (新增)
 - (等待后续开发新增功能...)
 
+## [1.3.0] - 2025-12-03
+### Added (新增)
+- **多级记忆系统 (Hierarchical Memory System)**:
+  - 实现了 **短期(Short) -> 中期(Medium) -> 长期(Long)** 的三级记忆架构。
+  - 新增 `prompts/` 目录，将原本单一的 Prompt 拆解为 8 个模块化文件（人设、关系、用户、格式、各级记忆、日程）。
+- **自动化记忆整理 (Auto-Consolidation)**:
+  - 引入 `APScheduler` 后台定时任务。
+  - **日结**: 每天凌晨 04:00 自动将昨日的短期记忆总结为日记存入中期记忆。
+  - **周结**: 每周一自动将上周日记总结为周报存入长期记忆。
+  - **自动补录**: 若昨日未手动生成记忆，后台会自动从数据库读取聊天记录进行补录。
+- **全日语 Prompt 支持**:
+  - 重构了后端逻辑，系统指令 (System Instructions) 和记忆生成 (Memory Generation) 全部强制为日语，以提升角色沉浸感。
+- **手动记忆快照**:
+  - 前端 Header 新增“大脑”图标按钮，支持手动触发今日记忆整理。
+
+### Changed (变更)
+- **Token 优化**:
+  - 聊天历史记录上下文不再包含冗余的日期信息，改为在 System Prompt 中全局声明“当前日期”，每条消息仅携带 `[HH:MM]` 时间戳，大幅节省 Token。
+- **API 架构升级**:
+  - 移除了笨重的 `google-generativeai` 库，改用轻量级 `requests` 库配合 OpenRouter 或 Cloudflare Worker 转发，提升兼容性与稳定性。
+- **依赖精简**: 更新 `requirements.txt`，移除了未使用的包，新增 `APScheduler`。
+
+### Removed (移除)
+- 移除了根目录下的旧版 `prompt.md` 和 `prompt example.md`，全面转向 `prompts/` 文件夹管理。
+
 ## [1.2.0] - 2025-11-29
 ### Added (新增)
 - **UI 顶部导航栏**: 新增了磨砂玻璃效果的顶部 Header，包含退出按钮、居中的角色状态显示（如“手机在线”）及功能菜单入口。

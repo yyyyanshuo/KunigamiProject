@@ -1,10 +1,14 @@
 import os
 import time
 import re
+import json
 import sqlite3 # 导入 sqlite3 库
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, send_from_directory
 from dotenv import load_dotenv
+import urllib3
+from apscheduler.schedulers.background import BackgroundScheduler # 新增
+import memory_jobs # 导入刚才那个模块
 
 # 这是在 app.py 文件的开头部分
 
@@ -23,13 +27,167 @@ PROMPT_FILE = "prompt.md"
 MAX_CONTEXT_LINES = 10
 MODEL_NAME = "gemini-3-pro"
 
+DATABASE_FILE = "chat_history.db"
+
+# 当前对话的用户名字 (用于读取关系 JSON)
+CURRENT_USER_NAME = "篠原桐奈"
+
+# ---------------------- 核心：Prompt 构建系统 ----------------------
+
+def build_system_prompt():
+    """
+    根据 prompts/ 文件夹下的文件，动态组装 System Prompt。
+    包含：人设、关系、用户档案、格式要求、长/中/短期记忆、日程表、当前时间。
+    """
+    prompt_parts = []
+
+    # 获取当前日期对象，用于筛选记忆
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+
+    # --- 1. 静态 Markdown 文件 (人设、用户、格式) ---
+    # 文件名 -> 标题
+    static_files = [
+        ("1_base_persona.md", "【Role / キャラクター設定】"),
+        ("3_user_persona.md", "【User / ユーザー情報】"),
+        ("8_format.md", "【System Rules / 出力ルール】")
+    ]
+    for filename, title in static_files:
+        try:
+            path = os.path.join("prompts", filename)
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                    if content:
+                        prompt_parts.append(f"{title}\n{content}")
+        except Exception: pass
+
+    # --- 2. 关系设定 (JSON) ---
+    try:
+        path = os.path.join("prompts", "2_relationship.json")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                rel_data = json.load(f)
+                user_rel = rel_data.get(CURRENT_USER_NAME)
+                if user_rel:
+                    # 【修改】拼装文本改成日语
+                    rel_str = (f"対話相手：{CURRENT_USER_NAME}\n"
+                           f"関係性：{user_rel.get('role', '不明')}\n"
+                           f"詳細：{user_rel.get('description', '')}")
+                prompt_parts.append(f"【Relationship / 関係設定】\n{rel_str}")
+    except Exception: pass
+
+    # --- 4. 长期记忆 (JSON - 按月) ---
+    # 这里简单处理：全部读取。如果记忆太长，可以根据 now.strftime("%Y-%m") 只读取当月和上个月
+    try:
+        path = os.path.join("prompts", "4_memory_long.json")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                long_mem = json.load(f)
+                if long_mem:
+                    # 格式化为： - 2025-10: xxxxx
+                    mem_list = [f"- {k}: {v}" for k, v in long_mem.items()]
+                    prompt_parts.append(f"【Long-term Memory / 長期記憶】\n" + "\n".join(mem_list))
+    except Exception: pass
+
+    # --- 5. 中期记忆 (JSON - 按天，最近7天) ---
+    try:
+        path = os.path.join("prompts", "5_memory_medium.json")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                med_mem = json.load(f)
+                recent_list = []
+                # 倒推7天
+                for i in range(7, 0, -1):
+                    day_key = (now - timedelta(days=i)).strftime("%Y-%m-%d")
+                    if day_key in med_mem:
+                        recent_list.append(f"- {day_key}: {med_mem[day_key]}")
+                if recent_list:
+                    prompt_parts.append(f"【Medium-term Memory / 最近一週間の出来事】\n" + "\n".join(recent_list))
+    except Exception: pass
+
+    # --- 6. 短期记忆 (JSON - 当天事件) ---
+    try:
+        path = os.path.join("prompts", "6_memory_short.json")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                short_mem = json.load(f)
+                today_events = short_mem.get(today_str) # 获取今天的事件列表
+                if today_events and isinstance(today_events, list):
+                    events_str = "\n".join([f"- [{e.get('time')}] {e.get('event')}" for e in today_events])
+                    prompt_parts.append(f"【Short-term Memory / 今日の出来事】\n{events_str}")
+    except Exception: pass
+
+    # --- 7. 近期安排 (JSON - 日程表) ---
+    # 筛选今天及以后的日程
+    try:
+        path = os.path.join("prompts", "7_schedule.json")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                schedule = json.load(f)
+                future_plans = []
+                # 简单的字符串比较日期 (YYYY-MM-DD 格式支持直接比较)
+                sorted_dates = sorted(schedule.keys())
+                for date_key in sorted_dates:
+                    if date_key >= today_str:
+                        future_plans.append(f"- {date_key}: {schedule[date_key]}")
+
+                if future_plans:
+                    prompt_parts.append(f"【Schedule / 今後の予定】\n" + "\n".join(future_plans))
+    except Exception: pass
+
+    # --- 8. 实时时间注入 ---
+    # 格式示例: 2025-11-29 Saturday
+
+    # 简单的星期几映射
+    week_map = ["月", "火", "水", "木", "金", "土", "日"]
+    week_str = week_map[now.weekday()]
+
+    current_date_str = now.strftime('%Y-%m-%d %A')
+
+    # 【修改】说明文字改成日语
+    prompt_parts.append(f"【Current Date / 現在の日付】\n今日は: {current_date_str}\n(以下の会話履歴には時間 [HH:MM] のみが含まれています。現在の日付に基づいて理解してください)")
+
+    return "\n\n".join(prompt_parts)
+
+# --- 【新增】AI 总结专用函数 ---
+def call_ai_to_summarize(text_content, prompt_type="short"):
+    """
+    调用 AI 对文本进行总结
+    prompt_type: 'short' (生成今日事件), 'medium' (生成每日摘要), 'long' (生成月度回忆)
+    """
+    if not text_content:
+        return None
+
+    system_instruction = ""
+    # --- 【修改】全部换成日语指令 ---
+    if prompt_type == "short":
+        # 即使是日语，格式标记 [HH:MM] 依然要保持，方便代码正则提取
+        system_instruction = "あなたは記憶整理係です。以下の会話から重要な出来事を抽出し（具体的な時間を含む）、無関係な雑談は無視してください。出力フォーマット：\n- [HH:MM] 出来事の内容\n- [HH:MM] 出来事の内容"
+    elif prompt_type == "medium":
+        system_instruction = "あなたは日記記録係です。この一日のすべての断片的な出来事を、國神錬介（Kunigami Rensuke）の一人称視点で、300文字以内の一貫した日記にまとめてください。"
+    elif prompt_type == "long":
+        system_instruction = "あなたは伝記作家です。この一週間の日記に基づいて、今週の重要な転換点と二人の関係の進展をまとめ、長期記憶として保存してください。"
+
+    # 构造请求消息
+    messages = [
+        {"role": "system", "content": system_instruction},
+        {"role": "user", "content": f"内容は以下の通りです：\n{text_content}"} # 提示语改成日语
+    ]
+
+    print(f"--- 正在进行记忆总结 ({prompt_type}) ---")
+
+    # 复用现有的 API 调用逻辑 (优先 OpenRouter, 其次 Gemini)
+    if USE_OPENROUTER:
+        return call_openrouter(messages)
+    else:
+        return call_gemini(messages)
+
 # ---------------------- 工具函数 ----------------------
 
 def get_timestamp():
     """生成时间戳"""
     return time.strftime("[%Y-%m-%d %A %H:%M:%S]", time.localtime())
-
-DATABASE_FILE = "chat_history.db"
 
 def init_db():
     """初始化数据库，创建 messages 表"""
@@ -95,43 +253,54 @@ def chat():
     user_msg_raw = data.get("message", "").strip()
     if not user_msg_raw:
         return jsonify({"error": "empty message"}), 400
-    try:
-        with open(PROMPT_FILE, "r", encoding="utf-8") as f:
-            system_prompt = f.read()
-    except FileNotFoundError:
-        system_prompt = "You are a friendly assistant."
+    # 1. 动态构建 System Prompt
+    system_prompt = build_system_prompt()
 
     # --- Part 2: 构建带时间戳的 Prompt ---
     messages = [{"role": "system", "content": system_prompt}]
 
-    # 2a. 【核心修正】从数据库读取历史记录，这次同时包含 role, content, 和 timestamp
+    # --- Part 2: 读取并处理历史记录 (修改版) ---
     conn = sqlite3.connect(DATABASE_FILE)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    # 我们依然读取最近20条记录
     cursor.execute("SELECT role, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT 20")
     history_rows = [dict(row) for row in cursor.fetchall()][::-1]
     conn.close()
 
-    # 2b. 【核心修正】循环历史记录，动态拼接成带时间戳的格式
-    for row in history_rows:
-        # 这里的 timestamp 是从数据库读出来的，格式是 'YYYY-MM-DD HH:MM:SS'
-        # 为了更人性化，我们把它转成我们之前用过的 [YYYY-MM-DD Day HH:MM:SS] 格式
-        try:
-            dt_object = datetime.strptime(row['timestamp'], '%Y-%m-%d %H:%M:%S')
-            formatted_timestamp = dt_object.strftime('[%Y-%m-%d %A %H:%M:%S]')
+    # 获取今天的日期字符串 (用于判断)
+    today_str = datetime.now().strftime('%Y-%m-%d')
 
-            # 构造新的 content，并添加到 messages 列表
+    for row in history_rows:
+        try:
+            # 1. 解析数据库里的完整时间
+            dt_object = datetime.strptime(row['timestamp'], '%Y-%m-%d %H:%M:%S')
+
+            # 2. 【智能压缩逻辑】
+            # 如果这条消息是“今天”发的，就只显示 [12:30]
+            # 如果是“以前”发的，为了防止 AI 搞混，我们可以显示 [11-28 12:30] (月-日 时间)
+            # 或者按照您的绝对要求，无论哪天都只显示 [12:30]
+
+            #=== 方案 A: 极简模式 (您要求的，只显示时间) ===
+            # formatted_timestamp = dt_object.strftime('[%H:%M]')
+
+            #=== 方案 B: 智能模式 (推荐: 如果不是今天，还是带个日期吧，不然 AI 会以为那是今天发生的事) ===
+            msg_day_str = dt_object.strftime('%Y-%m-%d')
+            if msg_day_str == today_str:
+                formatted_timestamp = dt_object.strftime('[%H:%M]')
+            else:
+                formatted_timestamp = dt_object.strftime('[%m-%d %H:%M]') # 以前的消息带个短日期
+
+            # 3. 拼接
             formatted_content = f"{formatted_timestamp} {row['content']}"
             messages.append({"role": row['role'], "content": formatted_content})
-        except (ValueError, TypeError):
-            # 如果时间戳格式有问题，就用原始 content，防止程序崩溃
+        except:
+            # 如果解析失败，就原样放进去
             messages.append({"role": row['role'], "content": row['content']})
 
-    # 2c. 【核心修正】为当前用户输入也加上实时时间戳
-    current_timestamp_str = get_timestamp()  # 使用我们已有的工具函数
-    user_entry_for_ai = {"role": "user", "content": f"{current_timestamp_str} {user_msg_raw}"}
-    messages.append(user_entry_for_ai)
+    # --- Part 3: 添加当前用户消息 (修改版) ---
+    # 获取当前短时间
+    current_short_time = datetime.now().strftime('[%H:%M]')
+    messages.append({"role": "user", "content": f"{current_short_time} {user_msg_raw}"})
 
     # --- [调试] 新增的打印代码 ---
     # 在这里，我们将完整的 messages 列表打印到控制台
@@ -303,9 +472,163 @@ def call_gemini(messages):
     except Exception as e:
         # 如果遇到关于模型的错误，例如 "model not found"，可以尝试换成 "gemini-1.5-pro-latest"
         return f"[ERROR] Gemini call failed: {e}"
+#--------------------------------
+    # import requests
+    # import json
+    #
+    # # 您的 Cloudflare 地址 (后面不需要加 v1beta...)
+    # # 记得把下面这个换成您刚才申请到的地址！
+    # BASE_URL = "https://gemini-proxy.lashongracelynyc623.workers.dev/"
+    #
+    # if not GEMINI_KEY:
+    #     return "[ERROR] No GEMINI_API_KEY found."
+    #
+    # # 1. 构造请求 URL
+    # # Gemini 1.5 Pro 的标准接口地址
+    # url = f"{BASE_URL}/v1beta/models/{MODEL_NAME}:generateContent?key={GEMINI_KEY}"
+    #
+    # # 2. 转换消息格式 (OpenAI 格式 -> Gemini 格式)
+    # gemini_contents = []
+    # system_instruction = None
+    #
+    # for msg in messages:
+    #     if msg['role'] == 'system':
+    #         system_instruction = {"parts": [{"text": msg['content']}]}
+    #     else:
+    #         role = 'model' if msg['role'] == 'assistant' else 'user'
+    #         gemini_contents.append({
+    #             "role": role,
+    #             "parts": [{"text": msg['content']}]
+    #         })
+    #
+    # payload = {
+    #     "contents": gemini_contents,
+    #     "generationConfig": {
+    #         "temperature": 0.6,
+    #         "maxOutputTokens": 800
+    #     }
+    # }
+    #
+    # if system_instruction:
+    #     payload["systemInstruction"] = system_instruction
+    #
+    # try:
+    #     # 直接发送 HTTP 请求，不走 SDK，不走代理
+    #     response = requests.post(url, json=payload, timeout=60)
+    #
+    #     if response.status_code != 200:
+    #         return f"[ERROR] Gemini API Error: {response.text}"
+    #
+    #     result = response.json()
+    #     # 提取回复文本
+    #     return result['candidates'][0]['content']['parts'][0]['text']
+    #
+    # except Exception as e:
+    #     return f"[ERROR] Request failed: {e}"
+
+# --- 【新增】API：手动触发今日短期记忆总结 ---
+@app.route("/api/memory/snapshot", methods=["POST"])
+def snapshot_memory():
+    # 1. 从数据库读取“今天”的所有消息
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    start_time = f"{today_str} 00:00:00"
+    end_time = f"{today_str} 23:59:59"
+
+    conn = sqlite3.connect(DATABASE_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT timestamp, role, content FROM messages WHERE timestamp >= ? AND timestamp <= ?", (start_time, end_time))
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        return jsonify({"status": "no_data", "message": "今天还没有聊天记录"})
+
+    # 2. 拼接对话文本
+    chat_log = ""
+    for ts, role, content in rows:
+        # 只取时间 HH:MM
+        time_part = ts.split(' ')[1][:5]
+        name = "桐奈" if role == "user" else "我"
+        chat_log += f"[{time_part}] {name}: {content}\n"
+
+    # 3. 调用 AI 总结
+    try:
+        summary = call_ai_to_summarize(chat_log, "short")
+        if not summary:
+            raise Exception("AI 返回为空")
+
+        # 4. 写入 6_memory_short.json
+        # 既然是 Snapshot，我们采取“覆盖更新”策略：每次点按钮，都重新总结今天的全部内容
+        # 这样避免重复，也更准确
+        short_mem_path = os.path.join("prompts", "6_memory_short.json")
+
+        # 读取现有数据（保留其他日期的，只更新今天）
+        current_data = {}
+        if os.path.exists(short_mem_path):
+            with open(short_mem_path, "r", encoding="utf-8") as f:
+                try: current_data = json.load(f)
+                except: pass
+
+        # 解析 AI 返回的文本为列表结构 (简单处理：按行分割)
+        # 假设 AI 很听话，返回的是 "- [HH:MM] xxx"
+        events = []
+        for line in summary.split('\n'):
+            line = line.strip()
+            if line:
+                # 简单提取时间，如果没有就填当前时间
+                match_time = re.search(r'\[(\d{2}:\d{2})\]', line)
+                event_time = match_time.group(1) if match_time else datetime.now().strftime("%H:%M")
+                event_text = re.sub(r'\[\d{2}:\d{2}\]', '', line).strip('- ').strip()
+
+                events.append({"time": event_time, "event": event_text})
+
+        current_data[today_str] = events
+
+        with open(short_mem_path, "w", encoding="utf-8") as f:
+            json.dump(current_data, f, ensure_ascii=False, indent=2)
+
+        return jsonify({"status": "success", "summary": events})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# 加在 app.py 的路由区域
+@app.route("/api/debug/force_maintenance")
+def force_maintenance():
+    scheduled_maintenance() # 手动调用上面那个定时函数
+    return jsonify({"status": "triggered", "message": "已手动触发后台维护，请查看服务器控制台日志"})
+
+# --- 定时任务配置 ---
+def scheduled_maintenance():
+    """
+    每天凌晨 04:00 运行一次
+    """
+    print("\n⏰ 正在执行每日后台维护...")
+
+    # 1. 执行日结 (处理昨天的)
+    memory_jobs.process_daily_rollover()
+
+    # 2. 如果今天是周一，执行周结
+    # weekday(): 0是周一, 6是周日
+    if datetime.now().weekday() == 0:
+        memory_jobs.process_weekly_rollover()
+
+    print("✅ 后台维护结束\n")
 
 # ---------------------- 启动 ----------------------
 
 if __name__ == "__main__":
     init_db()
+    # 确保 prompts 文件夹存在，防止报错
+    if not os.path.exists("prompts"):
+        os.makedirs("prompts")
+        print("Created 'prompts' directory. Please add md/json files.")
+
+    # --- 【新增】启动后台定时任务 ---
+    scheduler = BackgroundScheduler()
+    # 每天凌晨 4 点 0 分自动运行 (这个时候您肯定睡了，适合整理记忆)
+    scheduler.add_job(func=scheduled_maintenance, trigger="cron", hour=4, minute=0)
+    scheduler.start()
+    print("--- [Scheduler] 后台记忆整理服务已启动 (每天 04:00) ---")
+
     app.run(host="0.0.0.0", port=5000, debug=True)

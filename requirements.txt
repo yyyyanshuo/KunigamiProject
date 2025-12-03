@@ -2,3 +2,6 @@ flask
 python-dotenv
 google-generativeai
 requests
+Flask
+APScheduler
+urllib3
