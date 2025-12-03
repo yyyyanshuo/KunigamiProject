@@ -5,4 +5,12 @@ __pycache__/
 *.pyc
 .DS_Store
 debug_network.py
-prompt.md
+
+# 忽略旧的示例文件
+prompt_example.md
+
+# 忽略 prompts 文件夹下的所有内容...
+prompts/*
+
+# ...但是！保留以下文件（白名单）
+!prompts/8_format.md

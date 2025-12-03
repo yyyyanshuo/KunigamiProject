@@ -1,6 +1,13 @@
 # KunigamiProject 🌸
 
-> 一个基于 Flask 和 SQLite 的轻量级 AI 聊天应用，支持无尽历史记录、时间感知与流式对话体验。
+> 一个基于 Flask 和 SQLite 的轻量级 AI 聊天应用，支持无尽历史记录、时间感知、流式对话、多级记忆系统 (Hierarchical Memory)、自动化记忆整理与全日语沉浸式体验。
+
+## ✨ v1.3.0 新特性
+
+- **🧠 多级记忆系统**: 短期(Short)、中期(Medium)、长期(Long) 三级记忆自动流转。
+- **⏰ 自动化整理**: 后台定时任务自动进行日结和周结，无需人工干预。
+- **🎌 全日语支持**: 系统 Prompt 深度优化，提供沉浸式日语对话体验。
+- **📝 动态 Prompt**: 模块化管理 Prompt 文件，支持热更新。
 
 ## ✨ 功能特性 (Features)
 
@@ -18,6 +25,23 @@
 - **Database**: SQLite3
 - **Frontend**: HTML5, CSS3, Vanilla JavaScript (原生 JS，无庞大框架依赖)
 - **AI Integration**: Google Generative AI SDK / OpenAI Compatible API
+
+## ⚙️ 配置指南 (Setup Prompts)
+
+为了保护隐私，本项目仓库中**未包含**具体的角色设定文件。
+在运行项目前，请务必在 `prompts/` 目录下手动创建以下文件：
+
+| 文件名 | 类型 | 说明 | 示例内容 |
+| :--- | :--- | :--- | :--- |
+| **1_base_persona.md** | Markdown | **角色核心设定**。包含性格、口癖、背景故事。 | `名前は國神錬介。プロサッカー選手...` |
+| **2_relationship.json** | JSON | **角色关系图谱**。Key为用户名。 | `{"UserName": {"role": "恋人", "description": "..."}}` |
+| **3_user_persona.md** | Markdown | **用户档案**。AI 需要知道的关于你的信息。 | `ユーザーは大学生で、性格は...` |
+| **4_memory_long.json** | JSON | **长期记忆** (按月/周)。 | `{"2025-10": "出会いの季節..."}` |
+| **5_memory_medium.json** | JSON | **中期记忆** (最近7天)。 | `{"2025-12-01": "今日は雨だった..."}` |
+| **6_memory_short.json** | JSON | **短期记忆** (当天)。 | `{"2025-12-03": [{"time":"10:00","event":"..."}]}` |
+| **7_schedule.json** | JSON | **日程安排**。 | `{"2025-12-25": "クリスマスの予定"}` |
+
+> **提示**: `6_memory_short.json` 和 `5_memory_medium.json` 如果没有内容，可以留一个空的 JSON 对象 `{}`，系统运行后会自动生成。
 
 ## 🚀 快速开始 (Quick Start)
 
@@ -63,17 +87,21 @@ python app.py
 ```
 启动后，访问浏览器：`http://127.0.0.1:5000` 即可开始聊天。
 
+
+
 ## 📂 项目结构
 
 ```text
 KunigamiProject
-├── app.py              # 后端核心逻辑 (Flask)
-├── chat_history.db     # 聊天记录数据库 (自动生成，已忽略)
-├── scripts/            # 实用工具脚本 (如导出聊天记录)
-├── static/             # 静态资源 (图标、CSS等)
-├── templates/          # 前端页面 (chat.html)
-├── .env                # 配置文件 (需手动创建)
-└── requirements.txt    # 项目依赖
+├── app.py              # 后端核心逻辑 (Flask + APScheduler)
+├── memory_jobs.py      # 记忆整理任务脚本
+├── prompts/            # Prompt 模块文件夹 (核心!)
+│   ├── 8_format.md     # [已包含] 输出格式规范
+│   └── (其他文件需自行创建，详见下方配置指南)
+├── static/             # 静态资源 (头像、CSS)
+├── templates/          # 前端页面
+├── chat_history.db     # 数据库 (自动生成)
+└── requirements.txt    # 依赖列表
 ```
 
 ## 📝 许可证

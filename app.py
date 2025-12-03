@@ -23,7 +23,6 @@ OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/ap
 app = Flask(__name__, static_folder='static', template_folder='.')
 
 # 配置项
-PROMPT_FILE = "prompt.md"
 MAX_CONTEXT_LINES = 10
 MODEL_NAME = "gemini-3-pro"
 
