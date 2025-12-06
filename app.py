@@ -111,8 +111,18 @@ def build_system_prompt():
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
                 short_mem = json.load(f)
-                today_events = short_mem.get(today_str) # 获取今天的事件列表
-                if today_events and isinstance(today_events, list):
+
+                # 获取当天的数据
+                day_data = short_mem.get(today_str)
+
+                # 【兼容旧版本】如果它是列表，直接用；如果是字典(新版)，取 events 字段
+                today_events = []
+                if isinstance(day_data, list):
+                    today_events = day_data
+                elif isinstance(day_data, dict):
+                    today_events = day_data.get("events", [])
+
+                if today_events:
                     events_str = "\n".join([f"- [{e.get('time')}] {e.get('event')}" for e in today_events])
                     prompt_parts.append(f"【Short-term Memory / 今日の出来事】\n{events_str}")
     except Exception: pass
@@ -182,6 +192,98 @@ def call_ai_to_summarize(text_content, prompt_type="short"):
     else:
         return call_gemini(messages)
 
+# --- 【新增】核心逻辑：对指定日期进行增量记忆更新 ---
+def update_short_memory_for_date(target_date_str):
+    """
+    读取指定日期的新增消息(last_id之后)，调用AI总结，并追加到短期记忆中。
+    返回: (added_count, new_events)
+    """
+    short_mem_path = os.path.join("prompts", "6_memory_short.json")
+
+    # 1. 读取现有记忆，获取 last_id
+    current_data = {}
+    if os.path.exists(short_mem_path):
+        with open(short_mem_path, "r", encoding="utf-8") as f:
+            try: current_data = json.load(f)
+            except: pass
+
+    day_data = current_data.get(target_date_str)
+
+    existing_events = []
+    last_id = 0
+
+    # 兼容处理：如果是旧格式(list)，视为 last_id=0，并准备转换为新格式
+    if isinstance(day_data, list):
+        existing_events = day_data
+        # 尝试去数据库找这些事件里最大的ID？太麻烦，直接设为0，
+        # 可能会导致第一次重复总结一点点旧数据，但问题不大，之后就好了。
+        last_id = 0
+    elif isinstance(day_data, dict):
+        existing_events = day_data.get("events", [])
+        last_id = day_data.get("last_id", 0)
+
+    # 2. 从数据库查询【大于 last_id】的新消息
+    start_time = f"{target_date_str} 00:00:00"
+    end_time = f"{target_date_str} 23:59:59"
+
+    conn = sqlite3.connect(DATABASE_FILE)
+    cursor = conn.cursor()
+    # 关键：只查 id > last_id 的
+    cursor.execute("SELECT id, timestamp, role, content FROM messages WHERE timestamp >= ? AND timestamp <= ? AND id > ?", (start_time, end_time, last_id))
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        print(f"[{target_date_str}] 没有新增消息需要总结。")
+        return 0, []
+
+    # 更新 max_id
+    new_max_id = rows[-1][0]
+
+    # 3. 拼接文本
+    chat_log = ""
+    for _, ts, role, content in rows:
+        time_part = ts.split(' ')[1][:5]
+        name = "ユーザー" if role == "user" else "私" # 改成日语，配合全日语Prompt
+        chat_log += f"[{time_part}] {name}: {content}\n"
+
+    # 4. 调用 AI 总结 (Short模式)
+    try:
+        summary_text = call_ai_to_summarize(chat_log, "short")
+        if not summary_text: return 0, []
+
+        # 解析 AI 返回
+        new_events = []
+        import re
+        for line in summary_text.split('\n'):
+            line = line.strip()
+            if line:
+                match_time = re.search(r'\[(\d{2}:\d{2})\]', line)
+                event_time = match_time.group(1) if match_time else datetime.now().strftime("%H:%M")
+                # 这里的正则去掉前面的 [HH:MM] 和 - 符号
+                event_text = re.sub(r'\[\d{2}:\d{2}\]', '', line).strip('- ').strip()
+                new_events.append({"time": event_time, "event": event_text})
+
+        if not new_events: return 0, []
+
+        # 5. 追加写入 (Append)
+        final_events = existing_events + new_events
+
+        # 保存为新结构： { "events": [...], "last_id": 123 }
+        current_data[target_date_str] = {
+            "events": final_events,
+            "last_id": new_max_id
+        }
+
+        with open(short_mem_path, "w", encoding="utf-8") as f:
+            json.dump(current_data, f, ensure_ascii=False, indent=2)
+
+        return len(new_events), new_events
+
+    except Exception as e:
+        print(f"增量总结出错: {e}")
+        return 0, []
+
 # ---------------------- 工具函数 ----------------------
 
 def get_timestamp():
@@ -210,36 +312,48 @@ def init_db():
 def index():
     return send_from_directory(".", "templates/chat.html")
 
-# ---------------------- API：获取历史记录 (修复版) ----------------------
+# --- 【修改】历史记录接口 (支持定位) ---
+# 请找到原来的 get_history 函数，完全替换为下面这个：
 @app.route("/api/history", methods=["GET"])
 def get_history():
-    """提供给前端，用于加载所有历史聊天记录"""
-    # 1. 从 URL 参数获取页码和每页数量，设置默认值
+    limit = request.args.get('limit', 20, type=int)
     page = request.args.get('page', 1, type=int)
-    limit = request.args.get('limit', 20, type=int)  # 比如每次加载20条
-    offset = (page - 1) * limit
+    # 新增参数：target_id (如果有这个，就忽略 page，自动计算该消息在哪一页)
+    target_id = request.args.get('target_id', type=int)
 
     conn = sqlite3.connect(DATABASE_FILE)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # 2. 【核心】使用 LIMIT 和 OFFSET 来实现分页查询
-    # 我们按时间倒序查，这样拿到的就是最新的数据
-    cursor.execute("SELECT id, role, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT ? OFFSET ?", (limit, offset))
+    offset = (page - 1) * limit
 
-    # 3. 把结果反转，这样前端收到的就是按时间正序的了
+    # --- 核心：如果指定了跳转 ID，自动计算它前面的消息数量，从而反推 offset ---
+    if target_id:
+        # 1. 获取目标消息的时间戳
+        cursor.execute("SELECT timestamp FROM messages WHERE id = ?", (target_id,))
+        res = cursor.fetchone()
+        if res:
+            target_ts = res['timestamp']
+            # 2. 计算有多少条消息比它“新” (用于计算 offset)
+            cursor.execute("SELECT COUNT(*) FROM messages WHERE timestamp > ?", (target_ts,))
+            count_newer = cursor.fetchone()[0]
+            # 3. 设定 offset，让这条消息刚好出现在这一批数据的开头
+            offset = count_newer
+            # 4. 反向更新 page (给前端用)
+            page = (offset // limit) + 1
+
+    # 常规查询
+    cursor.execute("SELECT id, role, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT ? OFFSET ?", (limit, offset))
     messages = [dict(row) for row in cursor.fetchall()][::-1]
 
-    # 4. （可选但推荐）同时告诉前端总共有多少条消息，方便它判断是否已加载完
     cursor.execute("SELECT COUNT(id) FROM messages")
     total_messages = cursor.fetchone()[0]
-
     conn.close()
 
-    # 5. 返回一个包含数据和总数的对象
     return jsonify({
         "messages": messages,
-        "total": total_messages
+        "total": total_messages,
+        "page": page  # 返回当前真实的页码
     })
 
 # 这是在 app.py 文件中
@@ -301,19 +415,6 @@ def chat():
     current_short_time = datetime.now().strftime('[%H:%M]')
     messages.append({"role": "user", "content": f"{current_short_time} {user_msg_raw}"})
 
-    # --- [调试] 新增的打印代码 ---
-    # 在这里，我们将完整的 messages 列表打印到控制台
-    print("\n" + "="*50)
-    print("--- [调试] 正在发送给 AI 的完整 Prompt ---")
-    print("="*50)
-    for i, message in enumerate(messages):
-        role = message.get("role", "unknown")
-        content = message.get("content", "").replace('\n', '\\n') # 将换行符可视化
-        print(f"  [{i}] ({role}): {content[:100]}..." if len(content) > 100 else f"  [{i}] ({role}): {content}")
-    print("="*50)
-    print("--- [调试] Prompt 结束 ---")
-    # --- 调试代码结束 ---
-
     # --- Part 3: 核心交互 ---
     try:
         if USE_OPENROUTER and OPENROUTER_KEY:
@@ -321,11 +422,15 @@ def chat():
         else:
             reply_text_raw = call_gemini(messages)
 
-        # --- 【核心修复】AI 回复的“安检门” ---
-        # 我们用正则表达式，查找并移除回复开头可能存在的 [时间戳] 格式
-        timestamp_pattern_in_reply = r'^\[\d{4}-\d{2}-\d{2}\s[A-Za-z]+\s\d{2}:\d{2}:\d{2}\]\s*'
-        cleaned_reply_text = re.sub(timestamp_pattern_in_reply, '', reply_text_raw).strip()
-        # --- 安检结束 ---
+        # --- 【修改】清理 AI 回复中的时间戳 (安检门) ---
+        # 这里的正则会同时匹配两种格式：
+        # 1. [HH:MM]  (例如 [12:30])
+        # 2. [MM-DD HH:MM] (例如 [12-04 12:30])
+        # 同时也兼容一位数的小时 (如 [9:30])
+        timestamp_pattern = r'\[(?:(?:\d{2}-\d{2}\s+)?\d{1,2}:\d{2})\]\s*'
+
+        # 使用 re.sub 将其替换为空字符串
+        cleaned_reply_text = re.sub(timestamp_pattern, '', reply_text_raw).strip()
 
         now = datetime.now()
         user_timestamp = now.strftime('%Y-%m-%d %H:%M:%S')
@@ -386,6 +491,9 @@ def edit_message(msg_id):
 def call_openrouter(messages):
     import requests
 
+    # 【新增】打印日志
+    log_full_prompt(f"OpenRouter ({MODEL_NAME})", messages)
+
     # 构造请求地址，我们现在用的是 .env 里配置的新地址
     # 它会自动拼接成 "https://vg.v1api.cc/v1/chat/completions"
     url = f"{OPENROUTER_BASE_URL}/chat/completions"
@@ -423,6 +531,9 @@ def call_openrouter(messages):
 # ---------------------- Gemini ----------------------
 
 def call_gemini(messages):
+    # 【新增】打印日志
+    log_full_prompt(f"Gemini ({MODEL_NAME})", messages)
+
     try:
         import google.generativeai as genai
     except ImportError as e:
@@ -525,69 +636,16 @@ def call_gemini(messages):
     # except Exception as e:
     #     return f"[ERROR] Request failed: {e}"
 
-# --- 【新增】API：手动触发今日短期记忆总结 ---
+# --- API：手动触发今日记忆整理 (增量版) ---
 @app.route("/api/memory/snapshot", methods=["POST"])
 def snapshot_memory():
-    # 1. 从数据库读取“今天”的所有消息
     today_str = datetime.now().strftime('%Y-%m-%d')
-    start_time = f"{today_str} 00:00:00"
-    end_time = f"{today_str} 23:59:59"
-
-    conn = sqlite3.connect(DATABASE_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT timestamp, role, content FROM messages WHERE timestamp >= ? AND timestamp <= ?", (start_time, end_time))
-    rows = cursor.fetchall()
-    conn.close()
-
-    if not rows:
-        return jsonify({"status": "no_data", "message": "今天还没有聊天记录"})
-
-    # 2. 拼接对话文本
-    chat_log = ""
-    for ts, role, content in rows:
-        # 只取时间 HH:MM
-        time_part = ts.split(' ')[1][:5]
-        name = "桐奈" if role == "user" else "我"
-        chat_log += f"[{time_part}] {name}: {content}\n"
-
-    # 3. 调用 AI 总结
     try:
-        summary = call_ai_to_summarize(chat_log, "short")
-        if not summary:
-            raise Exception("AI 返回为空")
-
-        # 4. 写入 6_memory_short.json
-        # 既然是 Snapshot，我们采取“覆盖更新”策略：每次点按钮，都重新总结今天的全部内容
-        # 这样避免重复，也更准确
-        short_mem_path = os.path.join("prompts", "6_memory_short.json")
-
-        # 读取现有数据（保留其他日期的，只更新今天）
-        current_data = {}
-        if os.path.exists(short_mem_path):
-            with open(short_mem_path, "r", encoding="utf-8") as f:
-                try: current_data = json.load(f)
-                except: pass
-
-        # 解析 AI 返回的文本为列表结构 (简单处理：按行分割)
-        # 假设 AI 很听话，返回的是 "- [HH:MM] xxx"
-        events = []
-        for line in summary.split('\n'):
-            line = line.strip()
-            if line:
-                # 简单提取时间，如果没有就填当前时间
-                match_time = re.search(r'\[(\d{2}:\d{2})\]', line)
-                event_time = match_time.group(1) if match_time else datetime.now().strftime("%H:%M")
-                event_text = re.sub(r'\[\d{2}:\d{2}\]', '', line).strip('- ').strip()
-
-                events.append({"time": event_time, "event": event_text})
-
-        current_data[today_str] = events
-
-        with open(short_mem_path, "w", encoding="utf-8") as f:
-            json.dump(current_data, f, ensure_ascii=False, indent=2)
-
-        return jsonify({"status": "success", "summary": events})
-
+        count, new_events = update_short_memory_for_date(today_str)
+        if count > 0:
+            return jsonify({"status": "success", "summary": new_events, "message": f"新增了 {count} 条记忆"})
+        else:
+            return jsonify({"status": "no_data", "message": "暂时没有新对话需要整理"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -596,6 +654,93 @@ def snapshot_memory():
 def force_maintenance():
     scheduled_maintenance() # 手动调用上面那个定时函数
     return jsonify({"status": "triggered", "message": "已手动触发后台维护，请查看服务器控制台日志"})
+
+# --- 【新增】记忆面板页面 ---
+@app.route("/memory")
+def memory_view():
+    return send_from_directory("templates", "memory.html")
+
+# --- 【新增】获取所有 Prompts 和记忆的 API ---
+@app.route("/api/prompts_data")
+def get_prompts_data():
+    data = {}
+    # 定义我们要读取的文件列表
+    files = {
+        "base": "1_base_persona.md",
+        "relation": "2_relationship.json",
+        "user": "3_user_persona.md",
+        "long": "4_memory_long.json",
+        "medium": "5_memory_medium.json",
+        "short": "6_memory_short.json",
+        "schedule": "7_schedule.json",
+        "format": "8_format.md"
+    }
+
+    for key, filename in files.items():
+        path = os.path.join("prompts", filename)
+        content = "（文件不存在或为空）"
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                # 如果是 JSON，解析一下以便前端格式化，否则直接读文本
+                if filename.endswith(".json"):
+                    try: content = json.load(f)
+                    except: content = f.read() # 解析失败就读原文
+                else:
+                    content = f.read()
+        data[key] = content
+
+    return jsonify(data)
+
+# --- 【新增】保存 Prompt 文件的接口 ---
+@app.route("/api/save_prompt", methods=["POST"])
+def save_prompt_file():
+    key = request.json.get("key")
+    new_content = request.json.get("content") # 可以是字符串(md)或对象(json)
+
+    # 映射 Key 到 文件名
+    files_map = {
+        "base": "1_base_persona.md",
+        "relation": "2_relationship.json",
+        "user": "3_user_persona.md",
+        "long": "4_memory_long.json",
+        "medium": "5_memory_medium.json",
+        "short": "6_memory_short.json",
+        "schedule": "7_schedule.json",
+        "format": "8_format.md"
+    }
+
+    filename = files_map.get(key)
+    if not filename:
+        return jsonify({"status": "error", "message": "Invalid key"}), 400
+
+    path = os.path.join("prompts", filename)
+
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            # 如果是 JSON 对象，要转成字符串再存，且保证格式美观
+            if filename.endswith(".json") and isinstance(new_content, (dict, list)):
+                json.dump(new_content, f, ensure_ascii=False, indent=2)
+            else:
+                # 如果是文本，直接写
+                f.write(str(new_content))
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+# --- 【新增】搜索接口 ---
+@app.route("/api/search", methods=["POST"])
+def search_messages():
+    keyword = request.json.get("keyword", "").strip()
+    if not keyword: return jsonify([])
+
+    conn = sqlite3.connect(DATABASE_FILE)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    # 模糊搜索，按时间倒序
+    cursor.execute("SELECT id, role, content, timestamp FROM messages WHERE content LIKE ? ORDER BY timestamp DESC", (f"%{keyword}%",))
+    rows = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return jsonify(rows)
 
 # --- 定时任务配置 ---
 def scheduled_maintenance():
@@ -613,6 +758,20 @@ def scheduled_maintenance():
         memory_jobs.process_weekly_rollover()
 
     print("✅ 后台维护结束\n")
+
+# --- 【新增】调试工具：打印完整的 Prompt ---
+def log_full_prompt(service_name, messages):
+    print("\n" + "▼"*20 + f" 🟢 [DEBUG] 发送给 {service_name} 的完整内容 " + "▼"*20)
+
+    for i, msg in enumerate(messages):
+        role = msg.get('role', 'unknown').upper()
+        content = msg.get('content', '')
+        # 如果内容太长（比如几千字的记忆），也完整显示，方便您检查
+        print(f"【{i}】<{role}>:")
+        print(f"{content}")
+        print("-" * 50)
+
+    print("▲"*20 + " [DEBUG] END " + "▲"*20 + "\n")
 
 # ---------------------- 启动 ----------------------
 

@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>记忆核心 | Memory Core</title>
+    <style>
+        /* --- 全局基础 --- */
+        * { box-sizing: border-box; /* 关键：防止内边距撑破容器 */ }
+
+        body {
+            font-family: "Segoe UI", "PingFang SC", sans-serif;
+            background: linear-gradient(135deg, #fff3f8 0%, #ffe9e1 100%);
+            margin: 0; padding: 15px; color: #444; min-height: 100vh;
+        }
+        .container { max-width: 900px; margin: 0 auto; padding-bottom: 80px;}
+
+        /* 头部 */
+        .header {
+            display: flex; align-items: center; margin-bottom: 20px;
+            background: rgba(255,255,255,0.6); backdrop-filter: blur(10px);
+            padding: 12px 20px; border-radius: 16px; border: 1px solid #ffe5e8;
+        }
+        .back-btn { font-size: 24px; margin-right: 15px; cursor: pointer; color: #ffb6b9; }
+        h1 { margin: 0; font-size: 16px; color: #333; flex: 1; text-align: center; margin-right: 24px;}
+
+        /* 模块通用 */
+        .section-title { font-size: 13px; color: #aaa; margin: 25px 0 10px 5px; font-weight: bold; text-transform: uppercase; }
+
+        details {
+            background: #fff; border-radius: 12px; margin-bottom: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.03); border: 1px solid #fff0f2;
+            overflow: hidden;
+        }
+        summary {
+            padding: 15px; cursor: pointer; font-weight: 600; list-style: none;
+            display: flex; justify-content: space-between; align-items: center;
+            background: rgba(255,255,255,0.5); font-size: 14px;
+        }
+        summary::-webkit-details-marker { display: none; }
+
+        /* 操作栏 */
+        .action-bar {
+            padding: 10px 15px; background: #fffcfc; border-bottom: 1px solid #eee;
+            display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap;
+        }
+        .btn {
+            padding: 6px 14px; border-radius: 6px; font-size: 13px; cursor: pointer; border: none; font-weight: bold; flex-shrink: 0;
+        }
+        .btn-edit { background: #e3f2fd; color: #1565c0; }
+        .btn-save { background: #e8f5e9; color: #2e7d32; display: none; }
+        .btn-cancel { background: #ffebee; color: #c62828; display: none; }
+
+        /* 内容区 */
+        .content-box { padding: 0; background: #fafafa; }
+        .empty-state { padding: 20px; text-align: center; color: #bbb; font-style: italic; font-size: 13px; }
+
+        /* ------------------- 展示模式 (View Mode) ------------------- */
+        .view-mode .mem-item { padding: 12px 16px; border-bottom: 1px solid #eee; }
+        .view-mode .mem-header { font-size: 12px; color: #ffb6b9; font-weight: bold; margin-bottom: 6px; word-break: break-all;}
+        .view-mode .mem-text { font-size: 14px; white-space: pre-wrap; color: #555; line-height: 1.6; word-break: break-word;}
+        .view-mode .time-capsule { display: flex; gap: 10px; padding: 6px 0; font-size: 14px; align-items: flex-start;}
+        .view-mode .time-tag { background: #e3f2fd; color: #1565c0; font-size: 12px; padding: 2px 6px; border-radius: 4px; font-family: monospace; white-space: nowrap; margin-top: 2px;}
+
+        /* ------------------- 编辑模式 (Edit Mode) ------------------- */
+        .edit-mode { padding: 15px; display: none; background: #fff; }
+
+        /* 切换显示 */
+        .editing .view-mode { display: none; }
+        .editing .edit-mode { display: block; }
+        .editing .btn-edit { display: none; }
+        .editing .btn-save, .editing .btn-cancel { display: inline-block; }
+
+        /* --- 输入控件组 (Desktop 默认) --- */
+        .input-group {
+            display: flex; gap: 8px; margin-bottom: 12px;
+            align-items: flex-start; /* 顶部对齐 */
+            border-bottom: 1px dashed #f0f0f0; /* 分隔线 */
+            padding-bottom: 12px;
+        }
+        .input-group:last-child { border-bottom: none; }
+
+        /* 所有的输入框 */
+        input[type="text"], textarea {
+            border: 1px solid #ddd; border-radius: 6px; padding: 10px;
+            font-family: inherit; font-size: 14px;
+            transition: border-color 0.2s;
+        }
+        input:focus, textarea:focus { border-color: #ffb6b9; outline: none; }
+
+        /* 1. Key 输入框 (时间/日期/键名) */
+        .input-key { width: 140px; flex-shrink: 0; background: #fff; font-weight: bold; color: #555; }
+
+        /* 2. Value 输入框 (内容) - 解决“框太小”问题 */
+        .input-val { flex: 1; min-width: 0; } /* min-width:0 防止flex溢出 */
+        textarea.input-val { min-height: 100px; resize: vertical; line-height: 1.5; }
+
+        /* 3. Full 输入框 (大段描述) */
+        .input-full { width: 100%; min-height: 80px; margin-top: 6px; resize: vertical; }
+
+        /* 删除按钮 */
+        .btn-del {
+            background: #ffebee; color: #c62828; width: 36px; height: 36px;
+            border-radius: 6px; border: none; cursor: pointer; flex-shrink: 0;
+            font-size: 18px; display: flex; align-items: center; justify-content: center;
+        }
+
+        /* 添加按钮 */
+        .btn-add {
+            width: 100%; padding: 12px; background: #f8f9fa; border: 2px dashed #ddd;
+            color: #888; border-radius: 8px; cursor: pointer; margin-top: 10px; font-weight: bold;
+            transition: all 0.2s;
+        }
+        .btn-add:hover { border-color: #ffb6b9; color: #ffb6b9; background: #fff; }
+
+        /* 关系编辑卡片 */
+        .rel-edit-card {
+            border: 1px solid #eee; padding: 12px; border-radius: 8px;
+            margin-bottom: 12px; background: #fafafa;
+        }
+
+        /* Markdown 文本域 */
+        .md-editor { width: 100%; min-height: 300px; padding: 12px; line-height: 1.6; font-family: monospace; }
+
+        /* ================= 📱 手机端适配 (关键！) ================= */
+        @media (max-width: 600px) {
+            body { padding: 10px; }
+
+            /* 1. 强制纵向排列：解决“飞出去”和“显示不全” */
+            .input-group {
+                flex-direction: column; /* 上下排 */
+                background: #fdfdfd;
+                border: 1px solid #eee;
+                border-radius: 8px;
+                padding: 10px;
+                gap: 10px; /* 控件间距加大 */
+            }
+
+            /* 2. 所有输入框宽度 100% */
+            .input-key, .input-val, .input-full {
+                width: 100% !important; /* 强制填满 */
+                flex: none;
+                max-width: 100%;
+            }
+
+            /* 短期记忆的时间框可以稍微矮一点 */
+            .input-key { background-color: #fff8f8; }
+
+            /* 3. 删除按钮变成底部的宽条，方便手指点 */
+            .btn-del {
+                width: 100%;
+                height: 32px;
+                margin-top: 5px;
+                background-color: #fff0f0;
+                border: 1px solid #ffcdd2;
+            }
+            .btn-del::after { content: ' 删除 / Delete'; font-size: 12px; margin-left: 5px; }
+
+            /* 关系卡片里的布局调整 */
+            .rel-edit-card .input-group {
+                border: none; padding: 0; background: transparent;
+            }
+
+            /* 操作栏按钮 */
+            .action-bar .btn { flex: 1; text-align: center; } /* 按钮均分宽度 */
+        }
+
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <div class="back-btn" onclick="window.location.href='/'">←</div>
+        <h1>記憶の保管庫 (Memory Archive)</h1>
+    </div>
+
+    <!-- ================= 动态记忆区域 ================= -->
+    <div class="section-title">🧠 动态记忆 (Dynamic Memory)</div>
+
+    <!-- 1. 短期记忆 (JSON, 仅展示最近1天, 列表编辑) -->
+    <div id="module-short" class="module" data-type="short"></div>
+
+    <!-- 2. 中期记忆 (JSON, 仅展示最近7天, KV编辑) -->
+    <div id="module-medium" class="module" data-type="medium"></div>
+
+    <!-- 3. 长期记忆 (JSON, 全部, KV编辑) -->
+    <div id="module-long" class="module" data-type="long"></div>
+
+    <!-- 4. 日程 (JSON, 全部, KV编辑) -->
+    <div id="module-schedule" class="module" data-type="schedule"></div>
+
+    <!-- ================= 核心设定区域 ================= -->
+    <div class="section-title">🧬 核心设定 (Core Prompts)</div>
+
+    <!-- 5. 关系 (JSON, 复杂对象编辑) -->
+    <div id="module-relation" class="module" data-type="relation"></div>
+
+    <!-- 6. Markdown 文本类 -->
+    <div id="module-base" class="module" data-type="base"></div>
+    <div id="module-user" class="module" data-type="user"></div>
+    <div id="module-format" class="module" data-type="format"></div>
+
+</div>
+
+<!-- 模板：模块外壳 -->
+<template id="tpl-module">
+    <details>
+        <summary><span class="mod-title"></span></summary>
+        <div class="action-bar">
+            <button class="btn btn-edit" onclick="toggleEdit(this)">编辑 / Edit</button>
+            <button class="btn btn-cancel" onclick="cancelEdit(this)">取消</button>
+            <button class="btn btn-save" onclick="saveData(this)">保存 / Save</button>
+        </div>
+        <div class="content-box">
+            <!-- 展示模式 -->
+            <div class="view-mode"></div>
+            <!-- 编辑模式 -->
+            <div class="edit-mode"></div>
+        </div>
+    </details>
+</template>
+
+<script>
+    // 全局数据缓存 (存储完整的原始数据，确保保存时不丢失未显示的数据)
+    let GLOBAL_DATA = {};
+
+    const CONFIG = {
+        'short': { title: '短期记忆 (Short-term / Recent 1 Day)', method: 'renderShort' },
+        'medium': { title: '中期记忆 (Medium-term / Recent 1 Week)', method: 'renderKV' },
+        'long': { title: '长期记忆 (Long-term)', method: 'renderKV' },
+        'schedule': { title: '近期日程 (Schedule)', method: 'renderKV' },
+        'relation': { title: '关系图谱 (Relationship)', method: 'renderRelation' },
+        'base': { title: '角色人设 (Base Persona)', method: 'renderMD' },
+        'user': { title: '用户档案 (User Persona)', method: 'renderMD' },
+        'format': { title: '格式规则 (System Rules)', method: 'renderMD' }
+    };
+
+    // 初始化
+    fetch('/api/prompts_data')
+        .then(r => r.json())
+        .then(data => {
+            GLOBAL_DATA = data;
+            Object.keys(CONFIG).forEach(key => initModule(key, data[key]));
+        });
+
+    function initModule(key, data) {
+        const tpl = document.getElementById('tpl-module').content.cloneNode(true);
+        const container = document.getElementById('module-' + key);
+
+        tpl.querySelector('.mod-title').textContent = CONFIG[key].title;
+        container.appendChild(tpl);
+
+        // 初始渲染视图
+        renderView(key, data);
+    }
+
+    // ================= 渲染视图逻辑 (View Mode) =================
+
+    function renderView(key, data) {
+        const container = document.querySelector(`#module-${key} .view-mode`);
+        if(!data || (typeof data === 'object' && Object.keys(data).length === 0)) {
+            container.innerHTML = '<div class="empty-state">暂无数据</div>';
+            return;
+        }
+
+        // 1. Markdown 渲染
+        if(CONFIG[key].method === 'renderMD') {
+            container.innerHTML = `<div style="padding:15px; white-space:pre-wrap;">${data}</div>`;
+            return;
+        }
+
+        // 2. Short 渲染 (只取最近1天)
+        if(key === 'short') {
+            const dates = Object.keys(data).sort().reverse();
+            if(dates.length === 0) { container.innerHTML = '<div class="empty-state">暂无数据</div>'; return; }
+
+            const latestDate = dates[0]; // 只展示最近一天
+            const dayData = data[latestDate];
+            const events = Array.isArray(dayData) ? dayData : (dayData.events || []);
+
+            let html = `<div class="mem-item"><div class="mem-header">📅 ${latestDate} (Displaying Latest)</div>`;
+            events.forEach(e => {
+                html += `<div class="time-capsule"><span class="time-tag">${e.time}</span><span>${e.event}</span></div>`;
+            });
+            html += `</div>`;
+            container.innerHTML = html;
+            return;
+        }
+
+        // 3. Medium 渲染 (只取最近7天)
+        if(key === 'medium') {
+            const dates = Object.keys(data).sort().reverse().slice(0, 7);
+            let html = '';
+            dates.forEach(d => {
+                html += `<div class="mem-item"><div class="mem-header">📔 ${d}</div><div class="mem-text">${data[d]}</div></div>`;
+            });
+            container.innerHTML = html || '<div class="empty-state">暂无数据 (近7天)</div>';
+            return;
+        }
+
+        // --- 【新增】Schedule 渲染 (只显示今天及以后) ---
+        if(key === 'schedule') {
+            const today = new Date().toISOString().split('T')[0]; // 获取今天 YYYY-MM-DD
+            // 日期升序排列 (离今天最近的在最上面)
+            const dates = Object.keys(data).sort();
+
+            let html = '';
+            let count = 0;
+            dates.forEach(d => {
+                // 核心过滤：只有日期 >= 今天才显示
+                if (d >= today) {
+                    html += `<div class="mem-item"><div class="mem-header">📌 ${d}</div><div class="mem-text">${data[d]}</div></div>`;
+                    count++;
+                }
+            });
+            container.innerHTML = html || '<div class="empty-state">近期无日程</div>';
+            return;
+        }
+
+        // 4. 通用 KV 渲染 (Long, Schedule)
+        if(CONFIG[key].method === 'renderKV') {
+            const sortedKeys = Object.keys(data).sort().reverse();
+            let html = '';
+            sortedKeys.forEach(k => {
+                html += `<div class="mem-item"><div class="mem-header">📌 ${k}</div><div class="mem-text">${data[k]}</div></div>`;
+            });
+            container.innerHTML = html;
+            return;
+        }
+
+        // 5. Relation 渲染
+        if(key === 'relation') {
+            let html = '';
+            Object.keys(data).forEach(name => {
+                const info = data[name];
+                html += `<div class="mem-item"><div class="mem-header">👤 ${name} [${info.role}]</div><div class="mem-text">${info.description}</div></div>`;
+            });
+            container.innerHTML = html;
+        }
+    }
+
+    // ================= 编辑模式逻辑 (Edit Mode) =================
+
+    function toggleEdit(btn) {
+        const module = btn.closest('.module');
+        const key = module.id.replace('module-', '');
+        const editBox = module.querySelector('.edit-mode');
+
+        module.classList.add('editing');
+
+        // 【Fix】原来的 module.closest('details') 是错的，因为 details 在 module 里面
+        // 我们直接让当前模块内部的 details 展开即可
+        const detailsEl = module.querySelector('details');
+        if(detailsEl) detailsEl.open = true;
+
+        // 根据类型生成编辑器
+        buildEditor(key, editBox);
+    }
+
+    function cancelEdit(btn) {
+        const module = btn.closest('.module');
+        module.classList.remove('editing');
+    }
+
+    function buildEditor(key, container) {
+        const data = GLOBAL_DATA[key];
+        container.innerHTML = ''; // 清空
+
+        // 1. Markdown 编辑器
+        if(CONFIG[key].method === 'renderMD') {
+            container.innerHTML = `<textarea class="md-editor">${data || ''}</textarea>`;
+            return;
+        }
+
+        // 2. Short 编辑器 (特殊：只编辑最近一天，或者提供添加新日期的能力？为了简单，我们编辑“展示出来的那个日期”)
+        if(key === 'short') {
+            const dates = Object.keys(data).sort().reverse();
+            // 如果没有数据，默认创建今天
+            const targetDate = dates.length > 0 ? dates[0] : new Date().toISOString().split('T')[0];
+            const dayData = data[targetDate] || [];
+            const events = Array.isArray(dayData) ? dayData : (dayData.events || []);
+
+            // 显示日期标题
+            container.innerHTML += `<div style="font-weight:bold; margin-bottom:10px; color:#ffb6b9;">编辑日期: ${targetDate}</div>`;
+
+            // 隐藏域存储当前编辑的日期 Key
+            container.dataset.dateKey = targetDate;
+
+            // 生成事件列表
+            const listDiv = document.createElement('div');
+            listDiv.className = 'edit-list';
+            events.forEach(e => {
+                listDiv.innerHTML += `
+                  <div class="input-group">
+                      <input type="text" class="input-key" value="${e.time}" placeholder="HH:MM">
+                      <input type="text" class="input-val" value="${e.event}" placeholder="事件内容">
+                      <button class="btn-del" onclick="this.parentElement.remove()">×</button>
+                  </div>`;
+            });
+            container.appendChild(listDiv);
+            container.innerHTML += `<button class="btn-add" onclick="addShortRow(this)">+ 添加事件</button>`;
+            return;
+        }
+
+        // 3. 通用 KV 编辑器 (Medium, Long, Schedule)
+        if(CONFIG[key].method === 'renderKV') {
+            // 这里的策略：虽然 view 只显示7天，但 edit 应该允许编辑所有，或者至少显示所有
+            // 为了防止数据丢失，我们列出所有 Key
+            const sortedKeys = Object.keys(data).sort().reverse();
+            const listDiv = document.createElement('div');
+            sortedKeys.forEach(k => {
+                listDiv.innerHTML += `
+                  <div class="input-group">
+                      <input type="text" class="input-key" value="${k}" placeholder="Key/Date">
+                      <textarea class="input-val" rows="2">${data[k]}</textarea>
+                      <button class="btn-del" onclick="this.parentElement.remove()">×</button>
+                  </div>`;
+            });
+            container.appendChild(listDiv);
+            container.innerHTML += `<button class="btn-add" onclick="addKVRow(this)">+ 添加条目</button>`;
+            return;
+        }
+
+        // 4. Relation 编辑器
+        if(key === 'relation') {
+            const names = Object.keys(data);
+            const listDiv = document.createElement('div');
+            names.forEach(name => {
+                const info = data[name];
+                listDiv.innerHTML += `
+                   <div class="rel-edit-card">
+                       <div class="input-group">
+                           <input type="text" class="input-key" value="${name}" placeholder="姓名">
+                           <input type="text" class="input-val" value="${info.role}" placeholder="关系定位">
+                           <button class="btn-del" onclick="this.closest('.rel-edit-card').remove()">×</button>
+                       </div>
+                       <textarea class="input-full" rows="2" placeholder="详细描述">${info.description}</textarea>
+                   </div>`;
+            });
+            container.appendChild(listDiv);
+            container.innerHTML += `<button class="btn-add" onclick="addRelRow(this)">+ 添加角色</button>`;
+        }
+    }
+
+    // --- 动态添加行的辅助函数 ---
+    function addShortRow(btn) {
+        const row = `<div class="input-group">
+          <input type="text" class="input-key" value="" placeholder="HH:MM">
+          <input type="text" class="input-val" value="" placeholder="事件内容">
+          <button class="btn-del" onclick="this.parentElement.remove()">×</button>
+      </div>`;
+        btn.previousElementSibling.insertAdjacentHTML('beforeend', row);
+    }
+
+    function addKVRow(btn) {
+        const row = `<div class="input-group">
+          <input type="text" class="input-key" value="" placeholder="Key/Date">
+          <textarea class="input-val" rows="2"></textarea>
+          <button class="btn-del" onclick="this.parentElement.remove()">×</button>
+      </div>`;
+        btn.previousElementSibling.insertAdjacentHTML('beforeend', row);
+    }
+
+    function addRelRow(btn) {
+        const row = `<div class="rel-edit-card">
+           <div class="input-group">
+               <input type="text" class="input-key" value="" placeholder="姓名">
+               <input type="text" class="input-val" value="" placeholder="关系定位">
+               <button class="btn-del" onclick="this.closest('.rel-edit-card').remove()">×</button>
+           </div>
+           <textarea class="input-full" rows="2" placeholder="详细描述"></textarea>
+       </div>`;
+        btn.previousElementSibling.insertAdjacentHTML('beforeend', row);
+    }
+
+    // ================= 保存逻辑 (Save) =================
+
+    async function saveData(btn) {
+        const module = btn.closest('.module');
+        const key = module.id.replace('module-', '');
+        const container = module.querySelector('.edit-mode');
+
+        let newData = null;
+
+        // 1. Markdown 保存
+        if(CONFIG[key].method === 'renderMD') {
+            newData = container.querySelector('textarea').value;
+        }
+
+        // 2. Short 保存 (特殊：只更新了那一天，需要合并回 GLOBAL_DATA)
+        else if(key === 'short') {
+            const dateKey = container.dataset.dateKey;
+            const rows = container.querySelectorAll('.input-group');
+            const newEvents = [];
+            rows.forEach(row => {
+                const t = row.querySelector('.input-key').value.trim();
+                const v = row.querySelector('.input-val').value.trim();
+                if(t && v) newEvents.push({time: t, event: v});
+            });
+
+            // 获取原始结构，保留 last_id
+            const originalDayData = GLOBAL_DATA[key][dateKey] || {};
+            let lastId = 0;
+            if(!Array.isArray(originalDayData)) lastId = originalDayData.last_id || 0;
+
+            // 构造新的全量数据
+            newData = { ...GLOBAL_DATA[key] }; // 复制旧数据
+            newData[dateKey] = {
+                events: newEvents,
+                last_id: lastId
+            };
+        }
+
+        // 3. KV 保存 (Medium, Long, Schedule)
+        else if(CONFIG[key].method === 'renderKV') {
+            newData = {};
+            const rows = container.querySelectorAll('.input-group');
+            rows.forEach(row => {
+                const k = row.querySelector('.input-key').value.trim();
+                const v = row.querySelector('.input-val').value.trim();
+                if(k) newData[k] = v;
+            });
+        }
+
+        // 4. Relation 保存
+        else if(key === 'relation') {
+            newData = {};
+            const cards = container.querySelectorAll('.rel-edit-card');
+            cards.forEach(card => {
+                const name = card.querySelector('.input-key').value.trim();
+                const role = card.querySelector('.input-val').value.trim();
+                const desc = card.querySelector('.input-full').value.trim();
+                if(name) {
+                    newData[name] = { role: role, description: desc };
+                }
+            });
+        }
+
+        // --- 发送给后端 ---
+        btn.textContent = 'Saving...';
+        try {
+            const res = await fetch('/api/save_prompt', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ key: key, content: newData })
+            });
+            const result = await res.json();
+            if(result.status === 'success') {
+                // 更新本地缓存
+                GLOBAL_DATA[key] = newData;
+                // 重新渲染视图
+                renderView(key, newData);
+                // 退出编辑模式
+                module.classList.remove('editing');
+                btn.textContent = '保存 / Save';
+            } else {
+                alert('保存失败: ' + result.message);
+                btn.textContent = '保存 / Save';
+            }
+        } catch(e) {
+            alert('网络错误');
+            btn.textContent = '保存 / Save';
+        }
+    }
+
+</script>
+
+</body>
+</html>
