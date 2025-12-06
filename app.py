@@ -113,18 +113,30 @@ def build_system_prompt():
                 short_mem = json.load(f)
 
                 # 获取当天的数据
-                day_data = short_mem.get(today_str)
+                dates_to_load = [today_str]
 
-                # 【兼容旧版本】如果它是列表，直接用；如果是字典(新版)，取 events 字段
-                today_events = []
-                if isinstance(day_data, list):
-                    today_events = day_data
-                elif isinstance(day_data, dict):
-                    today_events = day_data.get("events", [])
+                # 【关键逻辑】如果现在是凌晨 4 点之前，说明昨天还没日结，必须把昨天的也带上
+                if now.hour < 4:
+                    yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+                    # 把昨天插在前面，按时间顺序读取
+                    dates_to_load.insert(0, yesterday_str)
 
-                if today_events:
-                    events_str = "\n".join([f"- [{e.get('time')}] {e.get('event')}" for e in today_events])
-                    prompt_parts.append(f"【Short-term Memory / 今日の出来事】\n{events_str}")
+                # 2. 循环读取并拼接
+                combined_events_str = ""
+                for date_key in dates_to_load:
+                    day_data = short_mem.get(date_key)
+                    # 兼容格式
+                    today_events = []
+                    if isinstance(day_data, list): today_events = day_data
+                    elif isinstance(day_data, dict): today_events = day_data.get("events", [])
+
+                    if today_events:
+                        # 加个日期头，让 AI 分得清
+                        combined_events_str += f"\n--- {date_key} ---\n"
+                        combined_events_str += "\n".join([f"- [{e.get('time')}] {e.get('event')}" for e in today_events])
+
+                if combined_events_str:
+                    prompt_parts.append(f"【Short-term Memory / 最近の出来事】{combined_events_str}")
     except Exception: pass
 
     # --- 7. 近期安排 (JSON - 日程表) ---
@@ -639,11 +651,34 @@ def call_gemini(messages):
 # --- API：手动触发今日记忆整理 (增量版) ---
 @app.route("/api/memory/snapshot", methods=["POST"])
 def snapshot_memory():
-    today_str = datetime.now().strftime('%Y-%m-%d')
+    now = datetime.now()
+    today_str = now.strftime('%Y-%m-%d')
+
+    total_new_count = 0
+    message_log = []
     try:
-        count, new_events = update_short_memory_for_date(today_str)
-        if count > 0:
-            return jsonify({"status": "success", "summary": new_events, "message": f"新增了 {count} 条记忆"})
+        # 1. 【关键逻辑】如果是凌晨 4 点前，先尝试更新昨天的
+        if now.hour < 4:
+            yesterday_str = (now - timedelta(days=1)).strftime('%Y-%m-%d')
+            print(f"--- [Snapshot] 凌晨检测，先检查昨天 ({yesterday_str}) ---")
+            count_y, events_y = update_short_memory_for_date(yesterday_str)
+            if count_y > 0:
+                total_new_count += count_y
+                message_log.append(f"昨天新增 {count_y} 条")
+
+        # 2. 更新今天的
+        print(f"--- [Snapshot] 检查今天 ({today_str}) ---")
+        count_t, events_t = update_short_memory_for_date(today_str)
+        if count_t > 0:
+            total_new_count += count_t
+            message_log.append(f"今天新增 {count_t} 条")
+
+        if total_new_count > 0:
+            return jsonify({
+                "status": "success",
+                "message": "记忆整理完成: " + "，".join(message_log),
+                "summary": [] # 前端暂时不需要具体内容，只要成功提示
+            })
         else:
             return jsonify({"status": "no_data", "message": "暂时没有新对话需要整理"})
     except Exception as e:

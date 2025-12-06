@@ -270,21 +270,46 @@
             return;
         }
 
-        // 2. Short 渲染 (只取最近1天)
+        // 2. Short 渲染 (智能显示：凌晨显示2天，白天显示1天)
         if(key === 'short') {
             const dates = Object.keys(data).sort().reverse();
-            if(dates.length === 0) { container.innerHTML = '<div class="empty-state">暂无数据</div>'; return; }
+            if(dates.length === 0) {
+                container.innerHTML = '<div class="empty-state">暂无数据</div>';
+                return;
+            }
 
-            const latestDate = dates[0]; // 只展示最近一天
-            const dayData = data[latestDate];
-            const events = Array.isArray(dayData) ? dayData : (dayData.events || []);
+            // --- 【修正】根据当前时间判断显示几天 ---
+            const currentHour = new Date().getHours();
+            // 如果是凌晨 4 点前 (0,1,2,3)，显示最近 2 天
+            // 否则只显示最近 1 天 (今天)
+            const daysToShow = (currentHour < 4) ? 2 : 1;
 
-            let html = `<div class="mem-item"><div class="mem-header">📅 ${latestDate} (Displaying Latest)</div>`;
-            events.forEach(e => {
-                html += `<div class="time-capsule"><span class="time-tag">${e.time}</span><span>${e.event}</span></div>`;
+            const recentDates = dates.slice(0, daysToShow);
+
+            let html = '';
+            recentDates.forEach(dateKey => {
+                const dayData = data[dateKey];
+                const events = Array.isArray(dayData) ? dayData : (dayData.events || []);
+
+                // 没数据的日期不显示
+                if (events.length === 0) return;
+
+                const todayStr = new Date().toISOString().split('T')[0];
+                const label = (dateKey === todayStr) ? '(Today)' : '';
+
+                html += `<div class="mem-item" style="border-left: 3px solid #ffb6b9; padding-left:12px;">
+                  <div class="mem-header">📅 ${dateKey} ${label}</div>`;
+
+                events.forEach(e => {
+                    html += `<div class="time-capsule">
+                      <span class="time-tag">${e.time}</span>
+                      <span>${e.event}</span>
+                  </div>`;
+                });
+                html += `</div>`;
             });
-            html += `</div>`;
-            container.innerHTML = html;
+
+            container.innerHTML = html || '<div class="empty-state">暂无今日数据</div>';
             return;
         }
 
