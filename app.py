@@ -742,6 +742,31 @@ def search_messages():
     conn.close()
     return jsonify(rows)
 
+# --- 【新增】常用语接口 ---
+@app.route("/api/quick_phrases", methods=["GET", "POST"])
+def handle_quick_phrases():
+    path = os.path.join("prompts", "quick_phrases.json")
+
+    # GET: 读取列表
+    if request.method == "GET":
+        if not os.path.exists(path):
+            return jsonify([]) # 文件不存在返回空列表
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return jsonify(json.load(f))
+        except:
+            return jsonify([])
+
+    # POST: 保存列表
+    if request.method == "POST":
+        new_list = request.json
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(new_list, f, ensure_ascii=False, indent=2)
+            return jsonify({"status": "success"})
+        except Exception as e:
+            return jsonify({"status": "error", "message": str(e)}), 500
+
 # --- 定时任务配置 ---
 def scheduled_maintenance():
     """

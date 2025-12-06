@@ -263,6 +263,70 @@
     display: flex; align-items: center; justify-content: center;
     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
   }
+
+  /* --- 【新增】+号按钮样式 --- */
+  #plusBtn {
+    margin-left: 8px;
+    background: #f0f0f0; color: #888;
+    border: 1px solid #ddd;
+    border-radius: 50%; /* 圆形 */
+    width: 36px; height: 36px;
+    font-size: 20px; line-height: 1;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+  }
+  #plusBtn:hover { background: #e0e0e0; color: #555; }
+  #plusBtn.active { background: #ffb6b9; color: #fff; border-color: #ffb6b9; transform: rotate(45deg); }
+  /* --- 常用语面板 (修改版：嵌入底部流) --- */
+  #quickPhrasesPanel {
+    /* 不再悬浮，而是作为Flex的一部分 */
+    height: 0; /* 默认高度为0，隐藏 */
+    overflow: hidden; /* 内容多了不溢出 */
+    background: #fff; /* 不用半透明了，因为是在最底部 */
+    border-top: 1px solid #eee;
+    display: flex; flex-direction: column;
+    transition: height 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); /* 丝滑的动画 */
+    flex-shrink: 0; /* 防止被压缩 */
+  }
+
+  /* 当面板打开时，给它一个固定的高度 */
+  #quickPhrasesPanel.open {
+    height: 280px; /* 您可以根据需要调整这个高度 */
+  }
+
+  /* 其它内部样式保持不变 */
+  .qp-header {
+    padding: 8px 15px; background: #fafafa; border-bottom: 1px solid #eee;
+    display: flex; justify-content: space-between; align-items: center;
+    font-weight: bold; color: #ffb6b9; font-size: 13px;
+    flex-shrink: 0;
+  }
+  /* ... qp-list, qp-item 等样式保持之前的即可 ... */
+
+  @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  .qp-btn-close { background:none; border:none; font-size:20px; color:#aaa; cursor:pointer; padding:0 5px;}
+  .qp-btn-text { background:none; border:none; font-size:12px; color:#666; cursor:pointer; margin-right:10px; text-decoration: underline;}
+
+  .qp-list { flex: 1; overflow-y: auto; padding: 10px; }
+
+  /* 列表项 (选用模式) */
+  .qp-item {
+    padding: 10px 12px; background: #fff; border: 1px solid #f0f0f0;
+    border-radius: 8px; margin-bottom: 8px; cursor: pointer;
+    font-size: 14px; color: #444; transition: all 0.2s;
+  }
+  .qp-item:hover { background: #fff5f6; border-color: #ffcdd2; color: #d32f2f; }
+  .qp-item:active { transform: scale(0.98); }
+
+  /* 编辑模式输入框 */
+  .qp-edit-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .qp-input { flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 6px; }
+  .qp-del-btn { width: 30px; background: #ffebee; border:none; color: #c62828; border-radius: 6px; cursor: pointer; }
+
+  /* 底部添加/保存按钮 */
+  .qp-add-btn { width: 48%; padding: 8px; background: #f5f5f5; border: 1px dashed #ccc; border-radius: 6px; cursor:pointer;}
+  .qp-save-btn { width: 48%; padding: 8px; background: #ffb6b9; color: #fff; border: none; border-radius: 6px; cursor:pointer; font-weight:bold;}
 </style>
 </head>
 <body>
@@ -321,7 +385,27 @@
 
 <div class="input-container">
   <textarea id="messageInput" placeholder="输入消息…" rows="1"></textarea>
-  <button id="sendBtn">发送</button>
+  <button id="sendBtn">发送</button><!-- 【新增】+号按钮 -->
+  <button id="plusBtn" onclick="toggleQuickPanel()">+</button>
+</div>
+
+<!-- 【新增】常用语面板 (默认隐藏) -->
+<div id="quickPhrasesPanel">
+  <div class="qp-header">
+    <span>💬 常用语</span>
+    <div>
+      <button class="qp-btn-text" id="qpEditToggle" onclick="toggleQPEditMode()">编辑</button>
+      <button class="qp-btn-close" onclick="toggleQuickPanel()">×</button>
+    </div>
+  </div>
+  <div id="qpList" class="qp-list">
+    <!-- JS 动态填充 -->
+  </div>
+  <!-- 编辑模式下的添加按钮 -->
+  <div id="qpAddContainer" style="display:none; padding:10px; border-top:1px solid #eee;">
+    <button class="qp-add-btn" onclick="addNewPhraseRow()">+ 新增一条</button>
+    <button class="qp-save-btn" onclick="saveQuickPhrases()">保存全部</button>
+  </div>
 </div>
 
 <!-- 【新增】编辑弹窗 -->
@@ -1032,6 +1116,141 @@
       setTimeout(() => {
         el.style.backgroundColor = 'transparent';
       }, 2000);
+    }
+
+    // --- 常用语功能 ---
+    const qpPanel = document.getElementById('quickPhrasesPanel');
+    const plusBtn = document.getElementById('plusBtn');
+    const qpList = document.getElementById('qpList');
+    const qpAddContainer = document.getElementById('qpAddContainer');
+    const qpEditToggle = document.getElementById('qpEditToggle');
+
+    let isQPEditMode = false;
+    let quickPhrases = []; // 本地缓存
+
+    async function toggleQuickPanel() {
+      // 切换 class 来控制高度动画
+      if (qpPanel.classList.contains('open')) {
+        // 关闭
+        qpPanel.classList.remove('open');
+        plusBtn.classList.remove('active');
+
+        // 关闭时延迟一点重置编辑模式，体验更好
+        setTimeout(() => {
+          isQPEditMode = false;
+          renderQPList();
+        }, 300);
+      } else {
+        // 打开
+        await loadQuickPhrases(); // 先加载数据
+        renderQPList();
+        qpPanel.classList.add('open');
+        plusBtn.classList.add('active');
+
+        // 【关键体验优化】面板长出来后，聊天记录自动滚到底
+        setTimeout(() => {
+          chatContainer.scrollTop = chatContainer.scrollHeight;
+        }, 300);
+      }
+    }
+
+    async function loadQuickPhrases() {
+      try {
+        const res = await fetch('/api/quick_phrases');
+        quickPhrases = await res.json();
+        if (!Array.isArray(quickPhrases)) quickPhrases = [];
+      } catch(e) { quickPhrases = []; }
+    }
+
+    function toggleQPEditMode() {
+      isQPEditMode = !isQPEditMode;
+      qpEditToggle.textContent = isQPEditMode ? '取消编辑' : '编辑';
+      qpEditToggle.style.color = isQPEditMode ? '#2196f3' : '#666';
+      qpAddContainer.style.display = isQPEditMode ? 'flex' : 'none';
+      qpAddContainer.style.justifyContent = 'space-between';
+      renderQPList();
+    }
+
+    function renderQPList() {
+      qpList.innerHTML = '';
+      if (quickPhrases.length === 0 && !isQPEditMode) {
+        qpList.innerHTML = '<div style="text-align:center;color:#ccc;font-size:12px;margin-top:20px;">暂无常用语，点击“编辑”添加</div>';
+        return;
+      }
+
+      quickPhrases.forEach((text, index) => {
+        if (isQPEditMode) {
+          // 编辑模式：显示输入框
+          const row = document.createElement('div');
+          row.className = 'qp-edit-row';
+          row.innerHTML = `
+                    <input type="text" class="qp-input" value="${text}">
+                    <button class="qp-del-btn" onclick="removeQPRow(this)">×</button>
+                `;
+          qpList.appendChild(row);
+        } else {
+          // 选用模式：显示按钮
+          const item = document.createElement('div');
+          item.className = 'qp-item';
+          item.textContent = text;
+          item.onclick = () => insertPhrase(text);
+          qpList.appendChild(item);
+        }
+      });
+    }
+
+    // --- 核心操作 ---
+
+    // 1. 插入到输入框
+    function insertPhrase(text) {
+      // 在光标处插入，或者直接追加
+      input.value += text;
+      input.style.height = 'auto'; // 自动调整高度
+      input.style.height = `${input.scrollHeight}px`;
+      input.focus();
+      toggleQuickPanel(); // 选完自动关闭
+    }
+
+    // 2. 动态添加一行 (编辑模式)
+    function addNewPhraseRow() {
+      const row = document.createElement('div');
+      row.className = 'qp-edit-row';
+      row.innerHTML = `
+            <input type="text" class="qp-input" placeholder="输入新常用语...">
+            <button class="qp-del-btn" onclick="removeQPRow(this)">×</button>
+        `;
+      qpList.appendChild(row);
+      row.querySelector('input').focus();
+    }
+
+    // 3. 删除一行
+    window.removeQPRow = function(btn) { // 挂在window上防止作用域问题
+      btn.parentElement.remove();
+    }
+
+    // 4. 保存到后端
+    async function saveQuickPhrases() {
+      const inputs = qpList.querySelectorAll('.qp-input');
+      const newList = [];
+      inputs.forEach(inp => {
+        const val = inp.value.trim();
+        if (val) newList.push(val);
+      });
+
+      try {
+        const res = await fetch('/api/quick_phrases', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(newList)
+        });
+        if (res.ok) {
+          quickPhrases = newList; // 更新本地缓存
+          toggleQPEditMode();     // 退出编辑模式
+          alert('保存成功！');
+        } else {
+          alert('保存失败');
+        }
+      } catch(e) { alert('网络错误'); }
     }
 </script>
 
