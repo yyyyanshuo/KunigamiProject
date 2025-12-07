@@ -204,15 +204,11 @@ def call_ai_to_summarize(text_content, prompt_type="short"):
     else:
         return call_gemini(messages)
 
-# --- 【新增】核心逻辑：对指定日期进行增量记忆更新 ---
+# --- 【修改版】核心逻辑：增量更新 (Reset时直接覆盖) ---
 def update_short_memory_for_date(target_date_str):
-    """
-    读取指定日期的新增消息(last_id之后)，调用AI总结，并追加到短期记忆中。
-    返回: (added_count, new_events)
-    """
     short_mem_path = os.path.join("prompts", "6_memory_short.json")
 
-    # 1. 读取现有记忆，获取 last_id
+    # 1. 读取现有记忆
     current_data = {}
     if os.path.exists(short_mem_path):
         with open(short_mem_path, "r", encoding="utf-8") as f:
@@ -220,27 +216,23 @@ def update_short_memory_for_date(target_date_str):
             except: pass
 
     day_data = current_data.get(target_date_str)
-
     existing_events = []
     last_id = 0
 
-    # 兼容处理：如果是旧格式(list)，视为 last_id=0，并准备转换为新格式
     if isinstance(day_data, list):
         existing_events = day_data
-        # 尝试去数据库找这些事件里最大的ID？太麻烦，直接设为0，
-        # 可能会导致第一次重复总结一点点旧数据，但问题不大，之后就好了。
         last_id = 0
     elif isinstance(day_data, dict):
         existing_events = day_data.get("events", [])
         last_id = day_data.get("last_id", 0)
 
-    # 2. 从数据库查询【大于 last_id】的新消息
+    # 2. 查询数据库
+    # 如果 last_id 为 0，说明要重读全天的消息
     start_time = f"{target_date_str} 00:00:00"
     end_time = f"{target_date_str} 23:59:59"
 
     conn = sqlite3.connect(DATABASE_FILE)
     cursor = conn.cursor()
-    # 关键：只查 id > last_id 的
     cursor.execute("SELECT id, timestamp, role, content FROM messages WHERE timestamp >= ? AND timestamp <= ? AND id > ?", (start_time, end_time, last_id))
     rows = cursor.fetchall()
     conn.close()
@@ -249,48 +241,59 @@ def update_short_memory_for_date(target_date_str):
         print(f"[{target_date_str}] 没有新增消息需要总结。")
         return 0, []
 
-    # 更新 max_id
+    # 记录最新的 max_id
     new_max_id = rows[-1][0]
 
     # 3. 拼接文本
     chat_log = ""
     for _, ts, role, content in rows:
         time_part = ts.split(' ')[1][:5]
-        name = "ユーザー" if role == "user" else "私" # 改成日语，配合全日语Prompt
+        name = "ユーザー" if role == "user" else "俺"
         chat_log += f"[{time_part}] {name}: {content}\n"
 
-    # 4. 调用 AI 总结 (Short模式)
+    # 4. 调用 AI 总结
     try:
         summary_text = call_ai_to_summarize(chat_log, "short")
         if not summary_text: return 0, []
 
-        # 解析 AI 返回
-        new_events = []
+        new_events_raw = []
         import re
         for line in summary_text.split('\n'):
             line = line.strip()
             if line:
                 match_time = re.search(r'\[(\d{2}:\d{2})\]', line)
                 event_time = match_time.group(1) if match_time else datetime.now().strftime("%H:%M")
-                # 这里的正则去掉前面的 [HH:MM] 和 - 符号
                 event_text = re.sub(r'\[\d{2}:\d{2}\]', '', line).strip('- ').strip()
-                new_events.append({"time": event_time, "event": event_text})
+                new_events_raw.append({"time": event_time, "event": event_text})
 
-        if not new_events: return 0, []
+        if not new_events_raw: return 0, []
 
-        # 5. 追加写入 (Append)
-        final_events = existing_events + new_events
+        # --- 【核心修改】覆盖 vs 追加 ---
 
-        # 保存为新结构： { "events": [...], "last_id": 123 }
+        all_events = []
+
+        if last_id > 0:
+            # 正常增量：追加模式
+            print(f"   -> [增量模式] 追加 {len(new_events_raw)} 条新记忆")
+            all_events = existing_events + new_events_raw
+        else:
+            # 重置模式：覆盖模式 (直接抛弃 existing_events)
+            print(f"   -> [重置模式] 全新生成 {len(new_events_raw)} 条记忆，覆盖旧数据")
+            all_events = new_events_raw
+
+        # 按时间排序 (保险起见)
+        all_events.sort(key=lambda x: x['time'])
+
+        # 保存
         current_data[target_date_str] = {
-            "events": final_events,
+            "events": all_events,
             "last_id": new_max_id
         }
 
         with open(short_mem_path, "w", encoding="utf-8") as f:
             json.dump(current_data, f, ensure_ascii=False, indent=2)
 
-        return len(new_events), new_events
+        return len(new_events_raw), new_events_raw
 
     except Exception as e:
         print(f"增量总结出错: {e}")
@@ -676,8 +679,10 @@ def snapshot_memory():
         if total_new_count > 0:
             return jsonify({
                 "status": "success",
+                # 这一行是已经拼好的提示语，直接用它最方便
                 "message": "记忆整理完成: " + "，".join(message_log),
-                "summary": [] # 前端暂时不需要具体内容，只要成功提示
+                # 【修改】把 summary 改成 count，直接传数字，别传空列表误导前端了
+                "count": total_new_count
             })
         else:
             return jsonify({"status": "no_data", "message": "暂时没有新对话需要整理"})
@@ -751,12 +756,56 @@ def save_prompt_file():
     path = os.path.join("prompts", filename)
 
     try:
+        # --- 【核心新增】如果是保存短期记忆，自动校准 last_id ---
+        if key == "short" and isinstance(new_content, dict):
+            conn = sqlite3.connect(DATABASE_FILE)
+            cursor = conn.cursor()
+
+            for date_str, day_data in new_content.items():
+                # 1. 获取用户编辑后的事件列表
+                events = []
+                if isinstance(day_data, dict):
+                    events = day_data.get("events", [])
+                elif isinstance(day_data, list):
+                    events = day_data # 兼容旧格式
+
+                # 2. 如果列表被清空了，last_id 直接重置为 0 (全量重读)
+                if not events:
+                    if isinstance(day_data, dict): day_data['last_id'] = 0
+                    else: new_content[date_str] = {"events": [], "last_id": 0}
+                    print(f"[{date_str}] 事件被清空，进度重置为 0")
+                    continue
+
+                # 3. 如果还有事件，找到【最后一条事件】的时间
+                last_event_time = events[-1].get('time', '00:00')
+
+                # 4. 去数据库查这个时间点对应的最后一条消息 ID
+                # 构造查询时间：精确到当天的这一分钟的最后一秒
+                query_ts = f"{date_str} {last_event_time}:59"
+
+                # 查找 <= 这个时间的最大 ID
+                cursor.execute("SELECT MAX(id) FROM messages WHERE timestamp <= ?", (query_ts,))
+                res = cursor.fetchone()
+
+                if res and res[0]:
+                    calibrated_id = res[0]
+                    # 更新 last_id
+                    if isinstance(day_data, dict):
+                        day_data['last_id'] = calibrated_id
+                    else:
+                        new_content[date_str] = {"events": events, "last_id": calibrated_id}
+                    print(f"[{date_str}] 智能回滚: 锚定时间 {last_event_time} -> 重置 ID 为 {calibrated_id}")
+                else:
+                    # 查不到 ID (可能时间填错了)，保险起见不改，或者设为0
+                    pass
+
+            conn.close()
+        # ----------------------------------------------------
+
         with open(path, "w", encoding="utf-8") as f:
-            # 如果是 JSON 对象，要转成字符串再存，且保证格式美观
             if filename.endswith(".json") and isinstance(new_content, (dict, list)):
                 json.dump(new_content, f, ensure_ascii=False, indent=2)
             else:
-                # 如果是文本，直接写
                 f.write(str(new_content))
         return jsonify({"status": "success"})
     except Exception as e:

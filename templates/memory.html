@@ -272,44 +272,55 @@
 
         // 2. Short 渲染 (智能显示：凌晨显示2天，白天显示1天)
         if(key === 'short') {
-            const dates = Object.keys(data).sort().reverse();
-            if(dates.length === 0) {
+            // 获取现有数据的日期列表
+            const availableDates = Object.keys(data);
+            if(availableDates.length === 0) {
                 container.innerHTML = '<div class="empty-state">暂无数据</div>';
                 return;
             }
 
-            // --- 【修正】根据当前时间判断显示几天 ---
-            const currentHour = new Date().getHours();
-            // 如果是凌晨 4 点前 (0,1,2,3)，显示最近 2 天
-            // 否则只显示最近 1 天 (今天)
-            const daysToShow = (currentHour < 4) ? 2 : 1;
+            // 计算【应该】显示的日期
+            const now = new Date();
+            const todayStr = now.toISOString().split('T')[0];
+            const yesterday = new Date(now);
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterdayStr = yesterday.toISOString().split('T')[0];
 
-            const recentDates = dates.slice(0, daysToShow);
+            // 逻辑：如果是凌晨4点前，目标日期是 [今天, 昨天]；否则只是 [今天]
+            const targetDates = [todayStr];
+            if (now.getHours() < 4) {
+                targetDates.push(yesterdayStr);
+            }
 
+            // 过滤：只显示目标日期中存在的
+            let hasContent = false;
             let html = '';
-            recentDates.forEach(dateKey => {
-                const dayData = data[dateKey];
-                const events = Array.isArray(dayData) ? dayData : (dayData.events || []);
 
-                // 没数据的日期不显示
-                if (events.length === 0) return;
+            targetDates.forEach(dateKey => {
+                if (availableDates.includes(dateKey)) {
+                    const dayData = data[dateKey];
+                    const events = Array.isArray(dayData) ? dayData : (dayData.events || []);
 
-                const todayStr = new Date().toISOString().split('T')[0];
-                const label = (dateKey === todayStr) ? '(Today)' : '';
+                    // 如果这一天虽然有Key但没事件，也不显示
+                    if (events.length === 0) return;
 
-                html += `<div class="mem-item" style="border-left: 3px solid #ffb6b9; padding-left:12px;">
-                  <div class="mem-header">📅 ${dateKey} ${label}</div>`;
+                    hasContent = true;
+                    const label = (dateKey === todayStr) ? '(Today)' : '';
 
-                events.forEach(e => {
-                    html += `<div class="time-capsule">
-                      <span class="time-tag">${e.time}</span>
-                      <span>${e.event}</span>
-                  </div>`;
-                });
-                html += `</div>`;
+                    html += `<div class="mem-item" style="border-left: 3px solid #ffb6b9; padding-left:12px;">
+                      <div class="mem-header">📅 ${dateKey} ${label}</div>`;
+
+                    events.forEach(e => {
+                        html += `<div class="time-capsule">
+                          <span class="time-tag">${e.time}</span>
+                          <span>${e.event}</span>
+                      </div>`;
+                    });
+                    html += `</div>`;
+                }
             });
 
-            container.innerHTML = html || '<div class="empty-state">暂无今日数据</div>';
+            container.innerHTML = hasContent ? html : '<div class="empty-state">暂无今日/昨日数据</div>';
             return;
         }
 
@@ -407,7 +418,14 @@
             const events = Array.isArray(dayData) ? dayData : (dayData.events || []);
 
             // 显示日期标题
-            container.innerHTML += `<div style="font-weight:bold; margin-bottom:10px; color:#ffb6b9;">编辑日期: ${targetDate}</div>`;
+            container.innerHTML += `<div style="font-weight:bold; margin-bottom:10px; color:#ffb6b9; display:flex; justify-content:space-between;">
+                <span>编辑日期: ${targetDate}</span>
+                <!-- 【新增】重置进度复选框 -->
+                <label style="font-size:12px; color:#666; display:flex; align-items:center; cursor:pointer;">
+                    <input type="checkbox" id="reset-progress-chk" style="margin-right:4px;">
+                    重置读取进度 (允许重新总结)
+                </label>
+            </div>`;
 
             // 隐藏域存储当前编辑的日期 Key
             container.dataset.dateKey = targetDate;
@@ -524,13 +542,19 @@
                 if(t && v) newEvents.push({time: t, event: v});
             });
 
-            // 获取原始结构，保留 last_id
+            // 获取原始 last_id
             const originalDayData = GLOBAL_DATA[key][dateKey] || {};
             let lastId = 0;
             if(!Array.isArray(originalDayData)) lastId = originalDayData.last_id || 0;
 
-            // 构造新的全量数据
-            newData = { ...GLOBAL_DATA[key] }; // 复制旧数据
+            // 【新增】检查复选框是否勾选
+            const resetChk = container.querySelector('#reset-progress-chk');
+            if (resetChk && resetChk.checked) {
+                lastId = 0; // 强制归零！下次就会重新扫描所有消息
+                console.log("已重置 last_id 为 0");
+            }
+
+            newData = { ...GLOBAL_DATA[key] };
             newData[dateKey] = {
                 events: newEvents,
                 last_id: lastId
