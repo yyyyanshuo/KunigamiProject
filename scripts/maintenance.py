@@ -1,6 +1,6 @@
 import sqlite3
 
-DATABASE_FILE = "chat_history.db"
+DATABASE_FILE = "chat.db"
 
 
 def delete_specific_records():

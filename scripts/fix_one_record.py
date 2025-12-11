@@ -1,6 +1,6 @@
 import sqlite3
 
-DATABASE_FILE = "chat_history.db"
+DATABASE_FILE = "chat.db"
 
 # --- 我们的手术目标 ---
 TARGET_ID = 121

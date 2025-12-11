@@ -1,16 +1,23 @@
-.env
-chat_history.db
-.idea/
+# 忽略 Python 缓存
 __pycache__/
 *.pyc
-.DS_Store
-debug_network.py
 
-# 忽略旧的示例文件
-prompt_example.md
+# 忽略环境配置
+.env
 
-# 忽略 prompts 文件夹下的所有内容...
-prompts/*
+# 忽略 IDE 配置
+.idea/
+.vscode/
 
-# ...但是！保留以下文件（白名单）
-!prompts/8_format.md
+# --- 【新增】忽略角色私有数据 ---
+# 忽略所有角色的数据库
+characters/**/*.db
+
+# 忽略所有角色的 Prompts 文件夹内容...
+characters/**/prompts/*
+
+# ...但保留格式说明文件 (白名单)
+!characters/**/prompts/8_format.md
+
+# 忽略全局配置里的私有信息 (如果有的话，暂时保留 config 结构)
+# configs/quick_phrases.json (这个通常可以上传，看您需求，建议保留)

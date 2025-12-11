@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>消息列表</title>
+    <style>
+        body {
+            font-family: "Segoe UI", "PingFang SC", sans-serif;
+            background: #f7f7f7; margin: 0; padding: 0;
+        }
+        .header {
+            background: #fff; padding: 15px 20px;
+            font-weight: bold; font-size: 18px; border-bottom: 1px solid #eee;
+            position: sticky; top: 0; z-index: 10;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+
+        .contact-list { padding-bottom: 20px; }
+
+        .contact-item {
+            display: flex; align-items: center;
+            background: #fff; padding: 12px 15px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer; transition: background 0.2s;
+            position: relative;
+        }
+        .contact-item:active { background: #f5f5f5; }
+
+        /* 置顶样式 */
+        .contact-item.pinned { background: #fdfdfd; } /* 可以稍微给个不一样的背景 */
+        .contact-item.pinned::after {
+            content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+            background-color: #ffb6b9; /* 置顶标记色 */
+        }
+
+        .avatar {
+            width: 50px; height: 50px; border-radius: 8px; margin-right: 12px;
+            object-fit: cover; flex-shrink: 0;
+            border: 1px solid #f0f0f0;
+        }
+
+        .info { flex: 1; min-width: 0; /* 防止文本溢出 */ }
+
+        .top-row { display: flex; justify-content: space-between; margin-bottom: 6px; }
+        .name { font-size: 16px; font-weight: 500; color: #333; }
+        .time { font-size: 11px; color: #bbb; }
+
+        .msg-preview {
+            font-size: 13px; color: #888;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <span>消息</span>
+    <!-- 这里以后可以放个加号，用来新建角色 -->
+    <span style="font-size:20px; color:#ffb6b9;">+</span>
+</div>
+
+<div class="contact-list" id="list">
+    <div style="text-align:center; padding:20px; color:#999;">加载中...</div>
+</div>
+
+<script>
+    async function loadContacts() {
+        try {
+            const res = await fetch('/api/contacts');
+            const data = await res.json();
+            renderList(data);
+        } catch(e) {
+            document.getElementById('list').innerHTML = '<div style="text-align:center; padding:20px;">加载失败</div>';
+        }
+    }
+
+    function renderList(contacts) {
+        const listEl = document.getElementById('list');
+        if(contacts.length === 0) {
+            listEl.innerHTML = '<div style="text-align:center; padding:40px; color:#ccc;">暂无联系人</div>';
+            return;
+        }
+
+        let html = '';
+        contacts.forEach(c => {
+            const pinnedClass = c.pinned ? 'pinned' : '';
+            // 点击跳转到 /chat/kunigami
+            html += `
+          <div class="contact-item ${pinnedClass}" onclick="window.location.href='/chat/${c.id}'">
+              <img src="${c.avatar}" class="avatar" onerror="this.src='/static/default_avatar.png'">
+              <div class="info">
+                  <div class="top-row">
+                      <span class="name">${c.remark}</span>
+                      <span class="time">${c.last_time}</span>
+                  </div>
+                  <div class="msg-preview">${c.last_msg || '暂无消息'}</div>
+              </div>
+          </div>`;
+        });
+        listEl.innerHTML = html;
+    }
+
+    // 页面加载时请求
+    loadContacts();
+
+    // 页面重新显示时也刷新(比如从聊天页退回来)
+    window.onpageshow = function(event) {
+        if (event.persisted) loadContacts();
+    };
+</script>
+
+</body>
+</html>

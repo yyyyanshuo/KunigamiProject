@@ -13,9 +13,9 @@ ROLE_MAPPING = {
     "assistant": "錬介"
 }
 
-# 数据库路径 (自动定位到上级目录的 chat_history.db)
+# 数据库路径 (自动定位到上级目录的 chat.db)
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(CURRENT_DIR, "..", "chat_history.db")
+DB_PATH = os.path.join(CURRENT_DIR, "..", "chat.db")
 
 # ===========================================
 

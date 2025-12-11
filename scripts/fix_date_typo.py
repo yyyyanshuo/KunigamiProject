@@ -1,7 +1,7 @@
 import sqlite3
 from datetime import datetime
 
-DATABASE_FILE = "../chat_history.db" # 注意，因为脚本在 scripts/ 文件夹里，所以要用 ../ 返回上一级
+DATABASE_FILE = "../characters/kunigami/chat.db"  # 注意，因为脚本在 scripts/ 文件夹里，所以要用 ../ 返回上一级
 TABLE_NAME = "messages"
 
 def fix_date_format_error():

@@ -8,7 +8,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 # 2. 获取上一级目录，也就是项目根目录 (e.g., /path/to/project)
 project_root = os.path.dirname(script_dir)
 # 3. 构造数据库文件的绝对路径
-DATABASE_FILE = os.path.join(project_root, "chat_history.db")
+DATABASE_FILE = os.path.join(project_root, "chat.db")
 
 TABLE_NAME = "messages"
 RECORD_LIMIT = 20 # 设置我们想要查看的记录数量

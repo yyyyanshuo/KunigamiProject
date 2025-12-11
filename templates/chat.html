@@ -336,7 +336,7 @@
   <!-- 左边组：退出 + 搜索 -->
   <div class="header-left-group">
     <!-- 退出按钮 -->
-    <button class="header-btn" onclick="alert('点击了退出')">
+    <button class="header-btn" onclick="window.location.href='/'">
       <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
     </button>
     <!-- 搜索按钮 (移到这里了) -->
@@ -366,7 +366,7 @@
       <svg viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
     </button>
     <!-- 详情按钮 -->
-    <button class="header-btn" onclick="window.location.href='/memory'">
+    <button class="header-btn" onclick="window.location.href='/memory/' + charId">
       <svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
     </button>
   </div>
@@ -463,6 +463,17 @@
 
 <!-- 【最终的、绝对正确的 <script> 标签】-->
 <script>
+    // --- 【新增】从 URL 获取当前角色 ID ---
+    // URL 格式: /chat/kunigami -> ID = kunigami
+    const charId = window.location.pathname.split('/').pop();
+    // 【新增】存储当前角色配置信息
+    let charConfig = {
+      name: 'Assistant',
+      remark: 'Assistant',
+      avatar: '/static/avatar_assistant.jpg' // 默认兜底
+    };
+    console.log("Current Character ID:", charId);
+
     const chatContainer = document.getElementById('chatContainer');
     const input = document.getElementById('messageInput');
     const btn = document.getElementById('sendBtn');
@@ -474,6 +485,28 @@
     let totalMessages = 0;
     let isLoading = false;
     const messagesPerPage = 20;
+
+    // --- 【新增】初始化 UI (头像、标题) ---
+    async function initUI() {
+      try {
+        const res = await fetch(`/api/${charId}/config`);
+        const data = await res.json();
+
+        if (data && !data.error) {
+          // 更新全局变量
+          charConfig = data;
+
+          // 1. 更新顶部名字 (优先显示备注)
+          const displayName = data.remark || data.name;
+          document.querySelector('.header-name').textContent = displayName;
+
+          // 2. (可选) 更新顶部状态文案，比如 "英雄 (Hero)"
+          // document.querySelector('.header-status span:last-child').textContent = '在线';
+        }
+      } catch (e) {
+        console.error("加载角色配置失败", e);
+      }
+    }
 
     function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
@@ -495,8 +528,13 @@
       // --- 3. 创建头像 ---
       const avatar = document.createElement('img');
       avatar.classList.add('avatar-img');
-      // 根据角色自动选择图片
-      avatar.src = role === 'user' ? '/static/avatar_user.jpg' : '/static/avatar_assistant.jpg';
+      // 【修改】使用动态配置的头像
+      if (role === 'user') {
+        avatar.src = '/static/avatar_user.jpg'; // 用户头像暂时固定，或者您也可以做成配置
+      } else {
+        // 使用从后端拉取的 charConfig.avatar
+        avatar.src = charConfig.avatar || '/static/avatar_assistant.jpg';
+      }
 
       // --- 4. 创建气泡栈 (Bubble Stack) ---
       const stack = document.createElement('div');
@@ -609,7 +647,7 @@
       isLoading = true;
       loadMoreBtn.textContent = '加載中...';
       try {
-        const res = await fetch(`/api/history?page=${page}&limit=${messagesPerPage}`);
+        const res = await fetch(`/api/${charId}/history?page=${page}&limit=${messagesPerPage}`);
         const data = await res.json();
         if (data.messages && data.messages.length > 0) {
           const oldScrollHeight = chatContainer.scrollHeight;
@@ -657,26 +695,44 @@
         chatContainer.scrollTop = chatContainer.scrollHeight;
 
         try {
-            const res = await fetch('/api/chat', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({message: originalText}) });
+            const res = await fetch(`/api/${charId}/chat`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({message: originalText}) });
             const data = await res.json();
 
-            if (data.replies && data.replies.length > 0) {
-                const fullReplyText = data.replies.join(' / ');
-                // 渲染 AI 消息（作为一个整体）
-                const aiMsg = { content: fullReplyText, role: 'assistant', timestamp: new Date() };
-                await sleep(1000); // 模拟思考时间
-                renderMessageGroup(aiMsg, 'append');
-                // 在 sendMessage 函数末尾
-                refreshDateSeparators();
-            } else { displayBubbleGroup([data.reply || '[无回复]'], data.reply || '[无回复]', 'assistant', new Date()); }
-        } catch (e) { displayBubbleGroup(['[连接失败，请稍后重试]'], '[连接失败，请稍后重试]', 'assistant', new Date()); }
+          if (data.replies && data.replies.length > 0) {
+            const fullReplyText = data.replies.join(' / ');
+            // 【修改】把后端传回来的 id 填进去 (data.id)
+            const aiMsg = {
+              id: data.id,  // <--- 加上这一行
+              content: fullReplyText,
+              role: 'assistant',
+              timestamp: new Date()
+            };
+            await sleep(1000);
+            renderMessageGroup(aiMsg, 'append');
+          } else { // 【修正这里】不要用 displayBubbleGroup
+              renderMessageGroup({
+                content: data.reply || '[无回复]',
+                role: 'assistant',
+                timestamp: new Date()
+              }, 'append');
+            }
+        } catch (e) { console.error(e);
+          // 【修正这里】不要用 displayBubbleGroup
+          renderMessageGroup({
+            content: '[连接失败，请稍后重试]',
+            role: 'assistant',
+            timestamp: new Date()
+          }, 'append');
+        }
         finally { btn.disabled = false; btn.textContent = "发送"; chatContainer.scrollTop = chatContainer.scrollHeight; }
     }
 
     // 2. 修改页面加载逻辑：加载完成后跳转到该 ID
     window.addEventListener('DOMContentLoaded', async () => {
       chatContainer.innerHTML = '';
-      await loadHistory(1); // 等待加载完成
+
+      // 【新增】先初始化 UI 信息 (这一步很快)
+      await initUI();
 
       // 【Fix 3】检查是否有需要跳转的消息
       const jumpId = sessionStorage.getItem('jump_to_msg_id');
@@ -685,14 +741,14 @@
         // 既然我们要跳到某条消息，就必须保证它被加载出来
         // 1. 先问后端：这条消息在第几页？
         try {
-          const checkRes = await fetch(`/api/history?limit=${messagesPerPage}&target_id=${jumpId}`);
+          const checkRes = await fetch(`/api/${charId}/history?limit=${messagesPerPage}&target_id=${jumpId}`);
           const checkData = await checkRes.json();
           const targetPage = checkData.page || 1;
 
           // 2. 一次性加载足够深的数据 (Page 1 ~ TargetPage)
           // 这样能保证目标消息及其下方的所有新消息都在
           const totalCountToLoad = targetPage * messagesPerPage;
-          const loadRes = await fetch(`/api/history?page=1&limit=${totalCountToLoad}`);
+          const loadRes = await fetch(`/api/${charId}/history?page=1&limit=${totalCountToLoad}`);
           const data = await loadRes.json();
 
           // 3. 更新全局状态
@@ -759,7 +815,7 @@
       if(!newContent) return alert("内容不能为空");
 
       try {
-        const res = await fetch(`/api/messages/${currentEditId}`, {
+        const res = await fetch(`/api/${charId}/messages/${currentEditId}`, {
           method: 'PUT',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({content: newContent})
@@ -775,7 +831,7 @@
     async function deleteMessage(id, groupElement) {
       if(!confirm("确定要删除这条消息吗？")) return;
       try {
-        const res = await fetch(`/api/messages/${id}`, { method: 'DELETE' });
+        const res = await fetch(`/api/${charId}/messages/${id}`, { method: 'DELETE' });
         if(res.ok) {
           // 删除成功，带动画移除 DOM
           groupElement.style.transition = "all 0.3s";
@@ -916,7 +972,11 @@
         return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
       });
 
-      const roleMap = { 'user': '篠原桐奈', 'assistant': '國神錬介' };
+      // --- 【修改】使用动态名字 ---
+      const roleMap = {
+        'user': '篠原桐奈', // 用户的名字暂时写死，或者您也可以从后端传过来
+        'assistant': charConfig.name // <--- 关键！使用当前角色的名字
+      };
       const weekDays = ['日', '月', '火', '水', '木', '金', '土'];
 
       let resultText = "";
@@ -984,7 +1044,7 @@
       if(!confirm("要让錬介整理一下今天的记忆吗？\n(这会消耗一些 Token 并更新后台记忆文件)")) return;
 
       try {
-        const res = await fetch('/api/memory/snapshot', { method: 'POST' });
+        const res = await fetch(`/api/${charId}/memory/snapshot`, { method: 'POST' });
         const data = await res.json();
         if(data.status === 'success') {
           // 【修改】直接显示后端返回的 message，它包含了具体的新增条数信息
@@ -1023,7 +1083,7 @@
       if(!kw) { searchResults.innerHTML = ''; return; }
 
       searchTimer = setTimeout(async () => {
-        const res = await fetch('/api/search', {
+        const res = await fetch(`/api/${charId}/search`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({keyword: kw})
@@ -1073,7 +1133,7 @@
 
         // 步骤 A: 询问后端这条消息在第几页 (使用之前的逻辑，limit=20)
         // 这里我们只是为了获取 page 参数，不需要真正的 messages
-        const checkRes = await fetch(`/api/history?limit=${messagesPerPage}&target_id=${id}`);
+        const checkRes = await fetch(`/api/${charId}/history?limit=${messagesPerPage}&target_id=${id}`);
         const checkData = await checkRes.json();
 
         const targetPage = checkData.page;
@@ -1084,7 +1144,7 @@
         const totalCountToLoad = targetPage * messagesPerPage;
 
         // 调用加载 (直接请求第一页，但 limit 巨大)
-        const loadRes = await fetch(`/api/history?page=1&limit=${totalCountToLoad}`);
+        const loadRes = await fetch(`/api/${charId}/history?page=1&limit=${totalCountToLoad}`);
         const data = await loadRes.json();
 
         // 更新全局状态 (假装我们只在第1页，实际上是一次性加载了一大坨)

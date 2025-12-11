@@ -2,7 +2,7 @@ import sqlite3
 import re
 from datetime import datetime, timedelta
 
-DATABASE_FILE = "chat_history.db"
+DATABASE_FILE = "chat.db"
 
 def clean_and_correct_database():
     print("--- 数据库高级清洁程序启动 (v2.1) ---")

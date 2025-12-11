@@ -1,6 +1,6 @@
 import sqlite3
 
-DATABASE_FILE = "chat_history.db"
+DATABASE_FILE = "chat.db"
 
 # --- 我们的手术任务清单 ---
 # 格式: (要修改的记录ID, "新的正确时间戳")

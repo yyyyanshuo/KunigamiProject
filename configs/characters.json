@@ -1,0 +1,26 @@
+{
+  "kunigami": {
+    "name": "國神錬介",
+    "remark": "私のヒーロー",
+    "avatar": "/static/avatar_assistant.jpg",
+    "pinned": true
+  },
+  "isagi": {
+    "name": "潔世一",
+    "remark": "",
+    "avatar": "/static/default_avatar.png",
+    "pinned": false
+  },
+  "chigiri": {
+    "name": "千切豹馬",
+    "remark": "",
+    "avatar": "/static/default_avatar.png",
+    "pinned": false
+  },
+  "rin": {
+    "name": "糸師凛",
+    "remark": "",
+    "avatar": "/static/default_avatar.png",
+    "pinned": false
+  }
+}
