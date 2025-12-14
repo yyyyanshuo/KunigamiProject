@@ -3,6 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- PWA 配置 -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#fff3f8">
+    <!-- iOS 专用配置 -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="/static/logo.png">
+
     <title>消息列表</title>
     <style>
         body {
@@ -52,19 +61,53 @@
         }
     </style>
 </head>
+
+<!-- 在 </body> 之前加入这一行 -->
+{% include 'tabbar.html' %}
 <body>
 
 <div class="header">
     <span>消息</span>
     <!-- 这里以后可以放个加号，用来新建角色 -->
-    <span style="font-size:20px; color:#ffb6b9;">+</span>
+    <!-- 给 + 号加上 onclick="openAddModal()" -->
+    <span style="font-size:24px; color:#ffb6b9; cursor:pointer;" onclick="openAddModal()">+</span>
 </div>
 
 <div class="contact-list" id="list">
     <div style="text-align:center; padding:20px; color:#999;">加载中...</div>
 </div>
 
+<!-- 【新增】添加角色弹窗 -->
+<div id="addCharModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
+    <div style="background:#fff; padding:25px; border-radius:12px; width:80%; max-width:320px; box-shadow:0 4px 20px rgba(0,0,0,0.2);">
+        <h3 style="margin:0 0 15px 0; color:#333; text-align:center;">新建联系人</h3>
+
+        <div style="margin-bottom:15px;">
+            <label style="display:block; font-size:12px; color:#888; margin-bottom:5px;">角色 ID (英文/数字, 不可改)</label>
+            <input type="text" id="new-char-id" placeholder="例如: bachira" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; box-sizing:border-box;">
+        </div>
+
+        <div style="margin-bottom:20px;">
+            <label style="display:block; font-size:12px; color:#888; margin-bottom:5px;">角色姓名</label>
+            <input type="text" id="new-char-name" placeholder="例如: 蜂乐回" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; box-sizing:border-box;">
+        </div>
+
+        <div style="display:flex; justify-content:space-between; gap:10px;">
+            <button onclick="closeAddModal()" style="flex:1; padding:10px; border:none; background:#f5f5f5; color:#666; border-radius:8px; cursor:pointer;">取消</button>
+            <button onclick="submitNewChar()" style="flex:1; padding:10px; border:none; background:#ffb6b9; color:#fff; border-radius:8px; cursor:pointer; font-weight:bold;">创建</button>
+        </div>
+    </div>
+</div>
+
 <script>
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js')
+                .then(reg => console.log('SW registered!', reg))
+                .catch(err => console.log('SW failed', err));
+        });
+    }
+
     async function loadContacts() {
         try {
             const res = await fetch('/api/contacts');
@@ -108,6 +151,52 @@
     window.onpageshow = function(event) {
         if (event.persisted) loadContacts();
     };
+
+    // --- 添加联系人逻辑 ---
+    const addModal = document.getElementById('addCharModal');
+    const inputId = document.getElementById('new-char-id');
+    const inputName = document.getElementById('new-char-name');
+
+    function openAddModal() {
+        inputId.value = '';
+        inputName.value = '';
+        addModal.style.display = 'flex';
+        inputId.focus();
+    }
+
+    function closeAddModal() {
+        addModal.style.display = 'none';
+    }
+
+    async function submitNewChar() {
+        const id = inputId.value.trim();
+        const name = inputName.value.trim();
+
+        if (!id || !name) return alert("请填写完整信息");
+
+        // 简单的前端校验
+        if (!/^[a-zA-Z0-9_]+$/.test(id)) return alert("ID 只能包含字母、数字或下划线");
+
+        try {
+            const res = await fetch('/api/characters/add', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ id: id, name: name })
+            });
+
+            const result = await res.json();
+
+            if (res.ok) {
+                alert("创建成功！");
+                closeAddModal();
+                loadContacts(); // 刷新列表
+            } else {
+                alert("创建失败: " + result.error);
+            }
+        } catch (e) {
+            alert("网络错误");
+        }
+    }
 </script>
 
 </body>

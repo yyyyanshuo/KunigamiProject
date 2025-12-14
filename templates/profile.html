@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>个人中心</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#fff3f8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <style>
+    body {
+      font-family: "Segoe UI", "PingFang SC", sans-serif;
+      background: #f7f7f7; margin: 0; padding: 0 0 80px 0;
+    }
+
+    /* 头部样式 */
+    .header {
+      background: #fff; padding: 40px 20px 20px;
+      text-align: center; border-bottom: 1px solid #eee;
+    }
+    .avatar-large {
+      width: 80px; height: 80px; border-radius: 50%;
+      background: #eee; margin: 0 auto 10px;
+      border: 3px solid #fff; box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    }
+    .username { font-size: 18px; font-weight: bold; color: #333; }
+
+    /* 模块通用样式 */
+    .section-container { margin: 20px 0; }
+
+    .section-header {
+      padding: 0 20px 10px; display: flex; justify-content: space-between; align-items: center;
+    }
+    .section-title { font-size: 13px; color: #888; font-weight: bold; }
+
+    .btn-edit-toggle {
+      color: #2196f3; font-size: 13px; background: none; border: none;
+      cursor: pointer; font-weight: bold; padding: 5px;
+    }
+
+    .config-card {
+      background: #fff; border-top: 1px solid #eee; border-bottom: 1px solid #eee;
+      padding: 15px 20px; position: relative;
+    }
+
+    /* --- 两种模式的样式 --- */
+
+    /* 1. 查看模式 (View Mode) */
+    .view-box {
+      font-size: 14px; line-height: 1.6; color: #444;
+      white-space: pre-wrap; /* 保留换行 */
+      min-height: 20px;
+    }
+
+    /* 2. 编辑模式 (Edit Mode) */
+    .edit-box { display: none; } /* 默认隐藏 */
+
+    .editor-area {
+      width: 100%; min-height: 150px; padding: 10px;
+      border: 1px solid #ddd; border-radius: 8px; outline: none;
+      font-size: 14px; line-height: 1.6; font-family: monospace;
+      resize: vertical; box-sizing: border-box; color: #333; background: #fafafa;
+    }
+
+    .action-bar {
+      margin-top: 10px; text-align: right; display: flex; gap: 10px; justify-content: flex-end;
+    }
+
+    .btn {
+      padding: 6px 16px; border-radius: 20px; font-size: 12px; cursor: pointer; font-weight: bold; border: none;
+    }
+    .btn-cancel { background: #f5f5f5; color: #666; }
+    .btn-save { background: #ffb6b9; color: #fff; }
+
+    /* --- 状态切换类 --- */
+    .editing .view-box { display: none; }
+    .editing .edit-box { display: block; }
+    .editing .btn-edit-toggle { display: none; } /* 编辑时隐藏右上角编辑按钮 */
+
+    .empty-tip { color: #ccc; font-style: italic; }
+
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <img src="/static/avatar_user.jpg" class="avatar-large">
+  <div class="username">篠原桐奈</div>
+</div>
+
+<!-- 模块 1: 用户设定 -->
+<div class="section-container" id="container-user">
+  <div class="section-header">
+    <div class="section-title">👤 全局用户设定 (Global User Persona)</div>
+    <button class="btn-edit-toggle" onclick="enterEdit('user')">编辑 / Edit</button>
+  </div>
+
+  <div class="config-card">
+    <!-- 查看模式 -->
+    <div class="view-box" id="view-user"><span class="empty-tip">加载中...</span></div>
+
+    <!-- 编辑模式 -->
+    <div class="edit-box">
+      <textarea id="input-user" class="editor-area"></textarea>
+      <div class="action-bar">
+        <button class="btn btn-cancel" onclick="cancelEdit('user')">取消</button>
+        <button class="btn btn-save" onclick="saveConfig('user')">保存设定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 模块 2: 系统规则 -->
+<div class="section-container" id="container-format">
+  <div class="section-header">
+    <div class="section-title">⚖️ 全局系统规则 (Global System Rules)</div>
+    <button class="btn-edit-toggle" onclick="enterEdit('format')">编辑 / Edit</button>
+  </div>
+
+  <div class="config-card">
+    <!-- 查看模式 -->
+    <div class="view-box" id="view-format"><span class="empty-tip">加载中...</span></div>
+
+    <!-- 编辑模式 -->
+    <div class="edit-box">
+      <textarea id="input-format" class="editor-area"></textarea>
+      <div class="action-bar">
+        <button class="btn btn-cancel" onclick="cancelEdit('format')">取消</button>
+        <button class="btn btn-save" onclick="saveConfig('format')">保存规则</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 引入底部导航栏 -->
+{% include 'tabbar.html' %}
+
+<script>
+  // 缓存数据，用于取消编辑时恢复
+  let cacheData = {
+    user: '',
+    format: ''
+  };
+
+  // 1. 加载配置
+  async function loadConfigs() {
+    try {
+      const res = await fetch('/api/global_config');
+      const data = await res.json();
+
+      // 更新缓存
+      cacheData.user = data.user_persona || '';
+      cacheData.format = data.system_format || '';
+
+      // 渲染页面
+      renderUI('user');
+      renderUI('format');
+
+    } catch(e) {
+      alert('配置加载失败');
+    }
+  }
+
+  // 2. 渲染 UI (把缓存数据显示出来)
+  function renderUI(type) {
+    const content = cacheData[type];
+    // 更新查看框
+    const viewEl = document.getElementById(`view-${type}`);
+    viewEl.textContent = content || '(暂无内容)';
+    if(!content) viewEl.classList.add('empty-tip');
+    else viewEl.classList.remove('empty-tip');
+
+    // 更新输入框 (保持同步)
+    document.getElementById(`input-${type}`).value = content;
+  }
+
+  // 3. 进入编辑模式
+  function enterEdit(type) {
+    document.getElementById(`container-${type}`).classList.add('editing');
+    // 聚焦输入框
+    document.getElementById(`input-${type}`).focus();
+  }
+
+  // 4. 取消编辑 (还原数据)
+  function cancelEdit(type) {
+    document.getElementById(`container-${type}`).classList.remove('editing');
+    // 重置输入框内容为缓存内容
+    document.getElementById(`input-${type}`).value = cacheData[type];
+  }
+
+  // 5. 保存配置
+  async function saveConfig(type) {
+    const inputEl = document.getElementById(`input-${type}`);
+    const content = inputEl.value;
+    const btn = document.querySelector(`#container-${type} .btn-save`);
+
+    // 映射后端 Key
+    const apiKey = (type === 'user') ? 'user_persona' : 'system_format';
+
+    const originalText = btn.textContent;
+    btn.textContent = '保存中...';
+    btn.disabled = true;
+
+    try {
+      const res = await fetch('/api/save_global_config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ key: apiKey, content: content })
+      });
+      const result = await res.json();
+
+      if(result.status === 'success') {
+        // 更新缓存
+        cacheData[type] = content;
+        // 重新渲染视图
+        renderUI(type);
+        // 退出编辑模式
+        document.getElementById(`container-${type}`).classList.remove('editing');
+      } else {
+        alert('保存失败: ' + result.error);
+      }
+    } catch(e) {
+      alert('网络错误');
+    } finally {
+      btn.textContent = originalText;
+      btn.disabled = false;
+    }
+  }
+
+  // 初始化
+  loadConfigs();
+</script>
+
+</body>
+</html>

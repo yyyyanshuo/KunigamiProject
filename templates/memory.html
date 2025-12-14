@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <html lang="zh">
 <head>
+    <!-- PWA 配置 -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#fff3f8">
+    <!-- iOS 专用配置 -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="/static/logo.png">
+
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>记忆核心 | Memory Core</title>
@@ -175,6 +183,61 @@
         <h1>記憶の保管庫 (Memory Archive)</h1>
     </div>
 
+    <!-- 【新增】角色档案编辑模块 -->
+    <div class="section-title">🎭 角色档案 (Character Profile)</div>
+
+    <!-- 【修正版】角色档案模块 -->
+    <div class="module" id="module-meta">
+        <!-- 【修改点】去掉了 open 属性，默认收起 -->
+        <details>
+            <summary>基本信息 (Metadata)</summary>
+
+            <!-- 1. 查看模式 (View Mode) -->
+            <div class="view-mode" id="meta-view-mode" style="padding: 20px; text-align: center;">
+                <div style="position: relative; display: inline-block;">
+                    <img id="view-avatar" src="" style="width:100px; height:100px; border-radius:15px; object-fit:cover; border: 3px solid #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                </div>
+                <div id="view-remark" style="font-size:18px; font-weight:bold; margin-top:10px; color:#333;">(加载中...)</div>
+                <div style="font-size:12px; color:#ccc; margin-top:5px;">ID: <span id="view-id"></span></div>
+
+                <div style="margin-top: 15px;">
+                    <!-- 点击进入编辑模式 -->
+                    <button class="btn btn-edit" onclick="toggleMetaEdit(true)">编辑资料 / Edit Profile</button>
+                </div>
+            </div>
+
+            <!-- 2. 编辑模式 (Edit Mode) - 默认隐藏 -->
+            <div class="edit-mode" id="meta-edit-mode" style="padding: 20px; text-align: center; display: none; background: #fffcfc;">
+
+                <!-- 头像上传 -->
+                <div style="margin-bottom: 20px; position: relative; display: inline-block;">
+                    <div style="font-size:12px; color:#ffb6b9; margin-bottom:8px; font-weight:bold;">点击更换头像 / Tap to Upload</div>
+                    <img id="edit-avatar-preview" src=""
+                         onclick="document.getElementById('avatar-upload-input').click()"
+                         style="width:100px; height:100px; border-radius:15px; object-fit:cover;
+                      border: 3px solid #ffb6b9; box-shadow: 0 4px 12px rgba(0,0,0,0.1); cursor: pointer;">
+                    <input type="file" id="avatar-upload-input" accept="image/*" style="display: none;" onchange="uploadAvatar(this)">
+                </div>
+
+                <!-- 备注名输入 -->
+                <div style="margin-bottom:15px; text-align: left; max-width: 300px; margin: 0 auto;">
+                    <div style="font-size:12px; font-weight:bold; color:#888; margin-bottom:4px;">备注名 / Remark Name</div>
+                    <input type="text" id="edit-remark-input" class="input-full" style="margin:0; text-align:center; font-size:16px; font-weight:bold;">
+                </div>
+
+                <!-- 操作按钮 -->
+                <div class="action-bar" style="justify-content: center; background: transparent; border: none; padding-top: 10px;">
+                    <!-- 【关键修改】加上 display: inline-block; 强制显示按钮 -->
+                    <button class="btn btn-cancel" onclick="toggleMetaEdit(false)" style="margin-right: 10px; display: inline-block;">取消 / Cancel</button>
+                    <button class="btn btn-save" onclick="saveMetaAndExit()" style="display: inline-block;">保存 / Save</button>
+                </div> 填写的内容为：
+                1. 角色 ID
+                2. 角色姓名
+            </div>
+
+        </details>
+    </div>
+
     <!-- ================= 动态记忆区域 ================= -->
     <div class="section-title">🧠 动态记忆 (Dynamic Memory)</div>
 
@@ -198,9 +261,6 @@
 
     <!-- 6. Markdown 文本类 -->
     <div id="module-base" class="module" data-type="base"></div>
-    <div id="module-user" class="module" data-type="user"></div>
-    <div id="module-format" class="module" data-type="format"></div>
-
 </div>
 
 <!-- 模板：模块外壳 -->
@@ -221,7 +281,49 @@
     </details>
 </template>
 
+<!-- 【新增】AI生成 - 输入弹窗 -->
+<div id="genInputModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:2000; align-items:center; justify-content:center;">
+    <div style="background:#fff; padding:20px; border-radius:12px; width:80%; max-width:300px;">
+        <h3 style="margin-top:0; color:#444;">AI 自动撰写人设</h3>
+        <div style="margin-bottom:10px;">
+            <label style="font-size:12px; color:#888;">角色名 (例如: 糸師 凛)</label>
+            <input type="text" id="gen-char-name" class="input-full" style="margin-top:4px;">
+        </div>
+        <div style="margin-bottom:20px;">
+            <label style="font-size:12px; color:#888;">作品/IP名 (例如: Blue Lock)</label>
+            <input type="text" id="gen-source-ip" class="input-full" style="margin-top:4px;">
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:10px;">
+            <!-- 【关键修改】加上 style="display: inline-block;" -->
+            <button class="btn btn-cancel" onclick="document.getElementById('genInputModal').style.display='none'" style="display: inline-block;">取消</button>
+            <button class="btn btn-save" onclick="submitGeneration()" style="display: inline-block;">开始生成</button>
+        </div>
+    </div>
+</div>
+
+<!-- 【新增】AI生成 - 预览确认弹窗 -->
+<div id="genPreviewModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:2100; align-items:center; justify-content:center;">
+    <div style="background:#fff; padding:20px; border-radius:12px; width:90%; max-width:600px; height:80vh; display:flex; flex-direction:column;">
+        <h3 style="margin-top:0; color:#444;">确认生成内容</h3>
+        <p style="font-size:12px; color:#888; margin-bottom:10px;">请检查并编辑生成的人设，点击“应用”将覆盖当前编辑框。</p>
+        <textarea id="gen-preview-text" style="flex:1; width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; resize:none; font-family:monospace; line-height:1.5; box-sizing:border-box;"></textarea>
+        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:15px;">
+            <!-- 【关键修改】加上 style="display: inline-block;" -->
+            <button class="btn btn-cancel" onclick="document.getElementById('genPreviewModal').style.display='none'" style="display: inline-block;">放弃</button>
+            <button class="btn btn-save" onclick="applyGeneratedPersona()" style="display: inline-block;">应用 (覆盖)</button>
+        </div>
+    </div>
+</div>
+
 <script>
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js')
+                .then(reg => console.log('SW registered!', reg))
+                .catch(err => console.log('SW failed', err));
+        });
+    }
+
     const charId = window.location.pathname.split('/').pop();
 
     // 全局数据缓存 (存储完整的原始数据，确保保存时不丢失未显示的数据)
@@ -234,9 +336,134 @@
         'schedule': { title: '近期日程 (Schedule)', method: 'renderKV' },
         'relation': { title: '关系图谱 (Relationship)', method: 'renderRelation' },
         'base': { title: '角色人设 (Base Persona)', method: 'renderMD' },
-        'user': { title: '用户档案 (User Persona)', method: 'renderMD' },
-        'format': { title: '格式规则 (System Rules)', method: 'renderMD' }
     };
+
+    // --- 【逻辑确认】切换编辑状态 ---
+    function toggleMetaEdit(isEditing) {
+        const viewMode = document.getElementById('meta-view-mode');
+        const editMode = document.getElementById('meta-edit-mode');
+
+        if (isEditing) {
+            // 进入编辑：隐藏查看，显示编辑
+            viewMode.style.display = 'none';
+            editMode.style.display = 'block';
+
+            // 同步数据到输入框
+            const currentRemark = document.getElementById('view-remark').textContent;
+            // 如果显示的是“(加载中...)”，就不要填进去，填空字符串
+            document.getElementById('edit-remark-input').value = (currentRemark === '(加载中...)') ? '' : currentRemark;
+            document.getElementById('edit-avatar-preview').src = document.getElementById('view-avatar').src;
+        } else {
+            // 退出编辑：显示查看，隐藏编辑
+            viewMode.style.display = 'block';
+            editMode.style.display = 'none';
+        }
+    }
+
+    // --- 【修正版】加载角色元数据 ---
+    async function loadCharMeta() {
+        try {
+            // 加个时间戳防止缓存，解决“刷新后不见了”的问题
+            const res = await fetch(`/api/${charId}/config?t=${new Date().getTime()}`);
+            const data = await res.json();
+
+            if(data && !data.error) {
+                const avatarUrl = data.avatar || '/static/default_avatar.png';
+                const remarkText = data.remark || data.name || 'Unknown';
+
+                // 1. 填充【查看模式】的数据
+                document.getElementById('view-avatar').src = avatarUrl;
+                document.getElementById('view-remark').textContent = remarkText;
+                document.getElementById('view-id').textContent = charId;
+
+                // 2. 填充【编辑模式】的数据 (作为初始值)
+                document.getElementById('edit-avatar-preview').src = avatarUrl;
+                document.getElementById('edit-remark-input').value = remarkText;
+            }
+        } catch(e) {
+            console.error("加载角色元数据失败", e);
+        }
+    }
+
+    // --- 【修改版】保存并退出 ---
+    async function saveMetaAndExit() {
+        const newRemark = document.getElementById('edit-remark-input').value.trim();
+        // 注意：头像在 uploadAvatar 时已经上传并更新了配置文件，这里主要保存备注名
+        // 但为了逻辑严谨，我们还是把当前的头像路径（虽然这里前端拿不到最新路径字符串，除非存全局变量，但通常不需要）
+        // 这里的逻辑是：只更新备注名。头像由 uploadAvatar 独立处理。
+
+        const btn = document.querySelector('#module-meta .btn-save');
+        btn.textContent = '保存中...';
+        btn.disabled = true;
+
+        try {
+            const res = await fetch(`/api/${charId}/update_meta`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    remark: newRemark
+                    // avatar: null // 不传 avatar，后端就不会覆盖掉刚才上传的新头像
+                })
+            });
+            const result = await res.json();
+            if(result.status === 'success') {
+                // 保存成功后，手动更新前端显示，不刷新页面
+                document.getElementById('view-remark').textContent = newRemark;
+                // 退出编辑模式
+                toggleMetaEdit(false);
+            } else {
+                alert('更新失败: ' + result.error);
+            }
+        } catch(e) {
+            alert('网络错误');
+        } finally {
+            btn.textContent = '保存 / Save';
+            btn.disabled = false;
+        }
+    }
+
+    // --- 【保持】上传头像逻辑 (微调) ---
+    async function uploadAvatar(inputElement) {
+        const file = inputElement.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            document.getElementById('edit-avatar-preview').src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const imgEl = document.getElementById('edit-avatar-preview');
+            imgEl.style.opacity = '0.5';
+
+            const res = await fetch(`/api/${charId}/upload_avatar`, {
+                method: 'POST',
+                body: formData
+            });
+            const result = await res.json();
+
+            if (result.status === 'success') {
+                // 上传成功后，立刻更新【查看模式】的头像，这样点保存退出后看到的是新的
+                document.getElementById('view-avatar').src = result.url;
+                imgEl.src = result.url;
+                imgEl.style.opacity = '1';
+                // alert('头像已上传'); // 可以去掉弹窗，体验更流畅
+            } else {
+                alert('上传失败: ' + result.error);
+                imgEl.style.opacity = '1';
+            }
+        } catch (e) {
+            alert('网络错误');
+            document.getElementById('edit-avatar-preview').style.opacity = '1';
+        }
+    }
+
+    // --- 初始化部分 ---
+    loadCharMeta(); // <--- 【关键】页面加载时执行这个
 
     // 初始化
     fetch(`/api/${charId}/prompts_data`)
@@ -337,22 +564,28 @@
             return;
         }
 
-        // --- 【新增】Schedule 渲染 (只显示今天及以后) ---
+        // --- Schedule 渲染 (只显示未来 7 天) ---
         if(key === 'schedule') {
-            const today = new Date().toISOString().split('T')[0]; // 获取今天 YYYY-MM-DD
-            // 日期升序排列 (离今天最近的在最上面)
-            const dates = Object.keys(data).sort();
+            // 计算今天和7天后的日期字符串
+            const now = new Date();
+            const todayStr = now.toISOString().split('T')[0];
 
+            const limitDate = new Date(now);
+            limitDate.setDate(now.getDate() + 7);
+            const limitStr = limitDate.toISOString().split('T')[0];
+
+            const dates = Object.keys(data).sort();
             let html = '';
-            let count = 0;
+
             dates.forEach(d => {
-                // 核心过滤：只有日期 >= 今天才显示
-                if (d >= today) {
+                // 【修改】只显示范围内的数据
+                if (d >= todayStr && d <= limitStr) {
                     html += `<div class="mem-item"><div class="mem-header">📌 ${d}</div><div class="mem-text">${data[d]}</div></div>`;
-                    count++;
                 }
             });
-            container.innerHTML = html || '<div class="empty-state">近期无日程</div>';
+
+            // 如果没有数据，或者数据都在范围外
+            container.innerHTML = html || '<div class="empty-state">未来7天暂无日程</div>';
             return;
         }
 
@@ -364,6 +597,7 @@
                 html += `<div class="mem-item"><div class="mem-header">📌 ${k}</div><div class="mem-text">${data[k]}</div></div>`;
             });
             container.innerHTML = html;
+
             return;
         }
 
@@ -407,7 +641,13 @@
 
         // 1. Markdown 编辑器
         if(CONFIG[key].method === 'renderMD') {
-            container.innerHTML = `<textarea class="md-editor">${data || ''}</textarea>`;
+            let extraHtml = '';
+            // 【新增】只在角色人设(base)模块显示 AI生成按钮
+            if (key === 'base') {
+                extraHtml = `<button class="btn" style="background:#e1bee7; color:#4a148c; margin-bottom:10px; width:100%;" onclick="openGenModal()">✨ AI 自动编写人设</button>`;
+            }
+
+            container.innerHTML = `${extraHtml}<textarea class="md-editor">${data || ''}</textarea>`;
             return;
         }
 
@@ -450,8 +690,35 @@
 
         // 3. 通用 KV 编辑器 (Medium, Long, Schedule)
         if(CONFIG[key].method === 'renderKV') {
-            // 这里的策略：虽然 view 只显示7天，但 edit 应该允许编辑所有，或者至少显示所有
-            // 为了防止数据丢失，我们列出所有 Key
+            // 容错处理
+            if (typeof data !== 'object' || data === null) {
+                container.innerHTML = `<div style="color:red;font-size:12px;margin-bottom:5px;">⚠️ 数据格式错误或为空，请直接粘贴 JSON 修复：</div>
+                                     <textarea class="md-editor">${data || ''}</textarea>`;
+                return;
+            }
+
+            // === 【新增】如果是 Schedule，插入复制工具栏 ===
+            if (key === 'schedule') {
+                const copyTool = document.createElement('div');
+                copyTool.style.cssText = "background:#f0f7ff; padding:10px; border-radius:8px; margin-bottom:15px; border:1px solid #cce5ff;";
+                copyTool.innerHTML = `
+                  <div style="font-size:12px; color:#1565c0; font-weight:bold; margin-bottom:5px;">📥 从他人复制日程 (覆盖当前)</div>
+                  <div style="display:flex; gap:5px;">
+                      <select id="schedule-source-select" style="flex:1; padding:6px; border-radius:4px; border:1px solid #ddd;">
+                          <option>正在加载...</option>
+                      </select>
+                      <button class="btn" style="background:#1565c0; color:white;" onclick="copyScheduleFrom()">复制</button>
+                  </div>
+              `;
+                container.appendChild(copyTool);
+
+                // 【关键】立即调用加载函数，并且加个延时确保元素已渲染
+                setTimeout(() => {
+                    loadContactsForSelect();
+                }, 50);
+            }
+            // ========================================================
+
             const sortedKeys = Object.keys(data).sort().reverse();
             const listDiv = document.createElement('div');
             sortedKeys.forEach(k => {
@@ -464,7 +731,8 @@
             });
             container.appendChild(listDiv);
             container.innerHTML += `<button class="btn-add" onclick="addKVRow(this)">+ 添加条目</button>`;
-            return;
+
+            return; // <--- return 必须在最后！
         }
 
         // 4. Relation 编辑器
@@ -612,6 +880,147 @@
         } catch(e) {
             alert('网络错误');
             btn.textContent = '保存 / Save';
+        }
+    }
+
+    // --- 获取联系人列表 (增强版) ---
+    async function loadContactsForSelect() {
+        console.log("正在加载联系人列表..."); // Debug日志
+
+        const select = document.getElementById('schedule-source-select');
+        if (!select) {
+            console.error("错误：找不到 select 元素！");
+            return;
+        }
+
+        try {
+            // 请求后端 API
+            const res = await fetch('/api/contacts');
+            if (!res.ok) {
+                throw new Error(`API 错误: ${res.status}`);
+            }
+
+            const contacts = await res.json();
+            console.log("获取到的联系人:", contacts); // Debug日志
+
+            let html = '<option value="">-- 选择角色 --</option>';
+            let count = 0;
+
+            contacts.forEach(c => {
+                // 排除自己 (charId 是全局变量)
+                if (c.id !== charId) {
+                    html += `<option value="${c.id}">${c.remark || c.name}</option>`;
+                    count++;
+                }
+            });
+
+            if (count === 0) {
+                html = '<option value="">没有其他角色可复制</option>';
+            }
+
+            select.innerHTML = html;
+
+        } catch(e) {
+            console.error("加载联系人失败", e);
+            select.innerHTML = '<option>加载失败，请重试</option>';
+        }
+    }
+
+    // --- 执行复制日程 ---
+    async function copyScheduleFrom() {
+        const select = document.getElementById('schedule-source-select');
+        const sourceId = select.value;
+        if (!sourceId) return alert("请先选择一个角色！");
+
+        if (!confirm("⚠️ 警告：这将完全覆盖当前的日程文件！\n确定要从该角色复制吗？")) return;
+
+        const btn = event.target;
+        btn.textContent = "...";
+        btn.disabled = true;
+
+        try {
+            const res = await fetch(`/api/${charId}/copy_schedule`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ source_id: sourceId })
+            });
+            const result = await res.json();
+
+            if (result.status === 'success') {
+                alert("复制成功！页面将刷新。");
+                // 更新全局缓存并刷新编辑界面
+                GLOBAL_DATA['schedule'] = result.data;
+                // 重新构建编辑器以显示新数据
+                const container = document.querySelector('#module-schedule .edit-mode');
+                buildEditor('schedule', container);
+            } else {
+                alert("复制失败: " + result.error);
+            }
+        } catch(e) {
+            alert("网络错误");
+        } finally {
+            btn.textContent = "复制";
+            btn.disabled = false;
+        }
+    }
+
+    // --- AI 生成人设逻辑 ---
+
+    function openGenModal() {
+        // 自动填入当前角色配置里的名字，方便用户
+        // 这里假设 charConfig 全局变量还在，如果不在也没关系，空着就行
+        // document.getElementById('gen-char-name').value = ...
+        document.getElementById('genInputModal').style.display = 'flex';
+    }
+
+    async function submitGeneration() {
+        const name = document.getElementById('gen-char-name').value.trim();
+        const ip = document.getElementById('gen-source-ip').value.trim();
+        if(!name || !ip) return alert("请填写完整！");
+
+        const btn = event.target;
+        const originalText = btn.textContent;
+        btn.textContent = "生成中(约15秒)...";
+        btn.disabled = true;
+
+        try {
+            const res = await fetch('/api/generate_persona', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ char_name: name, source_ip: ip })
+            });
+            const result = await res.json();
+
+            if(result.status === 'success') {
+                // 关闭输入框，打开预览框
+                document.getElementById('genInputModal').style.display = 'none';
+                document.getElementById('gen-preview-text').value = result.content;
+                document.getElementById('genPreviewModal').style.display = 'flex';
+            } else {
+                alert("生成失败: " + result.error);
+            }
+        } catch(e) {
+            alert("网络错误");
+        } finally {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    }
+
+    function applyGeneratedPersona() {
+        const content = document.getElementById('gen-preview-text').value;
+        if(!content) return;
+
+        // 1. 把内容填入主编辑器的文本框
+        // 我们需要找到当前展开的 base 模块的 textarea
+        const editor = document.querySelector('#module-base .md-editor');
+        if(editor) {
+            editor.value = content;
+            // 2. 关闭弹窗
+            document.getElementById('genPreviewModal').style.display = 'none';
+            alert("已填入编辑器！\n请检查无误后，点击下方的「保存」按钮写入文件。");
+        } else {
+            alert("找不到编辑器实例，请刷新重试");
         }
     }
 

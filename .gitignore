@@ -21,3 +21,12 @@ characters/**/prompts/*
 
 # 忽略全局配置里的私有信息 (如果有的话，暂时保留 config 结构)
 # configs/quick_phrases.json (这个通常可以上传，看您需求，建议保留)
+
+# 忽略根目录的旧数据库
+chat_history.db
+
+# 忽略调试脚本
+debug_network.py
+
+# 忽略所有文件夹里的数据库
+*.db

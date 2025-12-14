@@ -1,333 +1,383 @@
 <!DOCTYPE html>
 <html lang="zh">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>桐奈 ✿ Chat</title>
-<!-- 这是在 chat.html 的 <head> 标签内 -->
-<style>
-  body {
-    font-family: "Segoe UI", "PingFang SC", "Helvetica Neue", sans-serif;
-    background: linear-gradient(135deg, #fff3f8 0%, #ffe9e1 100%);
-    margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh;
-  }
+  <!-- PWA 配置 -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#fff3f8">
+  <!-- iOS 专用配置 -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="/static/logo.png">
 
-  /* --- Header 布局修改 --- */
-  .chat-header {
-    position: relative;
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 16px;
-    background-color: rgba(255, 255, 255, 0.85);
-    backdrop-filter: blur(10px);
-    border-bottom: 1px solid #ffe5e8;
-    z-index: 100; flex-shrink: 0;
-  }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
+  <title>桐奈 ✿ Chat</title>
+  <!-- 这是在 chat.html 的 <head> 标签内 -->
+  <style>
+    /* --- 1. 锁死根元素高度 --- */
+    html {
+      height: 100%; /* 必须是 100% */
+      overflow: hidden; /* 禁止 html 滚动 */
+    }
 
-  /* 左边按钮组 (新增) */
-  .header-left-group {
-    display: flex; gap: 4px; z-index: 2; /* 保证在名字图层之上 */
-  }
+    body {
+      font-family: "Segoe UI", "PingFang SC", sans-serif;
+      background: linear-gradient(135deg, #fff3f8 0%, #ffe9e1 100%);
+      margin: 0; /* 核心布局 */
+      height: 100%; /* 跟随 html 高度 */
+      display: flex;
+      flex-direction: column;
+      overflow: hidden; /* 禁止 body 滚动 */
 
-  /* 右边按钮组 (保持) */
-  .header-right-group {
-    display: flex; gap: 4px; z-index: 2;
-  }
+      /* 避让刘海屏 */
+      padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+    }
 
-  /* 中间名字 (保持绝对居中) */
-  .header-title-box {
-    position: absolute; left: 50%; transform: translateX(-50%);
-    text-align: center; display: flex; flex-direction: column; align-items: center;
-    pointer-events: none; z-index: 1;
-  }
+    /* --- 2. 聊天区域 (占据剩余空间) --- */
+    .chat-container {
+      flex: 1; /* 自动撑满 */
 
-  /* 左右按钮通用样式 */
-  .header-btn {
-    background: none; border: none; cursor: pointer; padding: 8px;
-    display: flex; align-items: center; justify-content: center;
-    color: #ff9b9e; border-radius: 50%; transition: background 0.2s;
-  }
-  .header-btn:hover { background-color: rgba(0,0,0,0.05); }
-  .header-btn svg { width: 24px; height: 24px; fill: currentColor; }
+      /* 【关键魔法】防止 Flex 子元素滚动失效 */
+      min-height: 0;
 
-  /* 中间文字区域 */
-  .header-title-box {
-    position: absolute; /* 关键：脱离文档流 */
-    left: 50%;
-    transform: translateX(-50%); /* 完美的水平居中 */
-    text-align: center; display: flex; flex-direction: column; align-items: center;
-    pointer-events: none; /* 防止遮挡下方的点击（虽然这里header高层级没事，加个保险） */
-  }
-  .header-name { font-size: 16px; font-weight: bold; color: #444; }
-  .header-status { font-size: 11px; color: #999; display: flex; align-items: center; gap: 4px; margin-top: 2px;}
-  .status-dot { width: 8px; height: 8px; background-color: #4cd964; border-radius: 50%; display: inline-block; }
+      overflow-y: auto; /* 开启滚动 */
+      /* 稍微留点底 */
+      padding: 16px 16px 10px;
 
-  .chat-container {
-    flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; scroll-behavior: smooth;
-  }
+      /* iOS 惯性滚动 */
+      -webkit-overflow-scrolling: touch;
+      scroll-behavior: smooth;
+    }
 
-  /* --- 【重构】头像 + 气泡组 布局 --- */
-  .message-group {
-    display: flex;
-    margin: 8px 0; /* 每组对话的上下间距 */
-    align-items: flex-start; /* 顶对齐：头像始终在消息组的最上方 */
-    /*max-width: 90%;*/
-    max-width: 100%;    /* <-- 改为 100% */
-  }
+    /* --- 3. 输入框区域 (固定在底部，不可压缩) --- */
+    .input-container {
+      flex-shrink: 0; /* 【关键】禁止被键盘挤压变形 */
+      display: flex; align-items: center;
+      background-color: #fff;
+      border-top: 1px solid #ffdce0;
+      z-index: 10;
+      /* 适配底部小黑条 */
+      padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
+    }
 
-  /* 用户：右对齐，反向排列(头像在右) */
-  .message-group.user {
-    align-self: flex-end;
-    flex-direction: row-reverse;
-    margin-left: 50px;
-  }
+    /* --- Header 布局修改 --- */
+    .chat-header {
+      position: relative;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 16px;
+      background-color: rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid #ffe5e8;
+      z-index: 100; flex-shrink: 0;
+    }
 
-  /* 助手：左对齐，正向排列(头像在左) */
-  .message-group.assistant {
-    align-self: flex-start;
-    flex-direction: row;
-    margin-right: 50px;
-  }
+    /* 左边按钮组 (新增) */
+    .header-left-group {
+      display: flex; gap: 4px; z-index: 2; /* 保证在名字图层之上 */
+    }
 
-  /* --- 头像样式 --- */
-  .avatar-img {
-    width: 40px; height: 40px;
-    border-radius: 10px;
-    object-fit: cover;
-    flex-shrink: 0; /* 防止头像被挤压 */
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-    margin-top: 2px;
-    margin-bottom: 2px;
-  }
-  .message-group.user .avatar-img { margin-left: 10px;}
-  .message-group.assistant .avatar-img { margin-right: 10px; }
+    /* 右边按钮组 (保持) */
+    .header-right-group {
+      display: flex; gap: 4px; z-index: 2;
+    }
 
-  /* --- 气泡垂直堆叠容器 --- */
-  .bubble-stack {
-    display: flex; flex-direction: column;
-    min-width: 0; /* 修复Flex子元素溢出问题 */
-  }
-  /* 用户气泡靠右 */
-  .message-group.user .bubble-stack { align-items: flex-end; }
-  /* 助手气泡靠左 */
-  .message-group.assistant .bubble-stack { align-items: flex-start; }
+    /* 中间名字 (保持绝对居中) */
+    .header-title-box {
+      position: absolute; left: 50%; transform: translateX(-50%);
+      text-align: center; display: flex; flex-direction: column; align-items: center;
+      pointer-events: none; z-index: 1;
+    }
 
-  /* --- 微调原有样式 --- */
-  /* 覆盖之前的 wrapper 样式，让它适应新容器 */
-  /* --- Fix 4: 防止气泡被底部按钮撑大，恢复自然宽度 --- */
-  .message-wrapper {
-    display: flex; flex-direction: column; margin: 2px 0;
-    max-width: 100%; /* 这里的 100% 是相对于 stack 的 */
-  }
+    /* 左右按钮通用样式 */
+    .header-btn {
+      background: none; border: none; cursor: pointer; padding: 8px;
+      display: flex; align-items: center; justify-content: center;
+      color: #ff9b9e; border-radius: 50%; transition: background 0.2s;
+    }
+    .header-btn:hover { background-color: rgba(0,0,0,0.05); }
+    .header-btn svg { width: 24px; height: 24px; fill: currentColor; }
 
-  /* 2. 气泡 */
-  .bubble {
-    padding: 10px 14px; /* 内边距稍微调小一点点 */
-    border-radius: 16px;
-    line-height: 1.5;
-    word-wrap: break-word;
-    font-size: 14.5px; /* 原来可能是 16px，改小 */
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-    animation: fadeIn 0.3s ease;
+    /* 中间文字区域 */
+    .header-title-box {
+      position: absolute; /* 关键：脱离文档流 */
+      left: 50%;
+      transform: translateX(-50%); /* 完美的水平居中 */
+      text-align: center; display: flex; flex-direction: column; align-items: center;
+      pointer-events: none; /* 防止遮挡下方的点击（虽然这里header高层级没事，加个保险） */
+    }
+    .header-name { font-size: 16px; font-weight: bold; color: #444; }
+    .header-status { font-size: 11px; color: #999; display: flex; align-items: center; gap: 4px; margin-top: 2px;}
+    .status-dot { width: 8px; height: 8px; background-color: #4cd964; border-radius: 50%; display: inline-block; }
 
-    /* --- 【新增】这两行是关键 --- */
-    width: fit-content;  /* 强制气泡宽度只适应文字内容 */
-    max-width: 100%;     /* 防止文字太长时不换行 */
-  }
-  /* --- 【Fix】强制用户气泡和控件靠右对齐 --- */
-  .message-wrapper.user {
-    align-items: flex-end !important; /* 关键：加上 !important 提高优先级 */
-    text-align: right; /* 双重保险 */
-  }
+    /* --- 【重构】头像 + 气泡组 布局 --- */
+    .message-group {
+      display: flex;
+      margin: 8px 0; /* 每组对话的上下间距 */
+      align-items: flex-start; /* 顶对齐：头像始终在消息组的最上方 */
+      /*max-width: 90%;*/
+      max-width: 100%;    /* <-- 改为 100% */
+    }
 
-  /* 对应的，助手气泡靠左对齐 */
-  .message-wrapper.assistant {
-    align-items: flex-start !important;
-    text-align: left;
-  }
-  .message-wrapper.user .bubble {
-    background: linear-gradient(135deg, #ffb6b9, #ffc9c9); color: #fff;
-    border-bottom-right-radius: 4px;
-    text-align: left; /* 气泡还是在右边，但里面的字左对齐 */
-  }
-  .message-wrapper.assistant .bubble {
-    background: #fff; color: #444; border-bottom-left-radius: 4px; border: 1px solid #ffb6b9;
-  }
+    /* 用户：右对齐，反向排列(头像在右) */
+    .message-group.user {
+      align-self: flex-end;
+      flex-direction: row-reverse;
+      margin-left: 50px;
+    }
 
-  /* 3. 外部控制容器 (修改版：一直显示 + 水平对齐) */
-  .controls-container {
-    display: flex;
-    align-items: center; /* 【关键】让时间戳和按钮在同一水平线上垂直居中 */
-    gap: 6px;            /* 按钮和时间戳之间的间距 */
-    margin-top: 4px;
-    opacity: 1 !important; /* 【关键】强制一直显示，不再透明 */
-    visibility: visible;
-  }
+    /* 助手：左对齐，正向排列(头像在左) */
+    .message-group.assistant {
+      align-self: flex-start;
+      flex-direction: row;
+      margin-right: 50px;
+    }
 
-  /* 4. 左右对齐逻辑 (修改版) */
+    /* --- 头像样式 --- */
+    .avatar-img {
+      width: 40px; height: 40px;
+      border-radius: 10px;
+      object-fit: cover;
+      flex-shrink: 0; /* 防止头像被挤压 */
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      margin-top: 2px;
+      margin-bottom: 2px;
+    }
+    .message-group.user .avatar-img { margin-left: 10px;}
+    .message-group.assistant .avatar-img { margin-right: 10px; }
 
-  /* 用户的消息：控件靠右对齐 */
-  .message-wrapper.user .controls-container {
-    justify-content: flex-end;
-    flex-direction: row; /* 保持 [时间戳] [按钮组] 的顺序，或者您可以改成 row-reverse 让按钮在最外侧 */
-  }
+    /* --- 气泡垂直堆叠容器 --- */
+    .bubble-stack {
+      display: flex; flex-direction: column;
+      min-width: 0; /* 修复Flex子元素溢出问题 */
+    }
+    /* 用户气泡靠右 */
+    .message-group.user .bubble-stack { align-items: flex-end; }
+    /* 助手气泡靠左 */
+    .message-group.assistant .bubble-stack { align-items: flex-start; }
 
-  /* 助手的消息：控件靠左对齐 */
-  .message-wrapper.assistant .controls-container {
-    justify-content: flex-start;
-    flex-direction: row;
-  }
+    /* --- 微调原有样式 --- */
+    /* 覆盖之前的 wrapper 样式，让它适应新容器 */
+    /* --- Fix 4: 防止气泡被底部按钮撑大，恢复自然宽度 --- */
+    .message-wrapper {
+      display: flex; flex-direction: column; margin: 2px 0;
+      max-width: 100%; /* 这里的 100% 是相对于 stack 的 */
+    }
 
-  /* 【注意】请把之前这行删掉或注释掉，否则可能会有冲突 */
-  /* .message-group:hover .controls-container { opacity: 1; } */
+    /* 2. 气泡 */
+    .bubble {
+      padding: 10px 14px; /* 内边距稍微调小一点点 */
+      border-radius: 16px;
+      line-height: 1.5;
+      word-wrap: break-word;
+      font-size: 14.5px; /* 原来可能是 16px，改小 */
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+      animation: fadeIn 0.3s ease;
 
-  /* 所有的操作按钮通用样式 */
-  .action-btn {
-    background: transparent; border: none; cursor: pointer;
-    width: 24px; height: 24px; padding: 4px; border-radius: 4px;
-    display: flex; align-items: center; justify-content: center;
-    color: #aaa; transition: all 0.2s;
-  }
-  .action-btn:hover { background-color: rgba(0,0,0,0.05); color: #ff9b9e; }
-  .action-btn svg { width: 14px; height: 14px; fill: currentColor; }
+      /* --- 【新增】这两行是关键 --- */
+      width: fit-content;  /* 强制气泡宽度只适应文字内容 */
+      max-width: 100%;     /* 防止文字太长时不换行 */
+    }
+    /* --- 【Fix】强制用户气泡和控件靠右对齐 --- */
+    .message-wrapper.user {
+      align-items: flex-end !important; /* 关键：加上 !important 提高优先级 */
+      text-align: right; /* 双重保险 */
+    }
 
-  /* 移除原来 .copy-btn 的部分样式，统一用 .action-btn */
+    /* 对应的，助手气泡靠左对齐 */
+    .message-wrapper.assistant {
+      align-items: flex-start !important;
+      text-align: left;
+    }
+    .message-wrapper.user .bubble {
+      background: linear-gradient(135deg, #ffb6b9, #ffc9c9); color: #fff;
+      border-bottom-right-radius: 4px;
+      text-align: left; /* 气泡还是在右边，但里面的字左对齐 */
+    }
+    .message-wrapper.assistant .bubble {
+      background: #fff; color: #444; border-bottom-left-radius: 4px; border: 1px solid #ffb6b9;
+    }
 
-  /* 5. 时间戳和复制按钮 */
-  .timestamp {
-    font-size: 11px;
-    color: #aaa;
-    padding: 0 5px;
-  }
+    /* 3. 外部控制容器 (修改版：一直显示 + 水平对齐) */
+    .controls-container {
+      display: flex;
+      align-items: center; /* 【关键】让时间戳和按钮在同一水平线上垂直居中 */
+      gap: 6px;            /* 按钮和时间戳之间的间距 */
+      margin-top: 4px;
+      opacity: 1 !important; /* 【关键】强制一直显示，不再透明 */
+      visibility: visible;
+    }
 
-  /* --- 【新增】日期分隔符的样式 --- */
-  .date-separator {
-    align-self: center; /* 居中显示 */
-    margin: 20px 0;     /* 上下留出足够的间距 */
-    padding: 4px 12px;
-    background-color: rgba(0, 0, 0, 0.05); /* 一个淡淡的背景色 */
-    border-radius: 12px; /* 圆角 */
-    color: #aaa;         /* 柔和的文字颜色 */
-    font-size: 12px;
-    font-weight: 500;
-  }
+    /* 4. 左右对齐逻辑 (修改版) */
 
-  /* 6. 其他 */
-  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-  .input-container { display: flex; align-items: center; padding: 12px; border-top: 1px solid #ffdce0; background-color: #fff; }
-  textarea#messageInput {
-   flex: 1;
-   padding: 10px 14px;
-   border: 1px solid #ffd1d1;
-   border-radius: 20px;
-   outline: none;
-   font-size: 15px;
-   background: #fff8f9;
-   transition: border-color 0.2s;
-   resize: none;
-   box-sizing: border-box;
-  }
-  #messageInput:focus { border-color: #ff9b9e; }
-  #sendBtn { margin-left: 8px; background: linear-gradient(135deg, #ffb6b9, #ff9b73); color: white; border: none; border-radius: 20px; padding: 10px 18px; cursor: pointer; font-weight: bold; box-shadow: 0 3px 6px rgba(255,140,140,0.3); transition: all 0.2s; }
-  #sendBtn:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(255,140,140,0.4); }
+    /* 用户的消息：控件靠右对齐 */
+    .message-wrapper.user .controls-container {
+      justify-content: flex-end;
+      flex-direction: row; /* 保持 [时间戳] [按钮组] 的顺序，或者您可以改成 row-reverse 让按钮在最外侧 */
+    }
 
-  /* --- 【新增】强制隐藏“加载更多”按钮 --- */
-  #load-more-container {
-    display: none !important;
-  }
+    /* 助手的消息：控件靠左对齐 */
+    .message-wrapper.assistant .controls-container {
+      justify-content: flex-start;
+      flex-direction: row;
+    }
 
-  /* --- 【新增】多选模式样式 --- */
+    /* 【注意】请把之前这行删掉或注释掉，否则可能会有冲突 */
+    /* .message-group:hover .controls-container { opacity: 1; } */
 
-  /* 多选模式下，消息变成可点击手型 */
-  body.selection-mode .message-group {
-    cursor: pointer;
-    position: relative;
-    transition: all 0.2s;
-  }
+    /* 所有的操作按钮通用样式 */
+    .action-btn {
+      background: transparent; border: none; cursor: pointer;
+      width: 24px; height: 24px; padding: 4px; border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      color: #aaa; transition: all 0.2s;
+    }
+    .action-btn:hover { background-color: rgba(0,0,0,0.05); color: #ff9b9e; }
+    .action-btn svg { width: 14px; height: 14px; fill: currentColor; }
 
-  /* 禁用多选模式下的内部按钮交互，防止误触 */
-  body.selection-mode .message-group button { pointer-events: none; }
+    /* 移除原来 .copy-btn 的部分样式，统一用 .action-btn */
 
-  /* 选中状态 */
-  .message-group.selected {
-    background-color: rgba(255, 182, 185, 0.15); /* 淡淡的粉色背景 */
-    border-radius: 12px;
-    outline: 2px solid #ffb6b9; /* 粉色边框 */
-  }
+    /* 5. 时间戳和复制按钮 */
+    .timestamp {
+      font-size: 11px;
+      color: #aaa;
+      padding: 0 5px;
+    }
 
-  /* 在选中项右上角加个勾勾 (可选，为了好看) */
-  .message-group.selected::after {
-    content: '✔';
-    position: absolute; top: -8px; right: -8px;
-    width: 20px; height: 20px; background: #ffb6b9; color: #fff;
-    border-radius: 50%; font-size: 12px;
-    display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-  }
+    /* --- 【新增】日期分隔符的样式 (修复版) --- */
+    .date-separator {
+      align-self: center; /* Flex布局居中 */
 
-  /* --- 【新增】+号按钮样式 --- */
-  #plusBtn {
-    margin-left: 8px;
-    background: #f0f0f0; color: #888;
-    border: 1px solid #ddd;
-    border-radius: 50%; /* 圆形 */
-    width: 36px; height: 36px;
-    font-size: 20px; line-height: 1;
-    cursor: pointer; display: flex; align-items: center; justify-content: center;
-    transition: all 0.2s;
-  }
-  #plusBtn:hover { background: #e0e0e0; color: #555; }
-  #plusBtn.active { background: #ffb6b9; color: #fff; border-color: #ffb6b9; transform: rotate(45deg); }
-  /* --- 常用语面板 (修改版：嵌入底部流) --- */
-  #quickPhrasesPanel {
-    /* 不再悬浮，而是作为Flex的一部分 */
-    height: 0; /* 默认高度为0，隐藏 */
-    overflow: hidden; /* 内容多了不溢出 */
-    background: #fff; /* 不用半透明了，因为是在最底部 */
-    border-top: 1px solid #eee;
-    display: flex; flex-direction: column;
-    transition: height 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); /* 丝滑的动画 */
-    flex-shrink: 0; /* 防止被压缩 */
-  }
+      /* 【关键修改】强制宽度自适应，不拉伸 */
+      width: fit-content;
+      max-width: 90%; /* 防止日期文字太长溢出 */
 
-  /* 当面板打开时，给它一个固定的高度 */
-  #quickPhrasesPanel.open {
-    height: 280px; /* 您可以根据需要调整这个高度 */
-  }
+      margin: 20px auto; /* 上下间距20px，左右自动居中 */
+      padding: 4px 12px;
+      background-color: rgba(0, 0, 0, 0.05);
+      border-radius: 12px;
+      color: #aaa;
+      font-size: 12px;
+      font-weight: 500;
+      text-align: center;
+    }
 
-  /* 其它内部样式保持不变 */
-  .qp-header {
-    padding: 8px 15px; background: #fafafa; border-bottom: 1px solid #eee;
-    display: flex; justify-content: space-between; align-items: center;
-    font-weight: bold; color: #ffb6b9; font-size: 13px;
-    flex-shrink: 0;
-  }
-  /* ... qp-list, qp-item 等样式保持之前的即可 ... */
+    /* 6. 其他 */
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
-  @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    textarea#messageInput {
+     flex: 1;
+     padding: 10px 14px;
+     border: 1px solid #ffd1d1;
+     border-radius: 20px;
+     outline: none;
+     font-size: 15px;
+     background: #fff8f9;
+     transition: border-color 0.2s;
+     resize: none;
+     box-sizing: border-box;
+    }
+    #messageInput:focus { border-color: #ff9b9e; }
+    #sendBtn { margin-left: 8px; background: linear-gradient(135deg, #ffb6b9, #ff9b73); color: white; border: none; border-radius: 20px; padding: 10px 18px; cursor: pointer; font-weight: bold; box-shadow: 0 3px 6px rgba(255,140,140,0.3); transition: all 0.2s; }
+    #sendBtn:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(255,140,140,0.4); }
 
-  .qp-btn-close { background:none; border:none; font-size:20px; color:#aaa; cursor:pointer; padding:0 5px;}
-  .qp-btn-text { background:none; border:none; font-size:12px; color:#666; cursor:pointer; margin-right:10px; text-decoration: underline;}
+    /* --- 【新增】强制隐藏“加载更多”按钮 --- */
+    #load-more-container {
+      display: none !important;
+    }
 
-  .qp-list { flex: 1; overflow-y: auto; padding: 10px; }
+    /* --- 【新增】多选模式样式 --- */
 
-  /* 列表项 (选用模式) */
-  .qp-item {
-    padding: 10px 12px; background: #fff; border: 1px solid #f0f0f0;
-    border-radius: 8px; margin-bottom: 8px; cursor: pointer;
-    font-size: 14px; color: #444; transition: all 0.2s;
-  }
-  .qp-item:hover { background: #fff5f6; border-color: #ffcdd2; color: #d32f2f; }
-  .qp-item:active { transform: scale(0.98); }
+    /* 多选模式下，消息变成可点击手型 */
+    body.selection-mode .message-group {
+      cursor: pointer;
+      position: relative;
+      transition: all 0.2s;
+    }
 
-  /* 编辑模式输入框 */
-  .qp-edit-row { display: flex; gap: 8px; margin-bottom: 8px; }
-  .qp-input { flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 6px; }
-  .qp-del-btn { width: 30px; background: #ffebee; border:none; color: #c62828; border-radius: 6px; cursor: pointer; }
+    /* 禁用多选模式下的内部按钮交互，防止误触 */
+    body.selection-mode .message-group button { pointer-events: none; }
 
-  /* 底部添加/保存按钮 */
-  .qp-add-btn { width: 48%; padding: 8px; background: #f5f5f5; border: 1px dashed #ccc; border-radius: 6px; cursor:pointer;}
-  .qp-save-btn { width: 48%; padding: 8px; background: #ffb6b9; color: #fff; border: none; border-radius: 6px; cursor:pointer; font-weight:bold;}
-</style>
+    /* 选中状态 */
+    .message-group.selected {
+      background-color: rgba(255, 182, 185, 0.15); /* 淡淡的粉色背景 */
+      border-radius: 12px;
+      outline: 2px solid #ffb6b9; /* 粉色边框 */
+    }
+
+    /* 在选中项右上角加个勾勾 (可选，为了好看) */
+    .message-group.selected::after {
+      content: '✔';
+      position: absolute; top: -8px; right: -8px;
+      width: 20px; height: 20px; background: #ffb6b9; color: #fff;
+      border-radius: 50%; font-size: 12px;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    /* --- 【新增】+号按钮样式 --- */
+    #plusBtn {
+      margin-left: 8px;
+      background: #f0f0f0; color: #888;
+      border: 1px solid #ddd;
+      border-radius: 50%; /* 圆形 */
+      width: 36px; height: 36px;
+      font-size: 20px; line-height: 1;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: all 0.2s;
+    }
+    #plusBtn:hover { background: #e0e0e0; color: #555; }
+    #plusBtn.active { background: #ffb6b9; color: #fff; border-color: #ffb6b9; transform: rotate(45deg); }
+    /* --- 常用语面板 (修改版：嵌入底部流) --- */
+    #quickPhrasesPanel {
+      /* 不再悬浮，而是作为Flex的一部分 */
+      height: 0; /* 默认高度为0，隐藏 */
+      overflow: hidden; /* 内容多了不溢出 */
+      background: #fff; /* 不用半透明了，因为是在最底部 */
+      border-top: 1px solid #eee;
+      display: flex; flex-direction: column;
+      transition: height 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); /* 丝滑的动画 */
+      flex-shrink: 0; /* 防止被压缩 */
+    }
+
+    /* 当面板打开时，给它一个固定的高度 */
+    #quickPhrasesPanel.open {
+      height: 280px; /* 您可以根据需要调整这个高度 */
+    }
+
+    /* 其它内部样式保持不变 */
+    .qp-header {
+      padding: 8px 15px; background: #fafafa; border-bottom: 1px solid #eee;
+      display: flex; justify-content: space-between; align-items: center;
+      font-weight: bold; color: #ffb6b9; font-size: 13px;
+      flex-shrink: 0;
+    }
+    /* ... qp-list, qp-item 等样式保持之前的即可 ... */
+
+    @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+    .qp-btn-close { background:none; border:none; font-size:20px; color:#aaa; cursor:pointer; padding:0 5px;}
+    .qp-btn-text { background:none; border:none; font-size:12px; color:#666; cursor:pointer; margin-right:10px; text-decoration: underline;}
+
+    .qp-list { flex: 1; overflow-y: auto; padding: 10px; }
+
+    /* 列表项 (选用模式) */
+    .qp-item {
+      padding: 10px 12px; background: #fff; border: 1px solid #f0f0f0;
+      border-radius: 8px; margin-bottom: 8px; cursor: pointer;
+      font-size: 14px; color: #444; transition: all 0.2s;
+    }
+    .qp-item:hover { background: #fff5f6; border-color: #ffcdd2; color: #d32f2f; }
+    .qp-item:active { transform: scale(0.98); }
+
+    /* 编辑模式输入框 */
+    .qp-edit-row { display: flex; gap: 8px; margin-bottom: 8px; }
+    .qp-input { flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 6px; }
+    .qp-del-btn { width: 30px; background: #ffebee; border:none; color: #c62828; border-radius: 6px; cursor: pointer; }
+
+    /* 底部添加/保存按钮 */
+    .qp-add-btn { width: 48%; padding: 8px; background: #f5f5f5; border: 1px dashed #ccc; border-radius: 6px; cursor:pointer;}
+    .qp-save-btn { width: 48%; padding: 8px; background: #ffb6b9; color: #fff; border: none; border-radius: 6px; cursor:pointer; font-weight:bold;}
+  </style>
 </head>
 <body>
 
@@ -463,6 +513,15 @@
 
 <!-- 【最终的、绝对正确的 <script> 标签】-->
 <script>
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js')
+              .then(reg => console.log('SW registered!', reg))
+              .catch(err => console.log('SW failed', err));
+    });
+  }
+
     // --- 【新增】从 URL 获取当前角色 ID ---
     // URL 格式: /chat/kunigami -> ID = kunigami
     const charId = window.location.pathname.split('/').pop();
@@ -682,6 +741,23 @@
       } catch (e) { console.error("Failed to load history:", e); }
       finally { isLoading = false; loadMoreBtn.textContent = '加載更早的記錄'; }
     }
+
+  // --- 键盘弹起优化 ---
+  // 当窗口大小改变（通常是键盘弹起）时，强制滚到底部
+  window.visualViewport.addEventListener('resize', () => {
+    // 稍微延时一下，等键盘完全弹出来
+    setTimeout(() => {
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }, 100);
+  });
+
+  // 输入框聚焦时也触发一次
+  input.addEventListener('focus', () => {
+    setTimeout(() => {
+      input.scrollIntoView({block: "end"}); // 确保输入框在可视区
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }, 300);
+  });
 
     async function sendMessage() {
         const originalText = input.value.trim();

@@ -4,7 +4,7 @@ import re
 import json
 import sqlite3 # 导入 sqlite3 库
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, render_template # <--- 加上这个
 from dotenv import load_dotenv
 import urllib3
 from apscheduler.schedulers.background import BackgroundScheduler # 新增
@@ -21,7 +21,7 @@ OPENROUTER_KEY = os.getenv("OPENROUTER_KEY", "")
 # 新增下面这行，来读取我们配置的 API 地址
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
-app = Flask(__name__, static_folder='static', template_folder='.')
+app = Flask(__name__, static_folder='static', template_folder='templates')
 
 # 配置项
 MAX_CONTEXT_LINES = 10
@@ -36,6 +36,51 @@ CURRENT_USER_NAME = "篠原桐奈"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CHARACTERS_DIR = os.path.join(BASE_DIR, "characters")
 CONFIG_FILE = os.path.join(BASE_DIR, "configs", "characters.json")
+
+PERSONA_GENERATION_PROMPT = """
+あなたは熟練したキャラクター設定作家です。
+ユーザーから提供された「キャラクター名」と「作品名(IP)」に基づいて、以下の厳格なフォーマットに従ってキャラクター設定を作成してください。
+
+# 要件
+1. 言語：日本語
+2. 情報源：原作の公式設定やストーリーに基づき、正確かつ詳細に記述すること。
+3. 創作：もし情報が不足している部分は、キャラクターの性格に矛盾しない範囲で補完すること。
+4. フォーマット：以下の構造を厳守すること。
+
+# 出力フォーマット例
+# 役割
+(名前) (年齢/身長/誕生日)
+
+# 外見
+- 髪・瞳：(詳細な描写)
+- (その他の身体的特徴)
+
+# 経歴（年表）
+- (幼少期、学生時代、現在に至るまでの重要な出来事)
+
+# 生活状況
+- 拠点：(現在の住居や所属)
+- (寮や部屋割りなどの詳細があれば記述)
+
+# 人間関係
+- (家族、友人、ライバル、敵対関係など)
+
+# 性格（キーワード）
+- 表面：(他人に見せる態度)
+- 内面：(隠された本音、デレ要素、執着など)
+- 特徴：
+- 弱点：
+
+# 好きなこと・詳細
+- 代表色：
+- 動物：
+- 好きな食べ物：
+- 苦手な食べ物：
+- 趣味：
+- 好きな季節/科目/座右の銘など：
+- 自認する長所/短所：
+- 嬉しいこと/悲しいこと：
+"""
 
 # ... (之前的 imports 和 常用语接口 保持不变) ...
 
@@ -83,6 +128,9 @@ def build_system_prompt(char_id):  # <--- 增加参数
     now = datetime.now()
     today_str = now.strftime("%Y-%m-%d")
 
+    # 路径准备
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    CONFIG_DIR = os.path.join(BASE_DIR, "configs")
     # 获取该角色的 Prompt 目录
     _, prompts_dir = get_paths(char_id)
 
@@ -132,6 +180,22 @@ def build_system_prompt(char_id):  # <--- 增加参数
                     mem_list = [f"- {k}: {v}" for k, v in long_mem.items()]
                     prompt_parts.append(f"【Long-term Memory / 長期記憶】\n" + "\n".join(mem_list))
     except Exception: pass
+
+    # 3. 【全局通用】读取用户档案 (从 configs 读)
+    try:
+        path = os.path.join(CONFIG_DIR, "global_user_persona.md")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                prompt_parts.append(f"【User / ユーザー情報】\n{f.read().strip()}")
+    except: pass
+
+    # 4. 【全局通用】读取格式规则 (从 configs 读)
+    try:
+        path = os.path.join(CONFIG_DIR, "global_format.md")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                prompt_parts.append(f"【System Rules / 出力ルール】\n{f.read().strip()}")
+    except: pass
 
     # --- 5. 中期记忆 (JSON - 按天，最近7天) ---
     try:
@@ -183,18 +247,22 @@ def build_system_prompt(char_id):  # <--- 增加参数
                     prompt_parts.append(f"【Short-term Memory / 最近の出来事】{combined_events_str}")
     except Exception: pass
 
-    # --- 7. 近期安排 (JSON - 日程表) ---
-    # 筛选今天及以后的日程
+    # --- 7. 近期安排 (JSON - 仅限未来7天) ---
     try:
         path = os.path.join(prompts_dir, "7_schedule.json")
         if os.path.exists(path):
-            with open(path, "r", encoding="utf-8-sig") as f:
+            with open(path, "r", encoding="utf-8-sig") as f: # 记得用 utf-8-sig
                 schedule = json.load(f)
                 future_plans = []
-                # 简单的字符串比较日期 (YYYY-MM-DD 格式支持直接比较)
+
+                # 计算日期范围: 今天 ~ 7天后
+                limit_date = now + timedelta(days=7)
+                limit_date_str = limit_date.strftime("%Y-%m-%d")
+
                 sorted_dates = sorted(schedule.keys())
                 for date_key in sorted_dates:
-                    if date_key >= today_str:
+                    # 【修改】只选取：今天 <= 日期 <= 7天后
+                    if today_str <= date_key <= limit_date_str:
                         future_plans.append(f"- {date_key}: {schedule[date_key]}")
 
                 if future_plans:
@@ -374,9 +442,28 @@ def init_db():
 
 # ---------------------- 主页面 ----------------------
 
+# --- 【新增】PWA 支持文件路由 ---
+@app.route('/manifest.json')
+def manifest():
+    return send_from_directory('static', 'manifest.json')
+
+@app.route('/sw.js')
+def service_worker():
+    response = send_from_directory('static', 'sw.js')
+    # 必须设置 Header 确保 Service Worker 权限正确
+    response.headers['Content-Type'] = 'application/javascript'
+    response.headers['Service-Worker-Allowed'] = '/'
+    return response
+
 @app.route("/")
 def contact_list_view():
-    return send_from_directory("templates", "contacts.html")
+    # 改用 render_template，这样 html 里的 {% include %} 才会生效
+    return render_template("contacts.html")
+
+# 2. 【新增】个人主页
+@app.route("/profile")
+def profile_view():
+    return render_template("profile.html")
 
 # 聊天页面改为带 ID 的路由
 # 注意：原来的 / 路由废弃或重定向
@@ -720,7 +807,7 @@ def call_openrouter(messages):
     print(f"--- [Debug] Using model: {payload['model']}")  # 增加一个调试日志
 
     try:
-        r = requests.post(url, json=payload, headers=headers, timeout=60)
+        r = requests.post(url, json=payload, headers=headers, timeout=100)
         # 打印出服务端的原始报错信息，方便调试
         if r.status_code != 200:
             return f"[ERROR] API call failed with status {r.status_code}: {r.text}"
@@ -897,12 +984,10 @@ def get_prompts_data(char_id):
     files = {
         "base": "1_base_persona.md",
         "relation": "2_relationship.json",
-        "user": "3_user_persona.md",
         "long": "4_memory_long.json",
         "medium": "5_memory_medium.json",
         "short": "6_memory_short.json",
-        "schedule": "7_schedule.json",
-        "format": "8_format.md"
+        "schedule": "7_schedule.json"
     }
 
     # 1. 硬核拼接绝对路径，不依赖全局变量，防止出错
@@ -1113,6 +1198,289 @@ def get_char_details(char_id):
             return jsonify({"error": "Character not found"}), 404
 
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --- 【新增】更新角色元数据 (头像/备注) ---
+@app.route("/api/<char_id>/update_meta", methods=["POST"])
+def update_char_meta(char_id):
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    CONFIG_FILE = os.path.join(BASE_DIR, "configs", "characters.json")
+
+    if not os.path.exists(CONFIG_FILE):
+        return jsonify({"error": "Config file not found"}), 404
+
+    try:
+        # 1. 读取现有配置
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            all_config = json.load(f)
+
+        if char_id not in all_config:
+            return jsonify({"error": "Character ID not found"}), 404
+
+        # 2. 更新字段 (只更新前端传过来的字段)
+        data = request.json
+        new_remark = data.get("remark")
+        new_avatar = data.get("avatar")
+
+        # 允许改为空字符串，所以用 is not None 判断
+        if new_remark is not None:
+            all_config[char_id]["remark"] = new_remark.strip()
+
+        if new_avatar is not None:
+            all_config[char_id]["avatar"] = new_avatar.strip()
+
+        # 3. 写回文件
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(all_config, f, ensure_ascii=False, indent=2)
+
+        return jsonify({"status": "success"})
+
+    except Exception as e:
+        print(f"Update Meta Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# --- 【新增】获取角色私有资源 (图片等) ---
+# 这样前端就能通过 /char_assets/kunigami/avatar.png 访问图片了
+@app.route('/char_assets/<char_id>/<filename>')
+def get_char_asset(char_id, filename):
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    # 指向 characters/<char_id> 文件夹
+    directory = os.path.join(base_dir, "characters", char_id)
+    return send_from_directory(directory, filename)
+
+# --- 【新增】上传角色头像 ---
+@app.route("/api/<char_id>/upload_avatar", methods=["POST"])
+def upload_char_avatar(char_id):
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+
+    if file:
+        try:
+            BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+            # 1. 确定保存路径: characters/<char_id>/
+            char_dir = os.path.join(BASE_DIR, "characters", char_id)
+            if not os.path.exists(char_dir):
+                os.makedirs(char_dir)
+
+            # 2. 统一重命名为 avatar.png (或者保留原扩展名)
+            # 为了简单和防止缓存问题，我们建议统一叫 avatar.png，
+            # 也可以保留原后缀，这里为了稳妥保留原后缀
+            ext = os.path.splitext(file.filename)[1]
+            if not ext: ext = ".png"
+            filename = f"avatar{ext}"
+            file_path = os.path.join(char_dir, filename)
+
+            # 保存文件 (覆盖旧的)
+            file.save(file_path)
+
+            # 3. 更新 characters.json 里的路径
+            CONFIG_FILE = os.path.join(BASE_DIR, "configs", "characters.json")
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                all_config = json.load(f)
+
+            # 生成新的访问 URL
+            # 加上时间戳 ?v=... 是为了强制浏览器刷新缓存，立刻看到新头像
+            timestamp = int(time.time())
+            new_url = f"/char_assets/{char_id}/{filename}?v={timestamp}"
+
+            all_config[char_id]["avatar"] = new_url
+
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(all_config, f, ensure_ascii=False, indent=2)
+
+            return jsonify({"status": "success", "url": new_url})
+
+        except Exception as e:
+            print(f"Upload Error: {e}")
+            return jsonify({"error": str(e)}), 500
+
+# --- 【新增】获取全局配置 (用户人设 & 格式) ---
+@app.route("/api/global_config", methods=["GET"])
+def get_global_config():
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    CONFIG_DIR = os.path.join(BASE_DIR, "configs")
+
+    data = {}
+    files = {
+        "user_persona": "global_user_persona.md",
+        "system_format": "global_format.md"
+    }
+
+    for key, filename in files.items():
+        path = os.path.join(CONFIG_DIR, filename)
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data[key] = f.read()
+        else:
+            data[key] = ""
+
+    return jsonify(data)
+
+# --- 【新增】保存全局配置 ---
+@app.route("/api/save_global_config", methods=["POST"])
+def save_global_config():
+    key = request.json.get("key") # 'user_persona' or 'system_format'
+    content = request.json.get("content")
+
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    CONFIG_DIR = os.path.join(BASE_DIR, "configs")
+
+    filename_map = {
+        "user_persona": "global_user_persona.md",
+        "system_format": "global_format.md"
+    }
+
+    filename = filename_map.get(key)
+    if not filename:
+        return jsonify({"error": "Invalid key"}), 400
+
+    try:
+        with open(os.path.join(CONFIG_DIR, filename), "w", encoding="utf-8") as f:
+            f.write(content)
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --- 【新增】创建新角色接口 ---
+@app.route("/api/characters/add", methods=["POST"])
+def add_character():
+    try:
+        data = request.json
+        new_id = data.get("id", "").strip()
+        new_name = data.get("name", "").strip()
+
+        # 1. 基础校验
+        if not new_id or not new_name:
+            return jsonify({"error": "ID和名称不能为空"}), 400
+
+        # ID 只能是英文、数字、下划线 (作为文件夹名)
+        import re
+        if not re.match(r'^[a-zA-Z0-9_]+$', new_id):
+            return jsonify({"error": "ID 只能包含字母、数字或下划线"}), 400
+
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        CONFIG_FILE = os.path.join(BASE_DIR, "configs", "characters.json")
+        CHAR_ROOT = os.path.join(BASE_DIR, "characters")
+
+        # 2. 读取现有配置，检查 ID 是否重复
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            all_config = json.load(f)
+
+        if new_id in all_config:
+            return jsonify({"error": "该 ID 已存在"}), 400
+
+        # 3. 创建文件夹结构
+        target_char_dir = os.path.join(CHAR_ROOT, new_id)
+        target_prompts_dir = os.path.join(target_char_dir, "prompts")
+
+        if not os.path.exists(target_prompts_dir):
+            os.makedirs(target_prompts_dir)
+
+        # 4. 初始化数据库 (chat.db)
+        # 直接调用我们要有的 init_char_db 函数
+        init_char_db(new_id)
+
+        # 5. 创建默认的空 Prompt 文件 (防止进入记忆页面报错)
+        # 这些文件是必须存在的
+        default_files = [
+            "1_base_persona.md",
+            "2_relationship.json",
+            "3_user_persona.md", # 虽然有全局的，但局部文件最好也占个位
+            "4_memory_long.json",
+            "5_memory_medium.json",
+            "6_memory_short.json",
+            "7_schedule.json"
+        ]
+
+        for filename in default_files:
+            file_path = os.path.join(target_prompts_dir, filename)
+            with open(file_path, "w", encoding="utf-8") as f:
+                if filename.endswith(".json"):
+                    f.write("{}") # JSON 写空对象
+                else:
+                    f.write("")   # MD 写空字符串
+
+        # 6. 更新配置文件 (characters.json)
+        all_config[new_id] = {
+            "name": new_name,
+            "remark": new_name, # 默认备注同名
+            "avatar": "/static/default_avatar.png", # 默认头像
+            "pinned": False
+        }
+
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(all_config, f, ensure_ascii=False, indent=2)
+
+        return jsonify({"status": "success"})
+
+    except Exception as e:
+        print(f"Add Character Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# --- 【新增】复制他人日程接口 ---
+@app.route("/api/<target_char_id>/copy_schedule", methods=["POST"])
+def copy_other_schedule(target_char_id):
+    source_char_id = request.json.get("source_id")
+
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+    # 1. 获取源路径 和 目标路径
+    source_path = os.path.join(BASE_DIR, "characters", source_char_id, "prompts", "7_schedule.json")
+    _, target_prompts_dir = get_paths(target_char_id)
+    target_path = os.path.join(target_prompts_dir, "7_schedule.json")
+
+    if not os.path.exists(source_path):
+        return jsonify({"error": "源角色的日程文件不存在"}), 404
+
+    try:
+        # 2. 读取源文件
+        with open(source_path, "r", encoding="utf-8-sig") as f:
+            source_data = json.load(f)
+
+        # 3. 写入目标文件 (覆盖)
+        with open(target_path, "w", encoding="utf-8") as f:
+            json.dump(source_data, f, ensure_ascii=False, indent=2)
+
+        return jsonify({"status": "success", "data": source_data})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --- 【新增】AI 自动生成人设接口 ---
+@app.route("/api/generate_persona", methods=["POST"])
+def generate_persona():
+    data = request.json
+    char_name = data.get("char_name")
+    source_ip = data.get("source_ip")
+
+    if not char_name or not source_ip:
+        return jsonify({"error": "请输入角色名和作品名"}), 400
+
+    # 构造请求
+    user_content = f"キャラクター名: {char_name}\n作品名: {source_ip}"
+
+    # 这里的 PERSONA_GENERATION_PROMPT 就是上面定义的那一大段字符串
+    # 请务必把它定义在文件顶部或这个函数外面
+    messages = [
+        {"role": "system", "content": PERSONA_GENERATION_PROMPT},
+        {"role": "user", "content": user_content}
+    ]
+
+    try:
+        print(f"--- [Gen Persona] Generating for {char_name} ({source_ip}) ---")
+        # 复用现有的 LLM 调用函数
+        if USE_OPENROUTER:
+            generated_text = call_openrouter(messages)
+        else:
+            generated_text = call_gemini(messages)
+
+        return jsonify({"status": "success", "content": generated_text})
+
+    except Exception as e:
+        print(f"Gen Persona Error: {e}")
         return jsonify({"error": str(e)}), 500
 
 # --- 定时任务配置 ---

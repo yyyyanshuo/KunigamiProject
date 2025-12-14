@@ -2,7 +2,7 @@
   "kunigami": {
     "name": "國神錬介",
     "remark": "私のヒーロー",
-    "avatar": "/static/avatar_assistant.jpg",
+    "avatar": "/char_assets/kunigami/avatar.jpg?v=1765686312",
     "pinned": true
   },
   "isagi": {
@@ -19,7 +19,13 @@
   },
   "rin": {
     "name": "糸師凛",
-    "remark": "",
+    "remark": "糸師凛",
+    "avatar": "/char_assets/rin/avatar.jpg?v=1765686885",
+    "pinned": false
+  },
+  "bachira": {
+    "name": "蜂楽廻",
+    "remark": "蜂楽廻",
     "avatar": "/static/default_avatar.png",
     "pinned": false
   }
