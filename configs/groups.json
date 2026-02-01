@@ -1,0 +1,13 @@
+{
+  "team_z": {
+    "name": "Team Z",
+    "avatar": "/static/default_group.png",
+    "pinned": false,
+    "members": [
+      "kunigami",
+      "isagi",
+      "chigiri",
+      "bachira"
+    ]
+  }
+}

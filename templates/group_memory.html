@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>群聊管理</title>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#fff3f8">
+    <style>
+        body {
+            font-family: "Segoe UI", "PingFang SC", sans-serif;
+            background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%); /* 稍微换个冷色调区分群聊 */
+            margin: 0; padding: 20px; color: #444; min-height: 100vh;
+        }
+        .container { max-width: 800px; margin: 0 auto; padding-bottom: 60px;}
+
+        /* 头部 */
+        .header {
+            display: flex; align-items: center; margin-bottom: 20px;
+            background: rgba(255,255,255,0.6); backdrop-filter: blur(10px);
+            padding: 12px 20px; border-radius: 16px; border: 1px solid #fff;
+        }
+        .back-btn { font-size: 24px; margin-right: 15px; cursor: pointer; color: #5c6bc0; }
+        h1 { margin: 0; font-size: 18px; color: #333; flex: 1; text-align: center; margin-right: 24px;}
+
+        /* 模块卡片 */
+        .module {
+            background: #fff; border-radius: 12px; margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05); overflow: hidden;
+        }
+        .mod-header {
+            padding: 15px; font-weight: bold; background: rgba(255,255,255,0.8);
+            border-bottom: 1px solid #eee; display: flex; justify-content: space-between;
+        }
+
+        /* 内容区 */
+        .content-box { padding: 15px; }
+
+        /* 输入框 */
+        .input-full {
+            width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;
+            margin-top: 5px; box-sizing: border-box; font-size: 14px;
+        }
+
+        /* 按钮 */
+        .btn {
+            padding: 6px 14px; border-radius: 6px; font-size: 13px; cursor: pointer; border: none; font-weight: bold;
+        }
+        .btn-save { background: #5c6bc0; color: #fff; }
+        .btn-del { background: #ffebee; color: #c62828; width: 30px; }
+
+        /* 记忆列表项 */
+        .input-group { display: flex; gap: 8px; margin-bottom: 10px; }
+        .input-key { width: 80px; flex-shrink: 0; }
+
+        /* 成员标签 */
+        .member-tag {
+            display: inline-block; background: #e8eaf6; color: #3f51b5;
+            padding: 4px 10px; border-radius: 15px; font-size: 12px; margin-right: 5px; margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <!-- 返回按钮动态生成 -->
+        <div class="back-btn" id="backBtn">←</div>
+        <h1>群组信息 (Group Info)</h1>
+    </div>
+
+    <!-- 1. 群资料模块 -->
+    <div class="module">
+        <div class="mod-header">📋 基本信息</div>
+        <div class="content-box" style="text-align: center;">
+            <div style="margin-bottom: 20px; position: relative; display: inline-block;">
+                <img id="group-avatar" src="" onclick="document.getElementById('avatar-upload').click()"
+                     style="width:80px; height:80px; border-radius:15px; object-fit:cover; border: 3px solid #fff; cursor: pointer;">
+                <input type="file" id="avatar-upload" style="display:none" onchange="uploadGroupAvatar(this)">
+                <div style="font-size:12px; color:#aaa; margin-top:5px;">点击头像更换</div>
+            </div>
+
+            <div style="text-align:left; margin-bottom: 15px;">
+                <label style="font-size:12px; color:#888;">群名称</label>
+                <input type="text" id="group-name" class="input-full">
+            </div>
+
+            <div style="text-align:left;">
+                <label style="font-size:12px; color:#888;">成员列表 (不可编辑)</label>
+                <div id="member-list" style="margin-top:5px;"></div>
+            </div>
+
+            <div style="text-align:right; margin-top:15px;">
+                <button class="btn btn-save" onclick="saveGroupMeta()">更新资料</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. 群记忆模块 -->
+    <div class="module">
+        <div class="mod-header">
+            <span>🧠 群聊记忆 (Shared Memory)</span>
+            <button class="btn" style="background:#f5f5f5; color:#666;" onclick="toggleEditMode()" id="editToggleBtn">编辑</button>
+        </div>
+
+        <div class="content-box" id="memory-container">
+            <!-- JS 渲染列表 -->
+            <div style="text-align:center; color:#ccc;">加载中...</div>
+        </div>
+
+        <!-- 编辑按钮组 -->
+        <div id="edit-actions" style="display:none; padding:15px; border-top:1px solid #eee; text-align:right;">
+            <button class="btn" style="background:#eee;" onclick="addMemoryRow()">+ 添加条目</button>
+            <button class="btn btn-save" onclick="saveMemory()">保存修改</button>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    const groupId = window.location.pathname.split('/').pop();
+    let globalData = {};
+    let isEditing = false;
+
+    // 初始化链接
+    document.getElementById('backBtn').onclick = () => window.location.href = `/chat/group/${groupId}`;
+
+    // 加载数据
+    async function loadData() {
+        const res = await fetch(`/api/group/${groupId}/prompts_data`);
+        globalData = await res.json();
+        renderMeta();
+        renderMemoryView();
+    }
+
+    // 渲染基本信息
+    function renderMeta() {
+        const meta = globalData.meta;
+        document.getElementById('group-name').value = meta.name;
+        document.getElementById('group-avatar').src = meta.avatar || '/static/default_group.png';
+
+        const membersDiv = document.getElementById('member-list');
+        membersDiv.innerHTML = meta.members.map(m => `<span class="member-tag">${m}</span>`).join('');
+    }
+
+    // 渲染记忆 (查看模式)
+    function renderMemoryView() {
+        const container = document.getElementById('memory-container');
+        const data = globalData.short || {};
+
+        if (Object.keys(data).length === 0) {
+            container.innerHTML = '<div style="text-align:center; color:#ccc; font-style:italic;">暂无群聊记忆</div>';
+            return;
+        }
+
+        let html = '';
+        Object.keys(data).sort().reverse().forEach(date => {
+            const dayInfo = data[date];
+            const events = Array.isArray(dayInfo) ? dayInfo : (dayInfo.events || []);
+
+            if (events.length > 0) {
+                html += `<div style="margin-bottom:15px;">
+                  <div style="font-size:12px; color:#5c6bc0; font-weight:bold; border-bottom:1px dashed #ddd; margin-bottom:5px;">📅 ${date}</div>`;
+                events.forEach(e => {
+                    html += `<div style="display:flex; gap:10px; font-size:13px; margin-bottom:4px;">
+                      <span style="font-family:monospace; color:#888;">${e.time}</span>
+                      <span>${e.event}</span>
+                  </div>`;
+                });
+                html += `</div>`;
+            }
+        });
+        container.innerHTML = html;
+    }
+
+    // 切换编辑模式
+    function toggleEditMode() {
+        isEditing = !isEditing;
+        const container = document.getElementById('memory-container');
+        const actionDiv = document.getElementById('edit-actions');
+        const toggleBtn = document.getElementById('editToggleBtn');
+
+        if (isEditing) {
+            toggleBtn.textContent = '取消';
+            actionDiv.style.display = 'block';
+            renderMemoryEditor();
+        } else {
+            toggleBtn.textContent = '编辑';
+            actionDiv.style.display = 'none';
+            renderMemoryView(); // 恢复查看
+        }
+    }
+
+    // 渲染编辑器
+    function renderMemoryEditor() {
+        const container = document.getElementById('memory-container');
+        const data = globalData.short || {};
+        container.innerHTML = '';
+
+        // 简单起见，我们只允许编辑最近的一天，或者列出所有
+        // 这里列出所有 Key 供编辑
+        Object.keys(data).sort().reverse().forEach(date => {
+            const dayInfo = data[date];
+            const events = Array.isArray(dayInfo) ? dayInfo : (dayInfo.events || []);
+
+            let html = `<div class="day-block" data-date="${date}" style="margin-bottom:20px; border:1px solid #eee; padding:10px; border-radius:8px;">
+              <div style="font-weight:bold; margin-bottom:5px; color:#5c6bc0;">${date}</div>
+              <div class="event-list">`;
+
+            events.forEach(e => {
+                html += createInputRow(e.time, e.event);
+            });
+
+            html += `</div><button class="btn" style="width:100%; margin-top:5px; background:#fff; border:1px dashed #ccc; color:#888;" onclick="addEventRow(this)">+ 添加事件</button></div>`;
+            container.innerHTML += html;
+        });
+    }
+
+    function createInputRow(time, event) {
+        return `
+      <div class="input-group">
+          <input type="text" class="input-full input-key" value="${time}" placeholder="HH:MM" style="width:70px;">
+          <input type="text" class="input-full input-val" value="${event}" placeholder="事件内容">
+          <button class="btn btn-del" onclick="this.parentElement.remove()">×</button>
+      </div>`;
+    }
+
+    window.addEventRow = function(btn) {
+        const list = btn.previousElementSibling;
+        const div = document.createElement('div');
+        div.innerHTML = createInputRow('', '');
+        list.appendChild(div.firstElementChild);
+    }
+
+    // 保存记忆
+    async function saveMemory() {
+        const dayBlocks = document.querySelectorAll('.day-block');
+        const newData = { ...globalData.short }; // 复制原数据
+
+        dayBlocks.forEach(block => {
+            const date = block.dataset.date;
+            const rows = block.querySelectorAll('.input-group');
+            const newEvents = [];
+
+            rows.forEach(row => {
+                const t = row.querySelector('.input-key').value;
+                const v = row.querySelector('.input-val').value;
+                if(t && v) newEvents.push({time: t, event: v});
+            });
+
+            // 保留 last_id
+            const oldInfo = globalData.short[date] || {};
+            let lastId = 0;
+            if (!Array.isArray(oldInfo)) lastId = oldInfo.last_id || 0;
+
+            newData[date] = {
+                events: newEvents,
+                last_id: lastId
+            };
+        });
+
+        // 发送请求
+        const res = await fetch(`/api/group/${groupId}/save_memory`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ content: newData })
+        });
+
+        if (res.ok) {
+            globalData.short = newData;
+            toggleEditMode(); // 退出编辑
+            alert('保存成功');
+        } else {
+            alert('保存失败');
+        }
+    }
+
+    // 保存元数据
+    async function saveGroupMeta() {
+        const name = document.getElementById('group-name').value;
+        // 头像在上传时已保存
+        const res = await fetch(`/api/group/${groupId}/update_meta`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ name: name })
+        });
+        if(res.ok) alert('更新成功');
+    }
+
+    // 上传头像 (复用之前的逻辑，需修改 API 路径)
+    // 注意：我们还没写群头像上传接口，可以先复用 upload_user_avatar 的逻辑改一下
+    // 暂时略过，或者您想现在加上？
+
+    loadData();
+</script>
+
+</body>
+</html>

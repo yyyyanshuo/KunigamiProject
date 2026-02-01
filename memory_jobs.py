@@ -38,47 +38,36 @@ def _process_single_char_daily(char_id, target_date_str):
     short_file = os.path.join(prompts_dir, "6_memory_short.json")
     medium_file = os.path.join(prompts_dir, "5_memory_medium.json")
 
-    # --- 1. 自动补漏 (调用 app.py 的函数) ---
+    # 1. 自动补录 (只补录私聊的，群聊的已经实时进去了)
     try:
-        # 注意：这里的 update_short_memory_for_date 必须在 app.py 里支持 char_id 参数
         count, _ = update_short_memory_for_date(char_id, target_date_str)
-        if count > 0:
-            print(f"     ✅ [补录] 自动补录了 {count} 条记忆")
-    except Exception as e:
-        print(f"     ❌ [补录] 出错: {e}")
+        if count > 0: print(f"     ✅ [补录] 私聊补录 {count} 条")
+    except Exception as e: print(f"     ❌ [补录] 出错: {e}")
 
-    # --- 2. 生成日记 (Short -> Medium) ---
-    if not os.path.exists(short_file):
-        print("     - 无短期记忆文件，跳过")
-        return
+    # 2. 生成日记
+    if not os.path.exists(short_file): return
 
     with open(short_file, "r", encoding="utf-8") as f:
         try: short_data = json.load(f)
         except: return
 
-    # 兼容新旧格式获取事件
+    # 获取事件 (此时这里面已经包含了 私聊 + 群聊 的混合时间线)
     day_data = short_data.get(target_date_str)
     events = []
-    if isinstance(day_data, list):
-        events = day_data
-    elif isinstance(day_data, dict):
-        events = day_data.get("events", [])
+    if isinstance(day_data, list): events = day_data
+    elif isinstance(day_data, dict): events = day_data.get("events", [])
 
     if not events:
-        print(f"     - {target_date_str} 无事件记录，跳过日结")
+        print(f"     - {target_date_str} 无事件，跳过")
         return
 
     # 拼凑文本
     text_to_summarize = "\n".join([f"[{e['time']}] {e['event']}" for e in events])
 
-    # 调用 AI (注意：这里如果是多角色，AI 可能会根据 System Prompt 里的设定来写日记)
-    # 为了保证人设不串，理想情况下应该把 char_id 传给 call_ai_to_summarize 来切换 System Prompt
-    # 但目前 call_ai_to_summarize 是通用的，我们先这样用
+    # 调用 AI 总结 (medium模式)
     summary = call_ai_to_summarize(text_to_summarize, "medium", char_id)
 
-    if not summary:
-        print("     ⚠️ AI 返回为空，日结失败")
-        return
+    if not summary: return
 
     # 写入 Medium
     medium_data = {}

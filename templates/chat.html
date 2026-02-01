@@ -193,8 +193,13 @@
       border-bottom-right-radius: 4px;
       text-align: left; /* 气泡还是在右边，但里面的字左对齐 */
     }
+    /* 修复：助手/群成员气泡样式 */
     .message-wrapper.assistant .bubble {
-      background: #fff; color: #444; border-bottom-left-radius: 4px; border: 1px solid #ffb6b9;
+      background-color: #ffffff !important; /* 【关键】强制纯白背景 */
+      color: #333;
+      border: 1px solid #ffb6b9; /* 加个浅粉色边框，更好看 */
+      border-bottom-left-radius: 4px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05); /* 加一点阴影增加立体感 */
     }
 
     /* 3. 外部控制容器 (修改版：一直显示 + 水平对齐) */
@@ -377,6 +382,19 @@
     /* 底部添加/保存按钮 */
     .qp-add-btn { width: 48%; padding: 8px; background: #f5f5f5; border: 1px dashed #ccc; border-radius: 6px; cursor:pointer;}
     .qp-save-btn { width: 48%; padding: 8px; background: #ffb6b9; color: #fff; border: none; border-radius: 6px; cursor:pointer; font-weight:bold;}
+
+    /* --- 群聊专属样式 --- */
+
+    /* 名字显示 (默认隐藏，群聊且非用户时显示) */
+    .bubble-name {
+      font-size: 11px; color: #888; margin-bottom: 2px; margin-left: 4px;
+      display: none; /* 默认不显示，JS控制 */
+    }
+
+    /* 助手消息容器微调 */
+    .message-group.assistant {
+      /* 保持原样，但注意我们稍后会动态修改里面的头像 */
+    }
   </style>
 </head>
 <body>
@@ -416,7 +434,8 @@
       <svg viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
     </button>
     <!-- 详情按钮 -->
-    <button class="header-btn" onclick="window.location.href='/memory/' + charId">
+    <!-- 找到 Header 右侧的记忆按钮 -->
+    <button class="header-btn" onclick="goToMemory()">
       <svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
     </button>
   </div>
@@ -513,6 +532,23 @@
 
 <!-- 【最终的、绝对正确的 <script> 标签】-->
 <script>
+  // --- 1. 核心状态 ---
+  const pathParts = window.location.pathname.split('/');
+  // 判断是否为群聊 (URL包含 /group/)
+  const isGroupMode = pathParts.includes('group');
+  // 获取 ID (如果是群聊则是 group_id，单聊则是 char_id)
+  const currentId = pathParts.pop();
+
+  console.log(`Mode: ${isGroupMode ? 'Group' : 'Single'}, ID: ${currentId}`);
+
+  // 缓存配置
+  let currentConfig = {}; // 存群信息 或 角色信息
+  let groupMembers = {};  // 存群成员详细信息 (ID -> Avatar/Name)
+
+  // API 路径前缀生成器
+  function getApiPrefix() {
+    return isGroupMode ? `/api/group/${currentId}` : `/api/${currentId}`;
+  }
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
@@ -529,7 +565,7 @@
     let charConfig = {
       name: 'Assistant',
       remark: 'Assistant',
-      avatar: '/static/avatar_assistant.jpg' // 默认兜底
+      avatar: '/static/avatar_assistant.png' // 默认兜底
     };
     console.log("Current Character ID:", charId);
 
@@ -545,128 +581,150 @@
     let isLoading = false;
     const messagesPerPage = 20;
 
-    // --- 【新增】初始化 UI (头像、标题) ---
-    async function initUI() {
-      try {
-        const res = await fetch(`/api/${charId}/config`);
-        const data = await res.json();
+  async function initUI() {
+    try {
+      // 根据模式请求不同接口
+      const url = isGroupMode ? `/api/group/${currentId}/config` : `/api/${currentId}/config`;
+      const res = await fetch(url);
+      const data = await res.json();
 
-        if (data && !data.error) {
-          // 更新全局变量
-          charConfig = data;
+      if (isGroupMode) {
+        // --- 群聊模式 ---
+        currentConfig = data.group_info;
+        groupMembers = data.members; // 缓存成员信息
 
-          // 1. 更新顶部名字 (优先显示备注)
-          const displayName = data.remark || data.name;
-          document.querySelector('.header-name').textContent = displayName;
-
-          // 2. (可选) 更新顶部状态文案，比如 "英雄 (Hero)"
-          // document.querySelector('.header-status span:last-child').textContent = '在线';
-        }
-      } catch (e) {
-        console.error("加载角色配置失败", e);
+        document.querySelector('.header-name').textContent = currentConfig.name + ` (${Object.keys(groupMembers).length + 1}人)`;
+        // 可以在 header 显示群头像，或者暂时不显示状态
+        document.querySelector('.header-status').style.display = 'none'; // 群聊不显示“手机在线”
+      } else {
+        // --- 单人模式 ---
+        currentConfig = data;
+        const displayName = data.remark || data.name;
+        document.querySelector('.header-name').textContent = displayName;
       }
-    }
+    } catch (e) { console.error("UI加载失败", e); }
+  }
 
     function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-    function renderMessageGroup({ id, content, role, timestamp }, mode = 'append') {
-      // 1. 处理空消息
-      const bubbles = content.split('/').map(p => p.trim()).filter(Boolean);
-      if (bubbles.length === 0 && mode === 'append') bubbles.push(content);
-      if (bubbles.length === 0) return;
+  function renderMessageGroup({ id, content, role, timestamp }, mode = 'append') {
+    const bubbles = content.split('/').map(p => p.trim()).filter(Boolean);
+    if (bubbles.length === 0 && mode === 'append') bubbles.push(content);
+    if (bubbles.length === 0) return;
 
-      const fullText = content;
-      const date = new Date(timestamp);
+    const fullText = content;
+    const date = new Date(timestamp);
 
-      // --- 2. 创建最外层的 Group 容器 ---
-      const group = document.createElement('div');
-      group.classList.add('message-group', role); // 加上 user 或 assistant 类
-      group.dataset.timestamp = date.toISOString();
-      group.dataset.id = id;
+    // --- 角色判断逻辑 ---
+    const isUser = role === 'user';
+    // 样式类：用户用 'user'，其他人统统用 'assistant' (为了复用左侧气泡样式)
+    const cssClass = isUser ? 'user' : 'assistant';
 
-      // --- 3. 创建头像 ---
-      const avatar = document.createElement('img');
-      avatar.classList.add('avatar-img');
-      // 【修改】使用动态配置的头像
-      if (role === 'user') {
-        avatar.src = '/static/avatar_user.jpg'; // 用户头像暂时固定，或者您也可以做成配置
-      } else {
-        // 使用从后端拉取的 charConfig.avatar
-        avatar.src = charConfig.avatar || '/static/avatar_assistant.jpg';
-      }
+    const group = document.createElement('div');
+    group.classList.add('message-group', cssClass);
+    group.dataset.timestamp = date.toISOString();
+    group.dataset.id = id;
 
-      // --- 4. 创建气泡栈 (Bubble Stack) ---
-      const stack = document.createElement('div');
-      stack.classList.add('bubble-stack');
+    // 【新增】把说话人的 ID 存进去 (如果是用户则是 'user'，如果是群聊则是 'isagi' 等)
+    group.dataset.sender = role;
 
-      // --- 5. 循环生成气泡并放入栈中 (原有逻辑微调) ---
-      bubbles.forEach((text, index) => {
-        const isLast = (index === bubbles.length - 1);
-        const wrapper = document.createElement('div');
-        wrapper.classList.add('message-wrapper', role); // 保留原有样式类以便兼容CSS
+    // --- 头像与名字处理 ---
+    let avatarUrl = '/static/avatar_assistant.png'; // 默认
+    let displayName = '';
 
-        const bubble = document.createElement('div');
-        bubble.classList.add('bubble');
-        bubble.innerHTML = text.replace(/\n/g, "<br>");
-
-        wrapper.appendChild(bubble);
-
-        // 如果是最后一个气泡，添加时间戳和复制按钮
-        if (isLast) {
-          wrapper.dataset.fulltext = fullText;
-          const controls = document.createElement('div');
-          controls.classList.add('controls-container');
-
-          const timestampEl = document.createElement('div');
-          timestampEl.classList.add('timestamp');
-          timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-          // 2. 编辑按钮 (SVG 图标: 笔)
-          const editBtn = document.createElement('button');
-          editBtn.className = 'action-btn';
-          editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
-          editBtn.onclick = () => openEditModal(id, fullText, group);
-
-          // 3. 删除按钮 (SVG 图标: 垃圾桶)
-          const delBtn = document.createElement('button');
-          delBtn.className = 'action-btn';
-          delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
-          delBtn.onclick = () => deleteMessage(id, group);
-
-          // 4. 复制按钮 (保持原逻辑，加上 class)
-          const copyBtn = document.createElement('button');
-          copyBtn.className = 'action-btn';
-          copyBtn.innerHTML = `<img src="${copyIconPath}" style="width:14px;height:14px;opacity:0.6;">`;
-          copyBtn.onclick = () => {
-            if (navigator.clipboard) {
-              navigator.clipboard.writeText(fullText).then(() => {
-                icon.src = checkIconPath; copyBtn.classList.add('copied');
-                setTimeout(() => { icon.src = copyIconPath; copyBtn.classList.remove('copied'); }, 1500);
-              });
-            }
-          }
-
-          controls.appendChild(timestampEl);
-          if(id) { // 只有有 ID 的消息才能编辑/删除
-            controls.appendChild(editBtn);
-            controls.appendChild(delBtn);
-          }
-          controls.appendChild(copyBtn);
-          wrapper.appendChild(controls);
-        }
-        stack.appendChild(wrapper);
-      });
-
-      // --- 6. 组装并插入 ---
-      group.appendChild(avatar); // 插入头像
-      group.appendChild(stack);  // 插入气泡栈
-
-      if (mode === 'prepend') {
-        chatContainer.prepend(group);
-      } else {
-        chatContainer.appendChild(group);
+    if (isUser) {
+      avatarUrl = '/static/avatar_user.png';
+    } else {
+      // 如果是群聊，role 其实是 char_id (比如 'kunigami')
+      if (isGroupMode && groupMembers[role]) {
+        avatarUrl = groupMembers[role].avatar;
+        displayName = groupMembers[role].remark || groupMembers[role].name;
+      } else if (!isGroupMode) {
+        // 单聊
+        avatarUrl = currentConfig.avatar;
       }
     }
+
+    // 创建头像
+    const avatar = document.createElement('img');
+    avatar.classList.add('avatar-img');
+    avatar.src = avatarUrl;
+
+    // --- 气泡栈 ---
+    const stack = document.createElement('div');
+    stack.classList.add('bubble-stack');
+
+    // 如果是群聊且不是用户，在第一条气泡上面显示名字
+    if (isGroupMode && !isUser && displayName) {
+      const nameDiv = document.createElement('div');
+      nameDiv.className = 'bubble-name';
+      nameDiv.textContent = displayName;
+      nameDiv.style.display = 'block';
+      stack.appendChild(nameDiv);
+    }
+
+    bubbles.forEach((text, index) => {
+      const isLast = (index === bubbles.length - 1);
+      const wrapper = document.createElement('div');
+      wrapper.classList.add('message-wrapper', cssClass);
+
+      const bubble = document.createElement('div');
+      bubble.classList.add('bubble');
+      bubble.innerHTML = text.replace(/\n/g, "<br>");
+      wrapper.appendChild(bubble);
+
+      if (isLast) {
+        // ... (控制栏代码保持不变，复制/编辑/删除逻辑通用) ...
+        wrapper.dataset.fulltext = fullText;
+        const controls = document.createElement('div');
+        controls.classList.add('controls-container');
+
+        const timestampEl = document.createElement('div');
+        timestampEl.classList.add('timestamp');
+        timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+        // 2. 编辑按钮 (SVG 图标: 笔)
+        const editBtn = document.createElement('button');
+        editBtn.className = 'action-btn';
+        editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+        editBtn.onclick = () => openEditModal(id, fullText, group);
+
+        // 3. 删除按钮 (SVG 图标: 垃圾桶)
+        const delBtn = document.createElement('button');
+        delBtn.className = 'action-btn';
+        delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+        delBtn.onclick = () => deleteMessage(id, group);
+
+        // 4. 复制按钮 (保持原逻辑，加上 class)
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'action-btn';
+        copyBtn.innerHTML = `<img src="${copyIconPath}" style="width:14px;height:14px;opacity:0.6;">`;
+        copyBtn.onclick = () => {
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(fullText).then(() => {
+              icon.src = checkIconPath; copyBtn.classList.add('copied');
+              setTimeout(() => { icon.src = copyIconPath; copyBtn.classList.remove('copied'); }, 1500);
+            });
+          }
+        }
+
+        controls.appendChild(timestampEl);
+        if(id) { // 只有有 ID 的消息才能编辑/删除
+          controls.appendChild(editBtn);
+          controls.appendChild(delBtn);
+        }
+        controls.appendChild(copyBtn);
+        wrapper.appendChild(controls);
+      }
+      stack.appendChild(wrapper);
+    });
+
+    group.appendChild(avatar);
+    group.appendChild(stack);
+
+    if (mode === 'prepend') chatContainer.prepend(group);
+    else chatContainer.appendChild(group);
+  }
 
     // --- 【新增】全局日期重排函数 (彻底解决日期重复/Invalid问题) ---
     function refreshDateSeparators() {
@@ -706,7 +764,8 @@
       isLoading = true;
       loadMoreBtn.textContent = '加載中...';
       try {
-        const res = await fetch(`/api/${charId}/history?page=${page}&limit=${messagesPerPage}`);
+        // 【修改】使用 getApiPrefix() 动态获取路径
+        const res = await fetch(`${getApiPrefix()}/history?page=${page}&limit=${messagesPerPage}`);
         const data = await res.json();
         if (data.messages && data.messages.length > 0) {
           const oldScrollHeight = chatContainer.scrollHeight;
@@ -771,27 +830,48 @@
         chatContainer.scrollTop = chatContainer.scrollHeight;
 
         try {
-            const res = await fetch(`/api/${charId}/chat`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({message: originalText}) });
-            const data = await res.json();
+          // 【修改】使用 getApiPrefix()
+          const res = await fetch(`${getApiPrefix()}/chat`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({message: originalText})
+          });
+          const data = await res.json();
 
           if (data.replies && data.replies.length > 0) {
-            const fullReplyText = data.replies.join(' / ');
-            // 【修改】把后端传回来的 id 填进去 (data.id)
-            const aiMsg = {
-              id: data.id,  // <--- 加上这一行
-              content: fullReplyText,
-              role: 'assistant',
-              timestamp: new Date()
-            };
-            await sleep(1000);
-            renderMessageGroup(aiMsg, 'append');
-          } else { // 【修正这里】不要用 displayBubbleGroup
-              renderMessageGroup({
-                content: data.reply || '[无回复]',
+            // --- 【修正】区分 单聊(字符串) 和 群聊(对象) ---
+
+            // 1. 判断是否为群聊格式 (数组里第一项是对象)
+            if (typeof data.replies[0] === 'object') {
+              // 群聊模式：可能有多个人回复，我们需要循环渲染
+              for (const reply of data.replies) {
+                // 模拟一点打字延迟，更有真实感
+                await sleep(800);
+
+                renderMessageGroup({
+                  id: reply.id || Date.now(), // 如果后端没回传ID暂时用时间戳兜底
+                  content: reply.content,
+                  role: reply.char_id, // 【关键】把说话人的ID传进去，renderMessageGroup会自动找头像
+                  timestamp: new Date() // 或者使用 reply.timestamp
+                }, 'append');
+
+                // 滚到底部
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+              }
+            }
+            // 2. 单聊模式 (旧逻辑，数组里是字符串)
+            else {
+              const fullReplyText = data.replies.join(' / ');
+              const aiMsg = {
+                id: data.id,
+                content: fullReplyText,
                 role: 'assistant',
                 timestamp: new Date()
-              }, 'append');
+              };
+              await sleep(1000);
+              renderMessageGroup(aiMsg, 'append');
             }
+          }
         } catch (e) { console.error(e);
           // 【修正这里】不要用 displayBubbleGroup
           renderMessageGroup({
@@ -817,14 +897,14 @@
         // 既然我们要跳到某条消息，就必须保证它被加载出来
         // 1. 先问后端：这条消息在第几页？
         try {
-          const checkRes = await fetch(`/api/${charId}/history?limit=${messagesPerPage}&target_id=${jumpId}`);
+          const checkRes = await fetch(`${getApiPrefix()}/history?limit=${messagesPerPage}&target_id=${jumpId}`);
           const checkData = await checkRes.json();
           const targetPage = checkData.page || 1;
 
           // 2. 一次性加载足够深的数据 (Page 1 ~ TargetPage)
           // 这样能保证目标消息及其下方的所有新消息都在
           const totalCountToLoad = targetPage * messagesPerPage;
-          const loadRes = await fetch(`/api/${charId}/history?page=1&limit=${totalCountToLoad}`);
+          const loadRes = await fetch(`${getApiPrefix()}/history?page=1&limit=${totalCountToLoad}`);
           const data = await loadRes.json();
 
           // 3. 更新全局状态
@@ -891,7 +971,8 @@
       if(!newContent) return alert("内容不能为空");
 
       try {
-        const res = await fetch(`/api/${charId}/messages/${currentEditId}`, {
+        // 【修改】使用 getApiPrefix()
+        const res = await fetch(`${getApiPrefix()}/messages/${currentEditId}`, {
           method: 'PUT',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({content: newContent})
@@ -907,7 +988,8 @@
     async function deleteMessage(id, groupElement) {
       if(!confirm("确定要删除这条消息吗？")) return;
       try {
-        const res = await fetch(`/api/${charId}/messages/${id}`, { method: 'DELETE' });
+        // 【修改】使用 getApiPrefix()
+        const res = await fetch(`${getApiPrefix()}/messages/${id}`, { method: 'DELETE' });
         if(res.ok) {
           // 删除成功，带动画移除 DOM
           groupElement.style.transition = "all 0.3s";
@@ -1059,8 +1141,27 @@
       let lastDateStr = "";
 
       selectedEls.forEach(group => {
-        const role = group.classList.contains('user') ? 'user' : 'assistant';
-        const name = roleMap[role];
+        // 1. 获取发送者 ID
+        const senderId = group.dataset.sender;
+        let name = '未知';
+
+        // 2. 判断名字
+        if (senderId === 'user') {
+          // 这里写死或者从页面获取您的名字
+          name = '篠原桐奈';
+        } else {
+          if (isGroupMode) {
+            // --- 群聊模式：去 groupMembers 里查 ---
+            if (groupMembers && groupMembers[senderId]) {
+              name = groupMembers[senderId].name;
+            } else {
+              name = senderId; // 查不到就显示ID
+            }
+          } else {
+            // --- 单聊模式：直接用当前角色的名字 ---
+            name = currentConfig.remark || currentConfig.name;
+          }
+        }
         const timestampStr = group.dataset.timestamp;
         if (!timestampStr) return;
         const dateObj = new Date(timestampStr);
@@ -1120,7 +1221,9 @@
       if(!confirm("要让錬介整理一下今天的记忆吗？\n(这会消耗一些 Token 并更新后台记忆文件)")) return;
 
       try {
-        const res = await fetch(`/api/${charId}/memory/snapshot`, { method: 'POST' });
+        // 原来：fetch(`/api/${charId}/memory/snapshot...`)
+        // 【修改后】：
+        const res = await fetch(`${getApiPrefix()}/memory/snapshot`, { method: 'POST' });
         const data = await res.json();
         if(data.status === 'success') {
           // 【修改】直接显示后端返回的 message，它包含了具体的新增条数信息
@@ -1159,7 +1262,8 @@
       if(!kw) { searchResults.innerHTML = ''; return; }
 
       searchTimer = setTimeout(async () => {
-        const res = await fetch(`/api/${charId}/search`, {
+        // 【修改】使用 getApiPrefix()
+        const res = await fetch(`${getApiPrefix()}/search`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({keyword: kw})
@@ -1209,7 +1313,7 @@
 
         // 步骤 A: 询问后端这条消息在第几页 (使用之前的逻辑，limit=20)
         // 这里我们只是为了获取 page 参数，不需要真正的 messages
-        const checkRes = await fetch(`/api/${charId}/history?limit=${messagesPerPage}&target_id=${id}`);
+        const checkRes = await fetch(`${getApiPrefix()}/history?limit=${messagesPerPage}&target_id=${id}`);
         const checkData = await checkRes.json();
 
         const targetPage = checkData.page;
@@ -1220,7 +1324,7 @@
         const totalCountToLoad = targetPage * messagesPerPage;
 
         // 调用加载 (直接请求第一页，但 limit 巨大)
-        const loadRes = await fetch(`/api/${charId}/history?page=1&limit=${totalCountToLoad}`);
+        const loadRes = await fetch(`${getApiPrefix()}/history?page=1&limit=${totalCountToLoad}`);
         const data = await loadRes.json();
 
         // 更新全局状态 (假装我们只在第1页，实际上是一次性加载了一大坨)
@@ -1393,6 +1497,14 @@
         }
       } catch(e) { alert('网络错误'); }
     }
+
+  function goToMemory() {
+    if (isGroupMode) {
+      window.location.href = `/memory/group/${currentId}`;
+    } else {
+      window.location.href = `/memory/${currentId}`;
+    }
+  }
 </script>
 
 </body>

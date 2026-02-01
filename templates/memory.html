@@ -186,9 +186,8 @@
     <!-- 【新增】角色档案编辑模块 -->
     <div class="section-title">🎭 角色档案 (Character Profile)</div>
 
-    <!-- 【修正版】角色档案模块 -->
+    <!-- 【修正版】角色档案模块 (置顶开关移入编辑模式) -->
     <div class="module" id="module-meta">
-        <!-- 【修改点】去掉了 open 属性，默认收起 -->
         <details>
             <summary>基本信息 (Metadata)</summary>
 
@@ -196,17 +195,18 @@
             <div class="view-mode" id="meta-view-mode" style="padding: 20px; text-align: center;">
                 <div style="position: relative; display: inline-block;">
                     <img id="view-avatar" src="" style="width:100px; height:100px; border-radius:15px; object-fit:cover; border: 3px solid #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                    <!-- 查看模式下的置顶标记 -->
+                    <span id="view-pinned-icon" style="display:none; position:absolute; top:-5px; right:-5px; background:#fff; border-radius:50%; padding:2px; box-shadow:0 2px 5px rgba(0,0,0,0.2); font-size:16px;">📌</span>
                 </div>
                 <div id="view-remark" style="font-size:18px; font-weight:bold; margin-top:10px; color:#333;">(加载中...)</div>
                 <div style="font-size:12px; color:#ccc; margin-top:5px;">ID: <span id="view-id"></span></div>
 
                 <div style="margin-top: 15px;">
-                    <!-- 点击进入编辑模式 -->
                     <button class="btn btn-edit" onclick="toggleMetaEdit(true)">编辑资料 / Edit Profile</button>
                 </div>
             </div>
 
-            <!-- 2. 编辑模式 (Edit Mode) - 默认隐藏 -->
+            <!-- 2. 编辑模式 (Edit Mode) -->
             <div class="edit-mode" id="meta-edit-mode" style="padding: 20px; text-align: center; display: none; background: #fffcfc;">
 
                 <!-- 头像上传 -->
@@ -225,14 +225,19 @@
                     <input type="text" id="edit-remark-input" class="input-full" style="margin:0; text-align:center; font-size:16px; font-weight:bold;">
                 </div>
 
+                <!-- 【移动到这里】置顶开关 -->
+                <div style="margin-bottom: 15px;">
+                    <label style="display: inline-flex; align-items: center; cursor: pointer; color: #555; font-weight: bold; background: #f0f0f0; padding: 8px 15px; border-radius: 20px;">
+                        <input type="checkbox" id="meta-pinned" style="width: 16px; height: 16px; margin-right: 8px; accent-color: #ffb6b9;">
+                        📌 置顶此联系人
+                    </label>
+                </div>
+
                 <!-- 操作按钮 -->
-                <div class="action-bar" style="justify-content: center; background: transparent; border: none; padding-top: 10px;">
-                    <!-- 【关键修改】加上 display: inline-block; 强制显示按钮 -->
-                    <button class="btn btn-cancel" onclick="toggleMetaEdit(false)" style="margin-right: 10px; display: inline-block;">取消 / Cancel</button>
-                    <button class="btn btn-save" onclick="saveMetaAndExit()" style="display: inline-block;">保存 / Save</button>
-                </div> 填写的内容为：
-                1. 角色 ID
-                2. 角色姓名
+                <div class="action-bar" style="justify-content: center; background: transparent; border: none; padding-top: 5px;">
+                    <button class="btn btn-cancel" onclick="toggleMetaEdit(false)" style="margin-right: 10px; display: inline-block;">取消</button>
+                    <button class="btn btn-save" onclick="saveCharProfile()" style="display: inline-block;">保存 / Save</button>
+                </div>
             </div>
 
         </details>
@@ -363,36 +368,39 @@
     // --- 【修正版】加载角色元数据 ---
     async function loadCharMeta() {
         try {
-            // 加个时间戳防止缓存，解决“刷新后不见了”的问题
             const res = await fetch(`/api/${charId}/config?t=${new Date().getTime()}`);
             const data = await res.json();
 
             if(data && !data.error) {
                 const avatarUrl = data.avatar || '/static/default_avatar.png';
                 const remarkText = data.remark || data.name || 'Unknown';
+                const isPinned = data.pinned || false;
 
-                // 1. 填充【查看模式】的数据
+                // 1. 填充【查看模式】
                 document.getElementById('view-avatar').src = avatarUrl;
                 document.getElementById('view-remark').textContent = remarkText;
                 document.getElementById('view-id').textContent = charId;
 
-                // 2. 填充【编辑模式】的数据 (作为初始值)
+                // 【新增】控制查看模式下的小图钉显示
+                document.getElementById('view-pinned-icon').style.display = isPinned ? 'block' : 'none';
+
+                // 2. 填充【编辑模式】 (作为初始值)
                 document.getElementById('edit-avatar-preview').src = avatarUrl;
                 document.getElementById('edit-remark-input').value = remarkText;
+                document.getElementById('meta-pinned').checked = isPinned;
             }
-        } catch(e) {
-            console.error("加载角色元数据失败", e);
-        }
+        } catch(e) { console.error("加载失败", e); }
     }
 
-    // --- 【修改版】保存并退出 ---
-    async function saveMetaAndExit() {
+    // --- 【修正版】保存档案 ---
+    async function saveCharProfile() {
+        // 【关键修正】这里必须用 edit-remark-input，因为 HTML 里是这个 ID
         const newRemark = document.getElementById('edit-remark-input').value.trim();
-        // 注意：头像在 uploadAvatar 时已经上传并更新了配置文件，这里主要保存备注名
-        // 但为了逻辑严谨，我们还是把当前的头像路径（虽然这里前端拿不到最新路径字符串，除非存全局变量，但通常不需要）
-        // 这里的逻辑是：只更新备注名。头像由 uploadAvatar 独立处理。
+        const isPinned = document.getElementById('meta-pinned').checked;
 
         const btn = document.querySelector('#module-meta .btn-save');
+        const originalText = btn.textContent;
+
         btn.textContent = '保存中...';
         btn.disabled = true;
 
@@ -401,15 +409,19 @@
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    remark: newRemark
-                    // avatar: null // 不传 avatar，后端就不会覆盖掉刚才上传的新头像
+                    remark: newRemark,
+                    pinned: isPinned
                 })
             });
             const result = await res.json();
             if(result.status === 'success') {
-                // 保存成功后，手动更新前端显示，不刷新页面
+                alert('档案更新成功！');
+
+                // 手动更新前端显示
                 document.getElementById('view-remark').textContent = newRemark;
-                // 退出编辑模式
+                // 更新小图钉显示状态
+                document.getElementById('view-pinned-icon').style.display = isPinned ? 'block' : 'none';
+
                 toggleMetaEdit(false);
             } else {
                 alert('更新失败: ' + result.error);
@@ -417,7 +429,7 @@
         } catch(e) {
             alert('网络错误');
         } finally {
-            btn.textContent = '保存 / Save';
+            btn.textContent = originalText;
             btn.disabled = false;
         }
     }

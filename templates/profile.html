@@ -85,8 +85,24 @@
 <body>
 
 <div class="header">
-  <img src="/static/avatar_user.jpg" class="avatar-large">
+  <!-- 【修改】头像点击上传区域 -->
+  <div style="position: relative; display: inline-block; cursor: pointer;" onclick="document.getElementById('user-avatar-input').click()">
+
+    <!-- 头像图片 -->
+    <img id="user-avatar-img" src="/static/avatar_user.png" class="avatar-large" style="transition: opacity 0.3s;">
+
+    <!-- 右下角的小相机图标 -->
+    <div style="position: absolute; bottom: 10px; right: 0; background: #ffb6b9; color: white; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border: 2px solid #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">
+      <svg viewBox="0 0 24 24" style="width:16px; height:16px; fill:currentColor;"><path d="M9 2L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/></svg>
+    </div>
+
+    <!-- 隐藏的文件输入框 -->
+    <input type="file" id="user-avatar-input" accept="image/*" style="display: none;" onchange="uploadUserAvatar(this)">
+  </div>
+
   <div class="username">篠原桐奈</div>
+  <!-- 这里的 ID 其实没有什么实际用处，或者您可以从后端获取 -->
+  <!-- <div class="user-id">ID: User_001</div> -->
 </div>
 
 <!-- 模块 1: 用户设定 -->
@@ -133,6 +149,27 @@
   </div>
 </div>
 
+<!-- 【新增】API 消耗日志面板 -->
+<div class="section-title">📊 系统调用日志 (API Usage Logs)</div>
+<div class="config-card" style="padding: 0; overflow: hidden; margin-bottom: 80px;">
+  <div style="max-height: 300px; overflow-y: auto;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 12px; font-family: monospace;">
+      <thead style="background: #f8f9fa; color: #666; position: sticky; top: 0;">
+      <tr>
+        <th style="padding: 10px; text-align: left;">时间</th>
+        <th style="padding: 10px; text-align: left;">角色</th>
+        <th style="padding: 10px; text-align: right;">Input</th>
+        <th style="padding: 10px; text-align: right;">Output</th>
+        <th style="padding: 10px; text-align: right;">Total</th>
+      </tr>
+      </thead>
+      <tbody id="usage-log-body">
+      <tr><td colspan="5" style="text-align:center; padding:20px; color:#ccc;">加载中...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
 <!-- 引入底部导航栏 -->
 {% include 'tabbar.html' %}
 
@@ -159,6 +196,49 @@
 
     } catch(e) {
       alert('配置加载失败');
+    }
+  }
+
+  // --- 【新增】上传用户头像 ---
+  async function uploadUserAvatar(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    // 1. 本地预览 (让用户立刻看到变化)
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      document.getElementById('user-avatar-img').src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+
+    // 2. 上传到服务器
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const imgEl = document.getElementById('user-avatar-img');
+    // 变半透明提示正在上传
+    imgEl.style.opacity = '0.5';
+
+    try {
+      const res = await fetch('/api/upload_user_avatar', {
+        method: 'POST',
+        body: formData
+      });
+      const result = await res.json();
+
+      if (result.status === 'success') {
+        // 成功后，更新 src (带时间戳)，确保下次刷新也是新的
+        imgEl.src = result.url;
+        // alert('头像更新成功！'); // 可选：不喜欢弹窗可以去掉
+      } else {
+        alert('上传失败: ' + result.error);
+      }
+    } catch (e) {
+      alert('网络错误');
+    } finally {
+      imgEl.style.opacity = '1';
+      // 清空 input，防止选同一张图不触发 onchange
+      input.value = '';
     }
   }
 
@@ -230,6 +310,41 @@
 
   // 初始化
   loadConfigs();
+
+  // 【新增】加载日志函数
+  async function loadUsageLogs() {
+    try {
+      const res = await fetch('/api/usage_logs');
+      const logs = await res.json();
+
+      const tbody = document.getElementById('usage-log-body');
+      if (logs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:#ccc;">暂无调用记录</td></tr>';
+        return;
+      }
+
+      let html = '';
+      logs.forEach(log => {
+        // 给 Total 加个颜色，消耗越多越红
+        let color = '#444';
+        if(log.total > 2000) color = '#e65100'; // 橙色
+        if(log.total > 5000) color = '#c62828'; // 红色
+
+        html += `
+              <tr style="border-bottom: 1px solid #eee;">
+                  <td style="padding: 8px 10px; color: #888;">${log.time.split(' ')[1]}</td> <!-- 只显示时分秒 -->
+                  <td style="padding: 8px 10px; font-weight:bold;">${log.char_id}</td>
+                  <td style="padding: 8px 10px; text-align: right; color: #1565c0;">${log.input}</td>
+                  <td style="padding: 8px 10px; text-align: right; color: #2e7d32;">${log.output}</td>
+                  <td style="padding: 8px 10px; text-align: right; font-weight: bold; color: ${color};">${log.total}</td>
+              </tr>`;
+      });
+      tbody.innerHTML = html;
+    } catch(e) { console.error("日志加载失败", e); }
+  }
+
+  // 初始化时调用
+  loadUsageLogs();
 </script>
 
 </body>

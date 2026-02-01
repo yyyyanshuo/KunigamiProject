@@ -25,7 +25,8 @@ app = Flask(__name__, static_folder='static', template_folder='templates')
 
 # 配置项
 MAX_CONTEXT_LINES = 10
-MODEL_NAME = "gemini-3-pro"
+MODEL_NAME = "gemini-2.5-pro"
+# MODEL_NAME = "gemini-3-pro-preview"gemini-3-flash-preview gemini-2.5-pro gemini-2.5-flash-lite
 
 DATABASE_FILE = "chat_history.db"
 
@@ -36,6 +37,9 @@ CURRENT_USER_NAME = "篠原桐奈"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CHARACTERS_DIR = os.path.join(BASE_DIR, "characters")
 CONFIG_FILE = os.path.join(BASE_DIR, "configs", "characters.json")
+# 【新增】群聊配置路径
+GROUPS_CONFIG_FILE = os.path.join(BASE_DIR, "configs", "groups.json")
+GROUPS_DIR = os.path.join(BASE_DIR, "groups")
 
 PERSONA_GENERATION_PROMPT = """
 あなたは熟練したキャラクター設定作家です。
@@ -61,6 +65,16 @@ PERSONA_GENERATION_PROMPT = """
 # 生活状況
 - 拠点：(現在の住居や所属)
 - (寮や部屋割りなどの詳細があれば記述)
+如果是蓝色监狱的角色：
+- 寮（ベッド順）：
+    - ①潔世一(11)、千切豹馬(4)、御影玲王(14)、**國神錬介(50)**
+    - ②烏旅人(6)、乙夜影汰(19)、雪宮剣優(5)、冰織羊(16)
+    - ③黒名蘭世(96)、清羅刃(69)、雷市陣吾(22)、五十嵐栗夢(108)
+    - ④糸師凛(9)、蜂楽廻(8)、七星虹郎(17)、（空）
+    - ⑤我牙丸吟(1)、時光青志(20)、蟻生十兵衛(3)、（空）
+    - ⑥オリーウェ・エゴ(2)、閃堂秋人(18)、士道龍聖(111)、（空）
+    - ⑦馬狼照英(13)、凪誠士郎(7)、二子一揮(25)、剣城斬鉄(15)
+- 寮配置：①②③④/⑦⑥○⑤（①真正面は⑦）
 
 # 人間関係
 - (家族、友人、ライバル、敵対関係など)
@@ -283,19 +297,78 @@ def build_system_prompt(char_id):  # <--- 增加参数
 
     return "\n\n".join(prompt_parts)
 
-# --- 【新增】AI 总结专用函数 ---
+# --- 工具：构建群聊时的关系 Prompt (ID -> Name 映射版) ---
+def build_group_relationship_prompt(current_char_id, other_member_ids):
+    """
+    当 current_char_id 说话时，注入他对群里其他人的看法。
+    关键：需要把 other_member_ids (如 isagi) 转换为 关系JSON里的 Key (如 洁世一)
+    """
+    # 1. 读取全局角色配置，建立 ID -> Name 的映射表
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    CONFIG_FILE = os.path.join(BASE_DIR, "configs", "characters.json")
+
+    id_to_name_map = {}
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            chars_config = json.load(f)
+            for cid, cinfo in chars_config.items():
+                id_to_name_map[cid] = cinfo.get("name", cid) # 没名字就用ID兜底
+    except: pass
+
+    # 2. 读取当前角色的关系文件
+    _, prompts_dir = get_paths(current_char_id)
+    rel_file = os.path.join(prompts_dir, "2_relationship.json")
+
+    prompt_text = "【Group Relationships / 群聊关系认知】\n(你是群聊的一员，请参考以下你与其他成员的关系)\n"
+
+    if not os.path.exists(rel_file):
+        return ""
+
+    try:
+        with open(rel_file, "r", encoding="utf-8") as f:
+            # 这里的 Key 是名字 (如 "洁世一")
+            rels_data = json.load(f)
+
+        found_any = False
+
+        # 3. 遍历在场的其他人，查找关系
+        for other_id in other_member_ids:
+            if other_id == "user": continue
+
+            # 获取对方的名字
+            target_name = id_to_name_map.get(other_id, other_id)
+
+            # 在关系表里查找
+            # 尝试直接匹配名字
+            rel_info = rels_data.get(target_name)
+
+            if rel_info:
+                role = rel_info.get('role', '未知')
+                desc = rel_info.get('description', '特になし')
+                prompt_text += f"- 対 {target_name}: {role} ({desc})\n"
+                found_any = True
+            else:
+                # 如果没找到特定关系，也可以不写，或者写个默认
+                pass
+
+        if not found_any:
+            return "" # 如果跟群里的人都没关系，就不加这段 prompt
+
+        return prompt_text
+
+    except Exception as e:
+        print(f"Build Group Rel Error: {e}")
+        return ""
+
+# --- 【修正版】AI 总结专用函数 (第一人称 + 纯净事实版) ---
 def call_ai_to_summarize(text_content, prompt_type="short", char_id="kunigami"):
-    """
-    调用 AI 对文本进行总结
-    prompt_type: 'short' (生成今日事件), 'medium' (生成每日摘要), 'long' (生成月度回忆)
-    """
     if not text_content:
         return None
 
-    # 1. 获取角色名字
+    # 获取角色名字 (用于辅助定位，虽说是第一人称，但AI知道自己是谁更好)
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     CONFIG_FILE = os.path.join(BASE_DIR, "configs", "characters.json")
-    char_name = "AI助手" # 默认值
+    char_name = "私" # 默认自称
 
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -305,25 +378,61 @@ def call_ai_to_summarize(text_content, prompt_type="short", char_id="kunigami"):
     except: pass
 
     system_instruction = ""
+
+    # 1. 短期记忆 (保持时间点列表，强调第一人称事实)
     if prompt_type == "short":
-        system_instruction = "あなたは記憶整理係です。以下の会話から重要な出来事を抽出し（具体的な時間を含む）、無関係な雑談は無視してください。出力フォーマット：\n- [HH:MM] 出来事の内容\n- [HH:MM] 出来事の内容"
+        system_instruction = (
+            f"あなたは{char_name}本人として、自身の記憶を整理しています。"
+            "以下の会話ログから、重要な出来事を抽出してください。"
+            "感情的な感想は不要です。「誰と何をしたか」「何が起きたか」という事実のみを簡潔に記録してください。"
+            "出力フォーマット：\n- [HH:MM] (自分または相手の行動・会話の要点)"
+        )
+
+    # 2. 【新增】群聊记录模式 (纯客观、上帝视角)
+    elif prompt_type == "group_log":
+        system_instruction = (
+            "あなたはグループチャットの書記係（第三者）です。"
+            "以下の会話ログから、重要なトピックや出来事を**客観的に**抽出してください。"
+            "**要件**：\n"
+            "1. 特定のキャラクターの視点（私/俺）を使わないでください。\n"
+            "2. 「[名前]が〜と言った」「全員で〜に行くことになった」のように、主語を明確にしてください。\n"
+            "3. 感情的な装飾は省き、事実のみを記録してください。\n"
+            "出力フォーマット：\n- [HH:MM] 出来事の内容"
+        )
+
+    # 2. 中期记忆 (日结) - 【修改】去时间戳，变段落
     elif prompt_type == "medium":
-        # 【修改】动态插入 char_name
-        system_instruction = f"あなたは日記記録係です。この一日のすべての断片的な出来事を、{char_name}の一人称視点で、300文字以内の一貫した日記にまとめてください。"
+        system_instruction = (
+            f"あなたは{char_name}本人です。この一日の出来事を振り返り、**一つの繋がった文章（段落形式）**で要約してください。"
+            "**要件**：\n"
+            "1. **時間表記（[HH:MM]など）は一切含めないでください**。\n"
+            "2. 箇条書きは禁止です。\n"
+            "3. **一人称視点**（俺/私）で、起きた事実のみを淡々と記述してください（感情的なポエムは不可）。\n"
+            "4. ユーザーとの会話や活動内容を中心に、300文字以内でまとめてください。"
+        )
+
+    # 3. 长期记忆 (周结) - 【修改】去时间戳，变段落
     elif prompt_type == "long":
-        system_instruction = "あなたは伝記作家です。この一週間の日記に基づいて、今週の重要な転換点と二人の関係の進展を、200文字程度で簡潔にまとめ、長期記憶として保存してください。"
+        system_instruction = (
+            f"あなたは{char_name}本人です。この一週間の記録を振り返り、全体的な流れを要約してください。"
+            "**要件**：\n"
+            "1. **具体的な日時や時間表記は不要**です。\n"
+            "2. 箇条書きは禁止です。**一つのまとまった文章**にしてください。\n"
+            "3. ユーザーとの関係性の変化や、重要な出来事の因果関係を一人称で客観的に記述してください。\n"
+            "4. 200文字程度。"
+        )
 
     messages = [
         {"role": "system", "content": system_instruction},
-        {"role": "user", "content": f"内容は以下の通りです：\n{text_content}"}
+        {"role": "user", "content": f"記憶ログ：\n{text_content}"}
     ]
 
-    print(f"--- 正在进行记忆总结 ({prompt_type}) for {char_name} ---")
+    print(f"--- 正在进行记忆总结 ({prompt_type}) [第一人称事实模式] ---")
 
     if USE_OPENROUTER:
-        return call_openrouter(messages)
+        return call_openrouter(messages, char_id=char_id)
     else:
-        return call_gemini(messages)
+        return call_gemini(messages, char_id=char_id)
 
 # --- 【修正版】核心逻辑：增量更新 (支持多角色) ---
 def update_short_memory_for_date(char_id, target_date_str):
@@ -418,6 +527,83 @@ def update_short_memory_for_date(char_id, target_date_str):
         print(f"增量总结出错: {e}")
         return 0, []
 
+# --- 【修正版】分发群聊记忆给成员 ---
+def distribute_group_memory(group_id, group_name, members, new_events, date_str):
+    """
+    将群聊新生成的事件，追加到每个成员的 6_memory_group_log.json 中
+    """
+    if not new_events:
+        print("   [Distribute] 没有新事件需要分发")
+        return
+
+    print(f"   [Distribute] 正在分发 {len(new_events)} 条事件给成员: {members}")
+
+    for char_id in members:
+        if char_id == "user": continue # 跳过用户
+
+        try:
+            # 1. 找到该角色的文件路径
+            _, prompts_dir = get_paths(char_id)
+            # 【修改】目标文件改为 6_memory_short.json
+            short_file = os.path.join(prompts_dir, "6_memory_short.json")
+
+            # 2. 读取现有数据
+            current_data = {}
+            if os.path.exists(short_file):
+                with open(short_file, "r", encoding="utf-8") as f:
+                    try: current_data = json.load(f)
+                    except: pass
+
+            # 兼容新旧格式 (获取当天的 dict)
+            day_data = current_data.get(date_str, {})
+            # 如果是旧格式列表，转为字典结构
+            if isinstance(day_data, list):
+                existing_events = day_data
+                last_id = 0
+            else:
+                existing_events = day_data.get("events", [])
+                last_id = day_data.get("last_id", 0)
+
+            # 3. 追加新事件 (格式化一下，标明来源)
+            count_added = 0
+            for event in new_events:
+                # 格式化内容：[群聊:群名] 事件
+                # 【修改】这里确保 event['event'] 是纯文本，不包含奇怪的 AI 生成头信息
+                clean_event_text = event['event'].replace('AI生成信息发送的内容', '').strip()
+                event_content = f"[群聊:{group_name}] {clean_event_text}"
+
+                # 简单去重
+                is_duplicate = False
+                for old in existing_events:
+                    if old['time'] == event['time'] and event_content in old['event']:
+                        is_duplicate = True
+                        break
+
+                if not is_duplicate:
+                    existing_events.append({
+                        "time": event['time'],
+                        "event": event_content
+                    })
+                    count_added += 1
+
+            if count_added > 0:
+                # 按时间重新排序 (保证群聊和私聊按时间穿插)
+                existing_events.sort(key=lambda x: x['time'])
+
+                # 保存回文件 (保持 last_id 不变，因为这些群聊消息不属于私聊数据库)
+                current_data[date_str] = {
+                    "events": existing_events,
+                    "last_id": last_id
+                }
+
+                with open(short_file, "w", encoding="utf-8") as f:
+                    json.dump(current_data, f, ensure_ascii=False, indent=2)
+
+                print(f"     -> [{char_id}] 合并成功 (+{count_added}条)")
+
+        except Exception as e:
+            print(f"     ❌ 同步给 [{char_id}] 失败: {e}")
+
 # ---------------------- 工具函数 ----------------------
 
 def get_timestamp():
@@ -473,80 +659,55 @@ def chat_view(char_id):
     # 实际项目中，您可能需要把 char_id 传给模板，或者让前端自己解析 URL
     return send_from_directory("templates", "chat.html")
 
+# --- 【新增】群聊页面路由 ---
+@app.route("/chat/group/<group_id>")
+def group_chat_view(group_id):
+    # 复用 chat.html，但在前端根据 URL 区分逻辑
+    return send_from_directory("templates", "chat.html")
+
+# --- 【修正版】获取通讯录 (角色 + 群聊 混合列表) ---
 @app.route("/api/contacts")
 def get_contacts():
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    CONFIG_FILE = os.path.join(BASE_DIR, "configs", "characters.json")
-
-    print(f"\n--- [Debug] 开始加载通讯录 ---")
-    # 1. 读取配置文件
+    # 1. 读取角色配置
     if not os.path.exists(CONFIG_FILE):
-        print(f"❌ 找不到配置文件: {CONFIG_FILE}")
         return jsonify([])
 
-    try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            chars_config = json.load(f)
-    except Exception as e:
-        print(f"❌ 配置文件 JSON 格式错误: {e}")
-        return jsonify([])
+    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+        chars_config = json.load(f)
 
     contact_list = []
 
-    # 2. 遍历每个角色，去读它的 DB
+    # --- A. 处理单人角色 ---
     for char_id, info in chars_config.items():
-        # 构造预期路径
-        char_dir = os.path.join(BASE_DIR, "characters", char_id)
-        db_path = get_char_db_path(char_id)
-
-        print(f"🔍 正在查找角色 [{char_id}] 的数据库...")
-        print(f"   -> 目标路径: {db_path}")
+        db_path = os.path.join(BASE_DIR, "characters", char_id, "chat.db")
 
         last_msg = ""
         last_time = ""
-        timestamp_val = 0 # 用于排序
+        timestamp_val = 0
 
         if os.path.exists(db_path):
-            print(f"   ✅ 找到 chat.db！准备读取...")
             try:
                 conn = sqlite3.connect(db_path)
                 cursor = conn.cursor()
-                # 只取最后一条
                 cursor.execute("SELECT content, timestamp FROM messages ORDER BY id DESC LIMIT 1")
                 row = cursor.fetchone()
                 conn.close()
-
                 if row:
                     last_msg = row[0]
-                    last_time_str = row[1] # 格式 "2025-12-08 12:00:00"
-
-                    print(f"   ✅ 读取成功: {last_msg[:10]}...")
-
-                    # 时间处理
-                    try:
-                        dt = datetime.strptime(last_time_str, '%Y-%m-%d %H:%M:%S')
-                        now = datetime.now()
-                        if dt.date() == now.date():
-                            last_time = dt.strftime('%H:%M')
-                        else:
-                            last_time = dt.strftime('%m-%d')
-                        timestamp_val = dt.timestamp()
-                    except:
-                        last_time = last_time_str
-                        print(f" ⚠️ 数据库是空的 (没有消息)")
-            except Exception as e:
-                print(f" ❌ 读取数据库报错: {e}")
-            else:
-                print(f" ❌ 没找到 chat.db！")
-                # 帮老板检查是不是名字没改
-                old_path = os.path.join(char_dir, "chat_history.db")
-                if os.path.exists(old_path):
-                    print(f" 💡 发现有个叫 'chat_history.db' 的文件，请把它重命名为 'chat.db'！")
+                    timestamp_val = datetime.strptime(row[1], '%Y-%m-%d %H:%M:%S').timestamp()
+                    # 简单的时间格式化
+                    dt = datetime.fromtimestamp(timestamp_val)
+                    if dt.date() == datetime.now().date():
+                        last_time = dt.strftime('%H:%M')
+                    else:
+                        last_time = dt.strftime('%m-%d')
+            except: pass
 
         contact_list.append({
+            "type": "char", # 标记类型
             "id": char_id,
             "avatar": info.get("avatar", "/static/default_avatar.png"),
-            # 【修改】使用 or 语法：如果 remark 是 None 或 ""，就自动使用 name
+            "name": info.get("name"),
             "remark": info.get("remark") or info["name"],
             "last_msg": last_msg,
             "last_time": last_time,
@@ -554,14 +715,55 @@ def get_contacts():
             "pinned": info.get("pinned", False)
         })
 
-    # 3. 排序逻辑：置顶优先 -> 然后按时间倒序
-    def sort_key(item):
-        # 拼成一个 tuple，False(0) < True(1)，所以置顶要取反或者倒序排
-        # 我们用 (pinned, timestamp) 做 key，然后 reverse=True
-        return (1 if item['pinned'] else 0, item['timestamp'])
+    # --- B. 处理群聊 (新增部分) ---
+    if os.path.exists(GROUPS_CONFIG_FILE):
+        try:
+            with open(GROUPS_CONFIG_FILE, "r", encoding="utf-8") as f:
+                groups_config = json.load(f)
 
-    contact_list.sort(key=sort_key, reverse=True)
-    print(f"--- [Debug] 通讯录加载完毕，共 {len(contact_list)} 人 ---\n")
+            for group_id, info in groups_config.items():
+                # 群聊数据库路径
+                db_path = os.path.join(GROUPS_DIR, group_id, "chat.db")
+
+                last_msg = ""
+                last_time = ""
+                timestamp_val = 0
+
+                if os.path.exists(db_path):
+                    try:
+                        conn = sqlite3.connect(db_path)
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT content, timestamp FROM messages ORDER BY id DESC LIMIT 1")
+                        row = cursor.fetchone()
+                        conn.close()
+                        if row:
+                            # 群聊消息可能需要显示是谁发的，这里暂时只取内容
+                            last_msg = row[0]
+                            timestamp_val = datetime.strptime(row[1], '%Y-%m-%d %H:%M:%S').timestamp()
+                            dt = datetime.fromtimestamp(timestamp_val)
+                            if dt.date() == datetime.now().date():
+                                last_time = dt.strftime('%H:%M')
+                            else:
+                                last_time = dt.strftime('%m-%d')
+                    except: pass
+
+                contact_list.append({
+                    "type": "group", # 标记类型
+                    "id": group_id,
+                    "avatar": info.get("avatar", "/static/default_group.png"), # 需要准备个群聊默认头像
+                    "name": info.get("name"),
+                    "remark": info.get("name"), # 群聊一般就叫群名
+                    "last_msg": last_msg,
+                    "last_time": last_time,
+                    "timestamp": timestamp_val,
+                    "pinned": info.get("pinned", False),
+                    "members": info.get("members", [])
+                })
+        except Exception as e:
+            print(f"Error loading groups: {e}")
+
+    # 4. 统一排序
+    contact_list.sort(key=lambda x: (1 if x['pinned'] else 0, x['timestamp']), reverse=True)
 
     return jsonify(contact_list)
 
@@ -625,6 +827,44 @@ def get_history(char_id):
         "page": page  # 返回修正后的页码给前端
     })
 
+# --- 【新增】群聊历史记录接口 ---
+@app.route("/api/group/<group_id>/history", methods=["GET"])
+def get_group_history(group_id):
+    # 逻辑与单人 get_history 几乎一样，只是数据库路径不同
+    db_path = os.path.join(GROUPS_DIR, group_id, "chat.db")
+
+    if not os.path.exists(db_path):
+        return jsonify({"messages": [], "total": 0, "page": 1})
+
+    limit = request.args.get('limit', 20, type=int)
+    page = request.args.get('page', 1, type=int)
+    target_id = request.args.get('target_id', type=int)
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    offset = (page - 1) * limit
+
+    if target_id:
+        cursor.execute("SELECT timestamp FROM messages WHERE id = ?", (target_id,))
+        res = cursor.fetchone()
+        if res:
+            target_ts = res['timestamp']
+            cursor.execute("SELECT COUNT(*) FROM messages WHERE timestamp > ?", (target_ts,))
+            count_newer = cursor.fetchone()[0]
+            page = (count_newer // limit) + 1
+            offset = (page - 1) * limit
+
+    cursor.execute("SELECT id, role, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT ? OFFSET ?", (limit, offset))
+    messages = [dict(row) for row in cursor.fetchall()][::-1]
+
+    cursor.execute("SELECT COUNT(id) FROM messages")
+    total = cursor.fetchone()[0]
+    conn.close()
+
+    return jsonify({"messages": messages, "total": total, "page": page})
+
 # 这是在 app.py 文件中
 
 # ---------------------- 核心聊天接口 (时间感知注入版) ----------------------
@@ -657,25 +897,56 @@ def chat(char_id):
     history_rows = [dict(row) for row in cursor.fetchall()][::-1]
     conn.close()
 
+    # --- 【关键修改】判断时间跨度 ---
+    now = datetime.now()
+    show_full_date = False # 默认不显示日期，只显示时间
+
+    if history_rows:
+        try:
+            # 1. 获取第一条历史记录的时间 (最早的一条)
+            first_msg_ts_str = history_rows[0]['timestamp']
+            first_dt = datetime.strptime(first_msg_ts_str, '%Y-%m-%d %H:%M:%S')
+
+            # 2. 比较：最早一条的日期 vs 现在(最新一条)的日期
+            # 如果日期不同 (比如昨天聊的 vs 今天聊的)，则开启“日期显示模式”
+            if first_dt.date() != now.date():
+                show_full_date = True
+        except:
+            # 如果解析出错，为了保险起见，保持默认或者开启
+            pass
+
+    # --- 循环处理历史消息 ---
     for row in history_rows:
         try:
             dt_object = datetime.strptime(row['timestamp'], '%Y-%m-%d %H:%M:%S')
-            formatted_timestamp = dt_object.strftime('[%H:%M]')
+
+            if show_full_date:
+                # 跨天模式：显示 [12-25 14:30]
+                formatted_timestamp = dt_object.strftime('[%m-%d %H:%M]')
+            else:
+                # 同天模式：只显示 [14:30]
+                formatted_timestamp = dt_object.strftime('[%H:%M]')
+
             formatted_content = f"{formatted_timestamp} {row['content']}"
             messages.append({"role": row['role'], "content": formatted_content})
         except:
+            # 容错：原样添加
             messages.append({"role": row['role'], "content": row['content']})
 
-    # 添加当前用户消息
-    current_short_time = datetime.now().strftime('[%H:%M]')
-    messages.append({"role": "user", "content": f"{current_short_time} {user_msg_raw}"})
+    # --- Part 3: 添加当前用户消息 ---
+    if show_full_date:
+        current_time_str = now.strftime('[%m-%d %H:%M]')
+    else:
+        current_time_str = now.strftime('[%H:%M]')
+
+    messages.append({"role": "user", "content": f"{current_time_str} {user_msg_raw}"})
 
     # 5. 核心交互 (API调用)
     try:
         if USE_OPENROUTER:
             reply_text_raw = call_openrouter(messages)
         else:
-            reply_text_raw = call_gemini(messages)
+            reply_text_raw = call_gemini(messages, char_id=char_id)
 
         # 清理时间戳
         timestamp_pattern = r'\[(?:(?:\d{2}-\d{2}\s+)?\d{1,2}:\d{2})\]\s*'
@@ -713,6 +984,193 @@ def chat(char_id):
         print(f"Chat Error: {e}")
         return jsonify({"error": str(e)}), 500
 
+# --- 【修正版】群聊核心接口 (串行上下文 + N倍回复) ---
+import random
+@app.route("/api/group/<group_id>/chat", methods=["POST"])
+def group_chat(group_id):
+    # 1. 基础准备
+    data = request.json
+    user_msg = data.get("message", "").strip()
+    if not user_msg: return jsonify({"error": "empty"}), 400
+
+    group_dir = os.path.join(GROUPS_DIR, group_id)
+    db_path = os.path.join(group_dir, "chat.db")
+
+    # 读取群成员
+    members = []
+    if os.path.exists(GROUPS_CONFIG_FILE):
+        with open(GROUPS_CONFIG_FILE, "r", encoding="utf-8") as f:
+            all_groups = json.load(f)
+            if group_id in all_groups:
+                members = all_groups[group_id].get("members", [])
+
+    ai_members = [m for m in members if m != "user"]
+    if not ai_members: return jsonify({"error": "No AI members"}), 404
+
+    # 2. 存入用户消息
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    now = datetime.now()
+    user_ts = now.strftime('%Y-%m-%d %H:%M:%S')
+
+    cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
+                   ("user", user_msg, user_ts))
+    conn.commit()
+    conn.close()
+
+    # 3. 决定回复次数
+    N = len(ai_members)
+    max_replies = 2 * N
+    num_replies = random.randint(1, max_replies)
+
+    print(f"--- [GroupChat] 成员: {len(ai_members)}人, 计划回复: {num_replies} 次 ---")
+
+    replies_for_frontend = []
+
+    # 加载名字映射
+    id_to_name = {}
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            c_conf = json.load(f)
+            for k, v in c_conf.items(): id_to_name[k] = v["name"]
+    except: pass
+
+    # --- 4. 循环生成 ---
+    # 这里的 context_buffer 存放的是本轮对话中产生的新内容
+    context_buffer = []
+
+    for i in range(num_replies):
+        speaker_id = random.choice(ai_members)
+        speaker_name = id_to_name.get(speaker_id, speaker_id)
+
+        print(f"   -> 第 {i+1} 轮: 由 [{speaker_name}] 发言")
+
+        # A. 构建 Prompt
+        sys_prompt = build_system_prompt(speaker_id)
+        other_members = [m for m in members if m != speaker_id]
+        rel_prompt = build_group_relationship_prompt(speaker_id, other_members)
+
+        full_sys_prompt = sys_prompt + "\n\n" + rel_prompt + "\n【Current Situation】\n当前是在群聊中。请注意上下文，与其他成员自然互动。"
+
+        messages = [{"role": "system", "content": full_sys_prompt}]
+
+        # --- B. 读取并处理历史记录 (关键修改点: 时间戳) ---
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        # 读取最近 20 条 (包含刚才用户的发言)
+        cursor.execute("SELECT role, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT 20")
+        history_rows = [dict(row) for row in cursor.fetchall()][::-1]
+        conn.close()
+
+        # 判断时间跨度
+        show_full_date = False
+        if history_rows:
+            try:
+                first_ts = datetime.strptime(history_rows[0]['timestamp'], '%Y-%m-%d %H:%M:%S')
+                if first_ts.date() != now.date():
+                    show_full_date = True
+            except: pass
+
+        for row in history_rows:
+            # 1. 处理时间戳
+            try:
+                dt_obj = datetime.strptime(row['timestamp'], '%Y-%m-%d %H:%M:%S')
+                if show_full_date:
+                    ts_str = dt_obj.strftime('[%m-%d %H:%M]')
+                else:
+                    ts_str = dt_obj.strftime('[%H:%M]')
+            except:
+                ts_str = ""
+
+            # 2. 处理名字 (群聊必须带名字)
+            r_id = row['role']
+            d_name = "User" if r_id == "user" else id_to_name.get(r_id, r_id)
+
+            # 3. 组合 Content
+            msg_role = "user" # 对当前AI来说都是外部输入
+            content_with_tag = f"{ts_str} [{d_name}]: {row['content']}"
+            messages.append({"role": msg_role, "content": content_with_tag})
+
+        # --- C. 注入本轮已生成的 Context Buffer (也要带时间) ---
+        # 这些是刚刚生成还没存库的，或者刚存库但逻辑上属于连贯对话
+        # 其实上面的 SQL 查询已经包含了 user_msg，所以 buffer 里只存 AI 刚刚生成的
+        for buf_msg in context_buffer:
+            # 简单起见，Buffer 里的默认为当前时间
+            cur_ts = now.strftime('[%H:%M]')
+            buf_content = f"{cur_ts} [{buf_msg['display_name']}]: {buf_msg['content']}"
+            messages.append({"role": "user", "content": buf_content})
+
+        # --- D. 调用 AI ---
+        try:
+            if USE_OPENROUTER:
+                reply_text = call_openrouter(messages, char_id=speaker_id)
+            else:
+                reply_text = call_gemini(messages, char_id=speaker_id)
+
+            timestamp_pattern = r'\[(?:(?:\d{2}-\d{2}\s+)?\d{1,2}:\d{2})\]\s*'
+            cleaned_reply = re.sub(timestamp_pattern, '', reply_text).strip()
+
+            # 去除 AI 可能自带的名字前缀 "[国神]:"
+            name_pattern = f"^\\[{speaker_name}\\][:：]\\s*"
+            cleaned_reply = re.sub(name_pattern, '', cleaned_reply).strip()
+
+            if not cleaned_reply: continue
+
+            # --- E. 存档 ---
+            ai_ts = (datetime.now()).strftime('%Y-%m-%d %H:%M:%S')
+
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
+                           (speaker_id, cleaned_reply, ai_ts))
+            conn.commit()
+            conn.close()
+
+            # 更新 Buffer
+            context_buffer.append({
+                "role_id": speaker_id,
+                "display_name": speaker_name,
+                "content": cleaned_reply
+            })
+
+            replies_for_frontend.append({
+                "char_id": speaker_id,
+                "name": speaker_name,
+                "content": cleaned_reply,
+                "timestamp": ai_ts
+            })
+
+        except Exception as e:
+            print(f"Group Chat Error ({speaker_id}): {e}")
+
+    return jsonify({"replies": replies_for_frontend})
+
+# --- 辅助：写入个人群聊日志 ---
+def update_group_log(char_id, event_content, timestamp_str):
+    _, prompts_dir = get_paths(char_id)
+    log_file = os.path.join(prompts_dir, "6_memory_group_log.json")
+
+    date_str = timestamp_str.split(' ')[0]
+    time_str = timestamp_str.split(' ')[1][:5]
+
+    current_data = {}
+    if os.path.exists(log_file):
+        with open(log_file, "r", encoding="utf-8") as f:
+            try: current_data = json.load(f)
+            except: pass
+
+    if date_str not in current_data:
+        current_data[date_str] = []
+
+    current_data[date_str].append({
+        "time": time_str,
+        "event": event_content
+    })
+
+    with open(log_file, "w", encoding="utf-8") as f:
+        json.dump(current_data, f, ensure_ascii=False, indent=2)
+
 # 3. 【新增】在 app.py 末尾添加这两个新接口
 # --- 【修正版】删除消息 (带结果检查) ---
 @app.route("/api/<char_id>/messages/<int:msg_id>", methods=["DELETE"])
@@ -747,6 +1205,39 @@ def delete_message(char_id, msg_id):
         print(f"   ❌ 删除报错: {e}")
         return jsonify({"error": str(e)}), 500
 
+# --- 【新增】群聊消息删除接口 ---
+@app.route("/api/group/<group_id>/messages/<int:msg_id>", methods=["DELETE"])
+def delete_group_message(group_id, msg_id):
+    # 1. 获取群聊数据库路径
+    # 确保 GROUPS_DIR 已定义 (在文件头部)
+    group_dir = os.path.join(GROUPS_DIR, group_id)
+    db_path = os.path.join(group_dir, "chat.db")
+
+    print(f"--- [Debug] 删除群消息: Group={group_id}, MsgID={msg_id} ---")
+
+    if not os.path.exists(db_path):
+        return jsonify({"error": "Group DB not found"}), 404
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("DELETE FROM messages WHERE id = ?", (msg_id,))
+        rows_affected = cursor.rowcount
+
+        conn.commit()
+        conn.close()
+
+        if rows_affected > 0:
+            print(f"   ✅ 群消息删除成功")
+            return jsonify({"status": "success"})
+        else:
+            return jsonify({"error": "Message ID not found"}), 404
+
+    except Exception as e:
+        print(f"   ❌ 群消息删除失败: {e}")
+        return jsonify({"error": str(e)}), 500
+
 # --- 【修正】编辑消息接口 (必须接收 char_id) ---
 @app.route("/api/<char_id>/messages/<int:msg_id>", methods=["PUT"])
 def edit_message(char_id, msg_id):  # <--- 1. 必须加上 char_id 参数
@@ -774,11 +1265,40 @@ def edit_message(char_id, msg_id):  # <--- 1. 必须加上 char_id 参数
         print(f"   ❌ 编辑失败: {e}")
         return jsonify({"error": str(e)}), 500
 
+# --- 【新增】群聊消息编辑接口 ---
+@app.route("/api/group/<group_id>/messages/<int:msg_id>", methods=["PUT"])
+def edit_group_message(group_id, msg_id):
+    # 1. 获取群聊数据库路径
+    group_dir = os.path.join(GROUPS_DIR, group_id)
+    db_path = os.path.join(group_dir, "chat.db")
+
+    print(f"--- [Debug] 编辑群消息: Group={group_id}, MsgID={msg_id} ---")
+
+    if not os.path.exists(db_path):
+        return jsonify({"error": "Group DB not found"}), 404
+
+    new_content = request.json.get("content", "")
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("UPDATE messages SET content = ? WHERE id = ?", (new_content, msg_id))
+        conn.commit()
+        conn.close()
+
+        print(f"   ✅ 群消息编辑成功")
+        return jsonify({"status": "success", "content": new_content})
+
+    except Exception as e:
+        print(f"   ❌ 群消息编辑失败: {e}")
+        return jsonify({"error": str(e)}), 500
+
 # 这是在 app.py 文件中的 call_openrouter 函数
 
 # ---------------------- OpenRouter / Compatible API ----------------------
 
-def call_openrouter(messages):
+def call_openrouter(messages, char_id="unknown"):
     import requests
 
     # 【新增】打印日志
@@ -819,112 +1339,93 @@ def call_openrouter(messages):
         return f"[ERROR] API request failed: {e}"
 
 # ---------------------- Gemini ----------------------
+# 【修改】增加 char_id 参数
+def call_gemini(messages, char_id="unknown"):
+    """
+    Google 官方直连 (配合 Cloudflare Worker) - 增强版
+    """
+    import requests
+    import json
 
-def call_gemini(messages):
-    # 【新增】打印日志
-    log_full_prompt(f"Gemini ({MODEL_NAME})", messages)
+    # 1. 动态获取 Cloudflare 地址
+    base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
+    url = f"{base_url}/v1beta/models/{MODEL_NAME}:generateContent?key={GEMINI_KEY}"
 
-    try:
-        import google.generativeai as genai
-    except ImportError as e:
-        return f"[ERROR] google.generativeai not installed or import failed: {e}. Try 'pip install -U google-generativeai'"
+    # 2. 转换消息格式
+    gemini_contents = []
+    system_instruction = None
+    for msg in messages:
+        if msg['role'] == 'system':
+            system_instruction = {"parts": [{"text": msg['content']}]}
+        else:
+            role = 'model' if msg['role'] == 'assistant' else 'user'
+            gemini_contents.append({"role": role, "parts": [{"text": msg['content']}]})
 
-    if not GEMINI_KEY:
-        return "[ERROR] No GEMINI_API_KEY found in environment."
-
-    genai.configure(api_key=GEMINI_KEY)
-
-    # 1. 提取 system prompt 和历史记录
-    system_prompt = ""
-    if messages and messages[0]['role'] == 'system':
-        system_prompt = messages[0]['content']
-        history = messages[1:]
-    else:
-        history = messages
-
-    # 2. 转换消息格式以适配 Gemini API
-    gemini_messages = []
-    for msg in history:
-        role = 'model' if msg['role'] == 'assistant' else 'user'
-        gemini_messages.append({'role': role, 'parts': [msg['content']]})
-
-    # 3. 设置生成参数
-    generation_config = {
-        "temperature": 0.6,
-        "max_output_tokens": 800,
+    # 3. 构造 Payload (加入关键的安全设置！)
+    payload = {
+        "contents": gemini_contents,
+        "generationConfig": {
+            "temperature": 1,
+            "maxOutputTokens": 10000
+        },
+        # 【关键修改】把 4 个维度的审查全部关掉 (BLOCK_NONE)
+        "safetySettings": [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+        ]
     }
 
+    if system_instruction:
+        payload["systemInstruction"] = system_instruction
+
     try:
-        model = genai.GenerativeModel(
-            model_name="gemini-2.5-pro",  # 遵照您的要求，保留此模型
-            generation_config=generation_config,
-            system_instruction=system_prompt
-        )
+        # 发送请求
+        r = requests.post(url, json=payload, timeout=100)
 
-        print("--- [4] [Gemini] 配置完成，准备调用 generate_content ---")  # <-- 添加的日志
+        if r.status_code != 200:
+            return f"[Gemini Error {r.status_code}] {r.text}"
 
-        # 4. 调用新的 generate_content API
-        response = model.generate_content(gemini_messages)
+        result = r.json()
 
-        print("--- [5] [Gemini] generate_content 调用成功，已收到回复 ---")  # <-- 添加的日志
+        # --- 【新增】提取 Token 数据 ---
+        # Google 的格式通常叫 usageMetadata
+        # --- 【新增】记录 Token ---
+        token_usage = result.get('usageMetadata', {})
+        if token_usage:
+            record_token_usage(
+                char_id,
+                MODEL_NAME,
+                token_usage.get('promptTokenCount', 0),
+                token_usage.get('candidatesTokenCount', 0),
+                # 【新增】直接提取 totalTokenCount
+                token_usage.get('totalTokenCount', 0)
+            )
+        # ------------------------
 
-        return response.text
+        # 解析回复
+        if 'candidates' not in result or not result['candidates']:
+            return "[Error] No candidates returned."
+
+        candidate = result['candidates'][0]
+
+        # 尝试获取文本
+        text = ""
+        if 'content' in candidate and 'parts' in candidate['content']:
+            text = candidate['content']['parts'][0]['text']
+        else:
+            finish_reason = candidate.get('finishReason', 'UNKNOWN')
+            text = f"[未生成文本] 原因: {finish_reason}"
+
+        # --- 【修改】调用日志时，把 token_usage 传进去 ---
+        log_full_prompt(f"Gemini Interaction ({MODEL_NAME})", messages, response_text=text, usage=token_usage)
+
+        return text
+
     except Exception as e:
-        # 如果遇到关于模型的错误，例如 "model not found"，可以尝试换成 "gemini-1.5-pro-latest"
-        return f"[ERROR] Gemini call failed: {e}"
-#--------------------------------
-    # import requests
-    # import json
-    #
-    # # 您的 Cloudflare 地址 (后面不需要加 v1beta...)
-    # # 记得把下面这个换成您刚才申请到的地址！
-    # BASE_URL = "https://gemini-proxy.lashongracelynyc623.workers.dev/"
-    #
-    # if not GEMINI_KEY:
-    #     return "[ERROR] No GEMINI_API_KEY found."
-    #
-    # # 1. 构造请求 URL
-    # # Gemini 1.5 Pro 的标准接口地址
-    # url = f"{BASE_URL}/v1beta/models/{MODEL_NAME}:generateContent?key={GEMINI_KEY}"
-    #
-    # # 2. 转换消息格式 (OpenAI 格式 -> Gemini 格式)
-    # gemini_contents = []
-    # system_instruction = None
-    #
-    # for msg in messages:
-    #     if msg['role'] == 'system':
-    #         system_instruction = {"parts": [{"text": msg['content']}]}
-    #     else:
-    #         role = 'model' if msg['role'] == 'assistant' else 'user'
-    #         gemini_contents.append({
-    #             "role": role,
-    #             "parts": [{"text": msg['content']}]
-    #         })
-    #
-    # payload = {
-    #     "contents": gemini_contents,
-    #     "generationConfig": {
-    #         "temperature": 0.6,
-    #         "maxOutputTokens": 800
-    #     }
-    # }
-    #
-    # if system_instruction:
-    #     payload["systemInstruction"] = system_instruction
-    #
-    # try:
-    #     # 直接发送 HTTP 请求，不走 SDK，不走代理
-    #     response = requests.post(url, json=payload, timeout=60)
-    #
-    #     if response.status_code != 200:
-    #         return f"[ERROR] Gemini API Error: {response.text}"
-    #
-    #     result = response.json()
-    #     # 提取回复文本
-    #     return result['candidates'][0]['content']['parts'][0]['text']
-    #
-    # except Exception as e:
-    #     return f"[ERROR] Request failed: {e}"
+        log_full_prompt(f"Gemini ERROR ({MODEL_NAME})", messages, response_text=str(e))
+        raise e
 
 # --- 【修正版】API：手动触发记忆整理 ---
 @app.route("/api/<char_id>/memory/snapshot", methods=["POST"])
@@ -964,6 +1465,156 @@ def snapshot_memory(char_id):  # <--- 1. 加上 char_id 参数
     except Exception as e:
         # 打印详细错误方便调试
         print(f"Snapshot Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# --- 【新增】群聊增量更新逻辑 ---
+def update_group_short_memory(group_id, target_date_str):
+    # 1. 路径准备
+    group_dir = os.path.join(GROUPS_DIR, group_id)
+    db_path = os.path.join(group_dir, "chat.db")
+    memory_file = os.path.join(group_dir, "memory_short.json") # 群聊自己的记忆文件
+
+    # 2. 读取群配置 (为了拿群名和成员列表)
+    if not os.path.exists(GROUPS_CONFIG_FILE):
+        return 0, []
+
+    with open(GROUPS_CONFIG_FILE, "r", encoding="utf-8") as f:
+        groups_config = json.load(f)
+        group_info = groups_config.get(group_id, {})
+
+    group_name = group_info.get("name", "Group")
+    members = group_info.get("members", [])
+
+    # 3. 读取现有群记忆 (获取 last_id)
+    current_data = {}
+    if os.path.exists(memory_file):
+        with open(memory_file, "r", encoding="utf-8") as f:
+            try: current_data = json.load(f)
+            except: pass
+
+    day_data = current_data.get(target_date_str, {})
+    # 兼容处理：如果是列表转字典
+    if isinstance(day_data, list):
+        existing_events = day_data
+        last_id = 0
+    else:
+        existing_events = day_data.get("events", [])
+        last_id = day_data.get("last_id", 0)
+
+    # 4. 查询群数据库
+    if not os.path.exists(db_path): return 0, []
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    start_time = f"{target_date_str} 00:00:00"
+    end_time = f"{target_date_str} 23:59:59"
+
+    # 只读取 ID > last_id 的新消息
+    cursor.execute("SELECT id, timestamp, role, content FROM messages WHERE timestamp >= ? AND timestamp <= ? AND id > ?", (start_time, end_time, last_id))
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows: return 0, []
+
+    new_max_id = rows[-1][0]
+
+    # 5. 拼接文本 (需要转换 role ID 为名字)
+    # 加载名字映射
+    id_to_name = {}
+    try:
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        CHAR_CONFIG_FILE = os.path.join(BASE_DIR, "configs", "characters.json")
+        with open(CHAR_CONFIG_FILE, "r", encoding="utf-8") as f:
+            c_conf = json.load(f)
+            for k, v in c_conf.items(): id_to_name[k] = v["name"]
+    except: pass
+
+    chat_log = ""
+    for _, ts, role, content in rows:
+        time_part = ts.split(' ')[1][:5]
+        # 如果是 user 显示用户，如果是 char_id 显示名字
+        name = "ユーザー" if role == "user" else id_to_name.get(role, role)
+        chat_log += f"[{time_part}] {name}: {content}\n"
+
+    # 6. 调用 AI 总结
+    # 这里我们复用 call_ai_to_summarize，用 "short" 模式提取事件
+    # 这里的 char_id 可以随便传一个群成员的，或者传 None，因为 short 模式主要是提取事实
+    summary_text = call_ai_to_summarize(chat_log, "group_log", "system")
+
+    if not summary_text: return 0, []
+
+    # 7. 解析 AI 返回结果
+    new_events = []
+    import re
+    for line in summary_text.split('\n'):
+        line = line.strip()
+        if line:
+            match_time = re.search(r'\[(\d{2}:\d{2})\]', line)
+            event_time = match_time.group(1) if match_time else datetime.now().strftime("%H:%M")
+            event_text = re.sub(r'\[\d{2}:\d{2}\]', '', line).strip('- ').strip()
+            new_events.append({"time": event_time, "event": event_text})
+
+    if not new_events: return 0, []
+
+    # 8. 保存到群聊记忆 (追加模式)
+    final_events = existing_events + new_events
+
+    # 如果是重置模式(last_id=0)，且原本有数据，这里可以加去重逻辑(类似单人)，这里暂略，直接追加
+
+    current_data[target_date_str] = {
+        "events": final_events,
+        "last_id": new_max_id
+    }
+
+    with open(memory_file, "w", encoding="utf-8") as f:
+        json.dump(current_data, f, ensure_ascii=False, indent=2)
+
+    # ================= 关键修复点 =================
+    # 9. 【必须】调用分发函数，传给个人
+    if new_events:
+        print(f"--- [Sync] 开始同步群聊记忆到个人文件 ---")
+        distribute_group_memory(group_id, group_name, members, new_events, target_date_str)
+    # ============================================
+
+    return len(new_events), new_events
+
+# --- 【修正】群聊快照接口 (真实实现) ---
+@app.route("/api/group/<group_id>/memory/snapshot", methods=["POST"])
+def snapshot_group_memory(group_id):
+    now = datetime.now()
+    today_str = now.strftime('%Y-%m-%d')
+
+    total_new = 0
+    msg_log = []
+
+    try:
+        # 1. 凌晨检测 (补录昨天)
+        if now.hour < 4:
+            yesterday = (now - timedelta(days=1)).strftime('%Y-%m-%d')
+            print(f"--- [Group Snapshot] 检查昨天 {yesterday} ---")
+            c_y, _ = update_group_short_memory(group_id, yesterday)
+            if c_y > 0:
+                total_new += c_y
+                msg_log.append(f"昨天 {c_y} 条")
+
+        # 2. 处理今天
+        print(f"--- [Group Snapshot] 检查今天 {today_str} ---")
+        c_t, _ = update_group_short_memory(group_id, today_str)
+        if c_t > 0:
+            total_new += c_t
+            msg_log.append(f"今天 {c_t} 条")
+
+        if total_new > 0:
+            return jsonify({
+                "status": "success",
+                "message": "群聊记忆整理完成 (并已同步给成员): " + "，".join(msg_log),
+                "count": total_new
+            })
+        else:
+            return jsonify({"status": "no_data", "message": "暂无新群聊消息"})
+
+    except Exception as e:
+        print(f"Group Snapshot Error: {e}")
         return jsonify({"error": str(e)}), 500
 
 # 加在 app.py 的路由区域
@@ -1117,6 +1768,80 @@ def save_prompt_file(char_id):
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# ================= 群聊记忆页面专用接口 =================
+
+# 1. 页面路由
+@app.route("/memory/group/<group_id>")
+def group_memory_view(group_id):
+    return render_template("group_memory.html")
+
+# 2. 获取群聊数据 (配置 + 记忆)
+@app.route("/api/group/<group_id>/prompts_data")
+def get_group_prompts_data(group_id):
+    group_dir = os.path.join(GROUPS_DIR, group_id)
+    memory_file = os.path.join(group_dir, "memory_short.json")
+
+    data = {
+        "meta": {},   # 群名、头像、成员
+        "short": {}   # 群聊记录
+    }
+
+    # 读取配置
+    if os.path.exists(GROUPS_CONFIG_FILE):
+        with open(GROUPS_CONFIG_FILE, "r", encoding="utf-8") as f:
+            all_groups = json.load(f)
+            data["meta"] = all_groups.get(group_id, {})
+
+    # 读取群聊记忆
+    if os.path.exists(memory_file):
+        try:
+            with open(memory_file, "r", encoding="utf-8") as f:
+                data["short"] = json.load(f)
+        except:
+            data["short"] = {}
+
+    return jsonify(data)
+
+# 3. 保存群聊记忆 (仅 memory_short)
+@app.route("/api/group/<group_id>/save_memory", methods=["POST"])
+def save_group_memory(group_id):
+    new_content = request.json.get("content")
+
+    group_dir = os.path.join(GROUPS_DIR, group_id)
+    memory_file = os.path.join(group_dir, "memory_short.json")
+
+    try:
+        with open(memory_file, "w", encoding="utf-8") as f:
+            json.dump(new_content, f, ensure_ascii=False, indent=2)
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+# 4. 更新群聊元数据 (头像/名称)
+@app.route("/api/group/<group_id>/update_meta", methods=["POST"])
+def update_group_meta(group_id):
+    if not os.path.exists(GROUPS_CONFIG_FILE):
+        return jsonify({"error": "Config not found"}), 404
+
+    try:
+        with open(GROUPS_CONFIG_FILE, "r", encoding="utf-8") as f:
+            all_groups = json.load(f)
+
+        if group_id not in all_groups:
+            return jsonify({"error": "Group not found"}), 404
+
+        data = request.json
+        # 更新字段
+        if "name" in data: all_groups[group_id]["name"] = data["name"].strip()
+        if "avatar" in data: all_groups[group_id]["avatar"] = data["avatar"].strip()
+
+        with open(GROUPS_CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(all_groups, f, ensure_ascii=False, indent=2)
+
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # --- 【修正版】搜索接口 ---
 @app.route("/api/<char_id>/search", methods=["POST"])
 def search_messages(char_id):
@@ -1150,6 +1875,24 @@ def search_messages(char_id):
     except Exception as e:
         print(f"   ❌ 数据库查询报错: {e}")
         return jsonify([])
+
+# --- 【新增】群聊搜索接口 ---
+@app.route("/api/group/<group_id>/search", methods=["POST"])
+def search_group_messages(group_id):
+    keyword = request.json.get("keyword", "").strip()
+    if not keyword: return jsonify([])
+
+    db_path = os.path.join(GROUPS_DIR, group_id, "chat.db")
+    if not os.path.exists(db_path): return jsonify([])
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, role, content, timestamp FROM messages WHERE content LIKE ? ORDER BY timestamp DESC", (f"%{keyword}%",))
+    rows = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+
+    return jsonify(rows)
 
 # --- 【修正】常用语接口 (改为读取全局配置) ---
 @app.route("/api/quick_phrases", methods=["GET", "POST"])
@@ -1200,6 +1943,33 @@ def get_char_details(char_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# --- 【新增】获取群组详情 (包含成员信息) ---
+@app.route("/api/group/<group_id>/config")
+def get_group_details(group_id):
+    if not os.path.exists(GROUPS_CONFIG_FILE):
+        return jsonify({"error": "Config not found"}), 404
+
+    with open(GROUPS_CONFIG_FILE, "r", encoding="utf-8") as f:
+        groups_config = json.load(f)
+
+    group_info = groups_config.get(group_id)
+    if not group_info:
+        return jsonify({"error": "Group not found"}), 404
+
+    # 还需要读取成员的详细信息(头像/名字)，前端好渲染
+    members_details = {}
+    with open(CONFIG_FILE, "r", encoding="utf-8") as f: # 读取 characters.json
+        chars_config = json.load(f)
+
+    for member_id in group_info.get("members", []):
+        if member_id in chars_config:
+            members_details[member_id] = chars_config[member_id]
+
+    return jsonify({
+        "group_info": group_info,
+        "members": members_details
+    })
+
 # --- 【新增】更新角色元数据 (头像/备注) ---
 @app.route("/api/<char_id>/update_meta", methods=["POST"])
 def update_char_meta(char_id):
@@ -1221,6 +1991,7 @@ def update_char_meta(char_id):
         data = request.json
         new_remark = data.get("remark")
         new_avatar = data.get("avatar")
+        new_pinned = data.get("pinned") # <--- 【新增】获取置顶状态
 
         # 允许改为空字符串，所以用 is not None 判断
         if new_remark is not None:
@@ -1228,6 +1999,10 @@ def update_char_meta(char_id):
 
         if new_avatar is not None:
             all_config[char_id]["avatar"] = new_avatar.strip()
+
+        # 【新增】更新置顶状态 (必须判断是否为 None，因为 False 也是有效值)
+        if new_pinned is not None:
+            all_config[char_id]["pinned"] = bool(new_pinned)
 
         # 3. 写回文件
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -1295,6 +2070,32 @@ def upload_char_avatar(char_id):
 
         except Exception as e:
             print(f"Upload Error: {e}")
+            return jsonify({"error": str(e)}), 500
+
+# --- 【新增】上传用户全局头像 ---
+@app.route("/api/upload_user_avatar", methods=["POST"])
+def upload_user_avatar():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+
+    if file:
+        try:
+            BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+            # 直接覆盖 static 文件夹下的 avatar_user.png
+            save_path = os.path.join(BASE_DIR, "static", "avatar_user.png")
+
+            file.save(save_path)
+
+            # 添加时间戳参数，防止浏览器缓存旧图片
+            timestamp = int(time.time())
+            new_url = f"/static/avatar_user.png?v={timestamp}"
+
+            return jsonify({"status": "success", "url": new_url})
+        except Exception as e:
+            print(f"User Avatar Upload Error: {e}")
             return jsonify({"error": str(e)}), 500
 
 # --- 【新增】获取全局配置 (用户人设 & 格式) ---
@@ -1420,6 +2221,72 @@ def add_character():
         print(f"Add Character Error: {e}")
         return jsonify({"error": str(e)}), 500
 
+# --- 【新增】创建群聊接口 ---
+@app.route("/api/groups/add", methods=["POST"])
+def add_group():
+    try:
+        data = request.json
+        new_id = data.get("id", "").strip()
+        new_name = data.get("name", "").strip()
+        members = data.get("members", []) # list of char_ids
+
+        # 1. 校验
+        if not new_id or not new_name:
+            return jsonify({"error": "ID和名称不能为空"}), 400
+        if len(members) < 2:
+            return jsonify({"error": "群聊至少需要2名成员"}), 400
+
+        import re
+        if not re.match(r'^[a-zA-Z0-9_]+$', new_id):
+            return jsonify({"error": "ID 只能包含字母、数字或下划线"}), 400
+
+        # 2. 读取/初始化配置
+        groups_config = {}
+        if os.path.exists(GROUPS_CONFIG_FILE):
+            with open(GROUPS_CONFIG_FILE, "r", encoding="utf-8") as f:
+                groups_config = json.load(f)
+
+        if new_id in groups_config:
+            return jsonify({"error": "该群聊ID已存在"}), 400
+
+        # 3. 创建文件夹
+        target_group_dir = os.path.join(GROUPS_DIR, new_id)
+        if not os.path.exists(target_group_dir):
+            os.makedirs(target_group_dir)
+
+        # 4. 初始化群聊数据库
+        db_path = os.path.join(target_group_dir, "chat.db")
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        # 群聊表结构与单人一致，但 role 字段可能会存具体的 char_id
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            role TEXT NOT NULL, 
+            content TEXT NOT NULL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        conn.commit()
+        conn.close()
+
+        # 5. 更新配置
+        groups_config[new_id] = {
+            "name": new_name,
+            "avatar": "/static/default_group.png", # 记得在static放个图
+            "pinned": False,
+            "members": members
+        }
+
+        with open(GROUPS_CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(groups_config, f, ensure_ascii=False, indent=2)
+
+        return jsonify({"status": "success"})
+
+    except Exception as e:
+        print(f"Add Group Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
 # --- 【新增】复制他人日程接口 ---
 @app.route("/api/<target_char_id>/copy_schedule", methods=["POST"])
 def copy_other_schedule(target_char_id):
@@ -1471,11 +2338,15 @@ def generate_persona():
 
     try:
         print(f"--- [Gen Persona] Generating for {char_name} ({source_ip}) ---")
+
+        # 定义一个特殊的记账 ID
+        log_id = f"System:GenPersona({char_name})"
+
         # 复用现有的 LLM 调用函数
         if USE_OPENROUTER:
             generated_text = call_openrouter(messages)
         else:
-            generated_text = call_gemini(messages)
+            generated_text = call_gemini(messages, char_id=log_id)
 
         return jsonify({"status": "success", "content": generated_text})
 
@@ -1517,6 +2388,105 @@ def log_full_prompt(service_name, messages):
 
     print("▲"*20 + " [DEBUG] END " + "▲"*20 + "\n")
 
+# --- 【终极版】日志记录：内容 + Token 账单 ---
+def log_full_prompt(service_name, messages, response_text=None, usage=None):
+    # 获取当前时间
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # 构造日志内容
+    log_content = []
+    log_content.append(f"\n{'='*20} [{timestamp}] {service_name} {'='*20}")
+
+    # 1. 打印上下文
+    for i, msg in enumerate(messages):
+        role = msg.get('role', 'unknown').upper()
+        content = msg.get('content', '')
+        log_content.append(f"【{i}】<{role}>:\n{content}\n{'-'*30}")
+
+    # 2. 打印 AI 回复
+    if response_text:
+        log_content.append(f"\n【🤖 AI REPLY】:\n{response_text}")
+
+    # 3. 【新增】打印 Token 消耗 (这就是您要的！)
+    if usage:
+        # Gemini 的格式通常是: {'promptTokenCount': 100, 'candidatesTokenCount': 20, 'totalTokenCount': 120}
+        input_tokens = usage.get('promptTokenCount', 0)      # 提问消耗 (便宜)
+        output_tokens = usage.get('candidatesTokenCount', 0) # 回复消耗 (贵)
+        total_tokens = usage.get('totalTokenCount', 0)       # 总计
+
+        log_content.append(f"\n【💰 TOKEN BILL】:")
+        log_content.append(f"   📥 输入(Prompt): {input_tokens}")
+        log_content.append(f"   📤 输出(Reply):  {output_tokens}")
+        log_content.append(f"   💎 总计(Total):  {total_tokens}")
+
+    log_content.append(f"{'='*50}\n")
+
+    final_log = "\n".join(log_content)
+
+    # 打印到黑框框
+    print(final_log)
+
+    # 保存到文件
+    try:
+        log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+        if not os.path.exists(log_dir): os.makedirs(log_dir)
+        log_file = os.path.join(log_dir, "api.log")
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(final_log)
+    except: pass
+
+# --- 【新增】Token 账单记录系统 ---
+USAGE_LOG_FILE = "logs/usage_history.json"
+
+def record_token_usage(char_id, model, input_tokens, output_tokens, total_tokens):
+    """记录一次 API 调用的消耗"""
+    try:
+        # 1. 确保日志目录存在
+        log_dir = os.path.dirname(USAGE_LOG_FILE)
+        if not os.path.exists(log_dir): os.makedirs(log_dir)
+
+        # 2. 读取现有日志
+        logs = []
+        if os.path.exists(USAGE_LOG_FILE):
+            with open(USAGE_LOG_FILE, "r", encoding="utf-8") as f:
+                try: logs = json.load(f)
+                except: logs = []
+
+        # 3. 追加新记录
+        new_entry = {
+            "time": datetime.now().strftime("%m-%d %H:%M:%S"),
+            "char_id": char_id,
+            "model": model,
+            "input": input_tokens,
+            "output": output_tokens,
+            "total": total_tokens
+        }
+        logs.append(new_entry)
+
+        # 4. 只保留最近 50 条 (防止文件无限膨胀)
+        if len(logs) > 50:
+            logs = logs[-50:]
+
+        # 5. 保存
+        with open(USAGE_LOG_FILE, "w", encoding="utf-8") as f:
+            json.dump(logs, f, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        print(f"Log Usage Error: {e}")
+
+# --- 【新增】获取账单接口 ---
+@app.route("/api/usage_logs")
+def get_usage_logs():
+    if not os.path.exists(USAGE_LOG_FILE):
+        return jsonify([])
+    try:
+        with open(USAGE_LOG_FILE, "r", encoding="utf-8") as f:
+            # 倒序返回，最新的在前面
+            logs = json.load(f)
+            return jsonify(logs[::-1])
+    except:
+        return jsonify([])
+
 # ---------------------- 启动 ----------------------
 
 if __name__ == "__main__":
@@ -1528,4 +2498,5 @@ if __name__ == "__main__":
     scheduler.start()
     print("--- [Scheduler] 后台记忆整理服务已启动 (每天 04:00) ---")
 
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    # 【关键修改】加上 use_reloader=False
+    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)

@@ -59,6 +59,32 @@
             font-size: 13px; color: #888;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
+        /* --- 下拉菜单修复版 --- */
+        #plusMenu {
+            display: none;
+            position: absolute;
+            top: 35px; right: 0;
+            background: #fff;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+            border-radius: 8px;
+            min-width: 150px; /* 【修改】加宽 */
+            z-index: 100;
+            overflow: hidden;
+            border: 1px solid #eee;
+        }
+
+        #plusMenu div {
+            padding: 12px 15px;
+            border-bottom: 1px solid #f9f9f9;
+            cursor: pointer;
+            font-size: 14px; /* 【修改】字体适中 */
+            color: #555;
+            white-space: nowrap; /* 【修改】禁止换行 */
+            transition: background 0.1s;
+        }
+
+        #plusMenu div:hover { background-color: #fff5f6; color: #ffb6b9; }
+        #plusMenu div:last-child { border-bottom: none; }
     </style>
 </head>
 
@@ -68,9 +94,14 @@
 
 <div class="header">
     <span>消息</span>
-    <!-- 这里以后可以放个加号，用来新建角色 -->
-    <!-- 给 + 号加上 onclick="openAddModal()" -->
-    <span style="font-size:24px; color:#ffb6b9; cursor:pointer;" onclick="openAddModal()">+</span>
+    <div style="position:relative;">
+        <span style="font-size:24px; color:#ffb6b9; cursor:pointer;" onclick="toggleMenu()">+</span>
+        <!-- 下拉菜单 -->
+        <div id="plusMenu" style="display:none; position:absolute; top:30px; right:0; background:#fff; box-shadow:0 2px 10px rgba(0,0,0,0.1); border-radius:8px; width:120px; z-index:100; overflow:hidden;">
+            <div onclick="openAddCharModal()" style="padding:10px; border-bottom:1px solid #eee; cursor:pointer;">👤 新建联系人</div>
+            <div onclick="openAddGroupModal()" style="padding:10px; cursor:pointer;">👥 新建群聊</div>
+        </div>
+    </div>
 </div>
 
 <div class="contact-list" id="list">
@@ -99,23 +130,115 @@
     </div>
 </div>
 
+<!-- 【新增】新建群聊弹窗 -->
+<div id="addGroupModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
+    <div style="background:#fff; padding:25px; border-radius:12px; width:85%; max-width:350px; box-shadow:0 4px 20px rgba(0,0,0,0.2);">
+        <h3 style="margin:0 0 15px 0; color:#333; text-align:center;">创建群聊</h3>
+
+        <div style="margin-bottom:15px;">
+            <label style="display:block; font-size:12px; color:#888; margin-bottom:5px;">群 ID (英文)</label>
+            <input type="text" id="new-group-id" placeholder="例如: team_z" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; box-sizing:border-box;">
+        </div>
+
+        <div style="margin-bottom:15px;">
+            <label style="display:block; font-size:12px; color:#888; margin-bottom:5px;">群名称</label>
+            <input type="text" id="new-group-name" placeholder="例如: 洁&蜂乐" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; box-sizing:border-box;">
+        </div>
+
+        <div style="margin-bottom:20px;">
+            <label style="display:block; font-size:12px; color:#888; margin-bottom:5px;">选择成员 (至少2人)</label>
+            <div id="char-selection-list" style="max-height:150px; overflow-y:auto; border:1px solid #eee; border-radius:8px; padding:5px;">
+                <!-- JS 动态填充 -->
+            </div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; gap:10px;">
+            <button onclick="document.getElementById('addGroupModal').style.display='none'" style="flex:1; padding:10px; border:none; background:#f5f5f5; color:#666; border-radius:8px; cursor:pointer;">取消</button>
+            <button onclick="submitNewGroup()" style="flex:1; padding:10px; border:none; background:#ffb6b9; color:#fff; border-radius:8px; cursor:pointer; font-weight:bold;">创建</button>
+        </div>
+    </div>
+</div>
+
 <script>
-    if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-            navigator.serviceWorker.register('/sw.js')
-                .then(reg => console.log('SW registered!', reg))
-                .catch(err => console.log('SW failed', err));
-        });
+    // --- 全局变量缓存 ---
+    let allContactsData = []; // 存一下API返回的数据，方便弹窗里复用
+
+    // --- 菜单逻辑 ---
+    function toggleMenu() {
+        const menu = document.getElementById('plusMenu');
+        menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
+    }
+    // 点击其他地方关闭菜单
+    window.addEventListener('click', (e) => {
+        if (!e.target.matches('.header span') && !e.target.closest('#plusMenu')) {
+            document.getElementById('plusMenu').style.display = 'none';
+        }
+    });
+
+    // --- 原有的新建联系人逻辑 (函数名改一下匹配HTML) ---
+    function openAddCharModal() {
+        document.getElementById('addCharModal').style.display = 'flex';
+        toggleMenu(); // 关菜单
     }
 
+    // --- 【新增】新建群聊逻辑 ---
+    function openAddGroupModal() {
+        const listDiv = document.getElementById('char-selection-list');
+        listDiv.innerHTML = '';
+
+        // 遍历缓存的联系人数据，只显示单人角色(type='char')
+        allContactsData.forEach(c => {
+            if (c.type === 'char') {
+                listDiv.innerHTML += `
+                  <label style="display:flex; align-items:center; padding:8px; border-bottom:1px solid #f9f9f9;">
+                      <input type="checkbox" value="${c.id}" class="char-checkbox" style="margin-right:10px;">
+                      <img src="${c.avatar}" style="width:24px; height:24px; border-radius:4px; margin-right:8px;">
+                      <span>${c.remark}</span>
+                  </label>
+              `;
+            }
+        });
+
+        document.getElementById('addGroupModal').style.display = 'flex';
+        toggleMenu();
+    }
+
+    async function submitNewGroup() {
+        const id = document.getElementById('new-group-id').value.trim();
+        const name = document.getElementById('new-group-name').value.trim();
+
+        // 获取选中的成员
+        const checkboxes = document.querySelectorAll('.char-checkbox:checked');
+        const members = Array.from(checkboxes).map(cb => cb.value);
+
+        if (!id || !name) return alert("请填写ID和名称");
+        if (members.length < 2) return alert("请至少选择2个成员");
+
+        try {
+            const res = await fetch('/api/groups/add', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ id, name, members })
+            });
+            const result = await res.json();
+            if (res.ok) {
+                alert("群聊创建成功！");
+                document.getElementById('addGroupModal').style.display = 'none';
+                loadContacts(); // 刷新列表
+            } else {
+                alert("失败: " + result.error);
+            }
+        } catch(e) { alert("网络错误"); }
+    }
+
+    // --- 列表渲染逻辑 (修改) ---
     async function loadContacts() {
         try {
             const res = await fetch('/api/contacts');
             const data = await res.json();
+            allContactsData = data; // 【关键】缓存数据供弹窗使用
             renderList(data);
-        } catch(e) {
-            document.getElementById('list').innerHTML = '<div style="text-align:center; padding:20px;">加载失败</div>';
-        }
+        } catch(e) { document.getElementById('list').innerHTML = '<div style="text-align:center; padding:20px;">加载失败</div>'; }
     }
 
     function renderList(contacts) {
@@ -128,9 +251,19 @@
         let html = '';
         contacts.forEach(c => {
             const pinnedClass = c.pinned ? 'pinned' : '';
-            // 点击跳转到 /chat/kunigami
+
+            // 【关键】区分跳转链接
+            // 如果是群聊，跳到 /chat/group/group_id (这是我们下一步要做的路由)
+            // 如果是单人，跳到 /chat/char_id
+            let jumpUrl = '';
+            if (c.type === 'group') {
+                jumpUrl = `/chat/group/${c.id}`;
+            } else {
+                jumpUrl = `/chat/${c.id}`;
+            }
+
             html += `
-          <div class="contact-item ${pinnedClass}" onclick="window.location.href='/chat/${c.id}'">
+          <div class="contact-item ${pinnedClass}" onclick="window.location.href='${jumpUrl}'">
               <img src="${c.avatar}" class="avatar" onerror="this.src='/static/default_avatar.png'">
               <div class="info">
                   <div class="top-row">
