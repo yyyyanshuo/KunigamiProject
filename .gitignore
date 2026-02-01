@@ -1,32 +1,39 @@
-# 忽略 Python 缓存
+# --- 系统/IDE 垃圾文件 ---
 __pycache__/
 *.pyc
-
-# 忽略环境配置
-.env
-
-# 忽略 IDE 配置
+.DS_Store
 .idea/
 .vscode/
+venv/
 
-# --- 【新增】忽略角色私有数据 ---
-# 忽略所有角色的数据库
+# --- 敏感配置与密钥 ---
+.env
+
+# --- 日志文件 (Logs) ---
+logs/
+*.log
+
+# --- 群聊数据 (Groups) ---
+# 群聊包含聊天记录和成员配置，全部忽略
+groups/
+
+# --- 角色数据 (Characters) ---
+# 忽略所有角色的聊天记录数据库
 characters/**/*.db
 
-# 忽略所有角色的 Prompts 文件夹内容...
+# 忽略所有角色的 Prompt 文件 (人设、记忆)
 characters/**/prompts/*
 
-# ...但保留格式说明文件 (白名单)
+# 【例外】保留格式说明文件 (作为模板给别人看)
 !characters/**/prompts/8_format.md
 
-# 忽略全局配置里的私有信息 (如果有的话，暂时保留 config 结构)
-# configs/quick_phrases.json (这个通常可以上传，看您需求，建议保留)
+# --- 配置文件夹 (Configs) ---
+# 忽略 JSON 配置 (里面有角色列表、常用语)
+configs/*.json
 
-# 忽略根目录的旧数据库
-chat_history.db
+# 忽略个人主页的用户人设 (这是您的隐私)
+configs/global_user_persona.md
 
-# 忽略调试脚本
-debug_network.py
-
-# 忽略所有文件夹里的数据库
-*.db
+# 【可选】保留全局格式规则 (这个通常不涉及隐私，留着方便部署)
+# 如果您连这个也想隐藏，把下面这行前面的 # 去掉
+# configs/global_format.md
