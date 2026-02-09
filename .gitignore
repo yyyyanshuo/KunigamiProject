@@ -1,39 +1,36 @@
-# --- 系统/IDE 垃圾文件 ---
+# --- 系统/环境 ---
 __pycache__/
 *.pyc
 .DS_Store
+.env
+venv/
 .idea/
 .vscode/
-venv/
 
-# --- 敏感配置与密钥 ---
-.env
-
-# --- 日志文件 (Logs) ---
+# --- 日志与数据 ---
 logs/
 *.log
+chat_history.db
 
-# --- 群聊数据 (Groups) ---
-# 群聊包含聊天记录和成员配置，全部忽略
+# --- 核心数据 (隐私) ---
+# 1. 角色数据
+characters/
+
+# 2. 群聊数据
 groups/
 
-# --- 角色数据 (Characters) ---
-# 忽略所有角色的聊天记录数据库
-characters/**/*.db
-
-# 忽略所有角色的 Prompt 文件 (人设、记忆)
-characters/**/prompts/*
-
-# 【例外】保留格式说明文件 (作为模板给别人看)
-!characters/**/prompts/8_format.md
-
-# --- 配置文件夹 (Configs) ---
-# 忽略 JSON 配置 (里面有角色列表、常用语)
+# 3. 配置文件 (只保留通用模板，忽略个人设置)
+# 忽略用户个人设置 (用户名、语言)
 configs/*.json
-
-# 忽略个人主页的用户人设 (这是您的隐私)
+# 忽略全局人设
 configs/global_user_persona.md
 
-# 【可选】保留全局格式规则 (这个通常不涉及隐私，留着方便部署)
-# 如果您连这个也想隐藏，把下面这行前面的 # 去掉
-# configs/global_format.md
+scripts/
+
+static/avatar_user.png
+
+chat_history.db
+
+debug_network.py
+test_final_connect.py
+test_google_pay.py

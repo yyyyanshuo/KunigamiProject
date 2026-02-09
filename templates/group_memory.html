@@ -191,20 +191,25 @@
         }
     }
 
-    // 渲染编辑器
+    // --- 【修正版】渲染编辑器 (带重置选项) ---
     function renderMemoryEditor() {
         const container = document.getElementById('memory-container');
         const data = globalData.short || {};
         container.innerHTML = '';
 
-        // 简单起见，我们只允许编辑最近的一天，或者列出所有
-        // 这里列出所有 Key 供编辑
         Object.keys(data).sort().reverse().forEach(date => {
             const dayInfo = data[date];
             const events = Array.isArray(dayInfo) ? dayInfo : (dayInfo.events || []);
 
             let html = `<div class="day-block" data-date="${date}" style="margin-bottom:20px; border:1px solid #eee; padding:10px; border-radius:8px;">
-              <div style="font-weight:bold; margin-bottom:5px; color:#5c6bc0;">${date}</div>
+              <div style="font-weight:bold; margin-bottom:10px; color:#5c6bc0; display:flex; justify-content:space-between; align-items:center;">
+                  <span>${date}</span>
+                  <!-- 【新增】重置进度复选框 -->
+                  <label style="font-size:12px; color:#666; font-weight:normal; display:flex; align-items:center; cursor:pointer;">
+                      <input type="checkbox" class="reset-chk" style="margin-right:4px;">
+                      重置进度 (重新总结)
+                  </label>
+              </div>
               <div class="event-list">`;
 
             events.forEach(e => {
@@ -232,10 +237,10 @@
         list.appendChild(div.firstElementChild);
     }
 
-    // 保存记忆
+    // --- 【修正版】保存记忆 (支持重置 last_id) ---
     async function saveMemory() {
         const dayBlocks = document.querySelectorAll('.day-block');
-        const newData = { ...globalData.short }; // 复制原数据
+        const newData = { ...globalData.short };
 
         dayBlocks.forEach(block => {
             const date = block.dataset.date;
@@ -243,15 +248,21 @@
             const newEvents = [];
 
             rows.forEach(row => {
-                const t = row.querySelector('.input-key').value;
-                const v = row.querySelector('.input-val').value;
+                const t = row.querySelector('.input-full.input-key').value;
+                const v = row.querySelector('.input-full.input-val').value;
                 if(t && v) newEvents.push({time: t, event: v});
             });
 
-            // 保留 last_id
+            // 获取原始 last_id
             const oldInfo = globalData.short[date] || {};
             let lastId = 0;
             if (!Array.isArray(oldInfo)) lastId = oldInfo.last_id || 0;
+
+            // 【新增】检查是否勾选了重置
+            const resetChk = block.querySelector('.reset-chk');
+            if (resetChk && resetChk.checked) {
+                lastId = 0; // 归零，下次AI会自动重读群聊记录
+            }
 
             newData[date] = {
                 events: newEvents,
@@ -260,18 +271,30 @@
         });
 
         // 发送请求
-        const res = await fetch(`/api/group/${groupId}/save_memory`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ content: newData })
-        });
+        const btn = document.querySelector('#edit-actions .btn-save');
+        const originalText = btn.textContent;
+        btn.textContent = '保存中...';
+        btn.disabled = true;
 
-        if (res.ok) {
-            globalData.short = newData;
-            toggleEditMode(); // 退出编辑
-            alert('保存成功');
-        } else {
-            alert('保存失败');
+        try {
+            const res = await fetch(`/api/group/${groupId}/save_memory`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ content: newData })
+            });
+
+            if (res.ok) {
+                globalData.short = newData;
+                toggleEditMode();
+                alert('保存成功！');
+            } else {
+                alert('保存失败');
+            }
+        } catch(e) {
+            alert('网络错误');
+        } finally {
+            btn.textContent = originalText;
+            btn.disabled = false;
         }
     }
 
@@ -287,9 +310,48 @@
         if(res.ok) alert('更新成功');
     }
 
-    // 上传头像 (复用之前的逻辑，需修改 API 路径)
-    // 注意：我们还没写群头像上传接口，可以先复用 upload_user_avatar 的逻辑改一下
-    // 暂时略过，或者您想现在加上？
+    // --- 【新增】上传群头像逻辑 ---
+    async function uploadGroupAvatar(inputElement) {
+        const file = inputElement.files[0];
+        if (!file) return;
+
+        // 1. 本地预览
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            document.getElementById('group-avatar').src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+
+        // 2. 上传
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const imgEl = document.getElementById('group-avatar');
+        imgEl.style.opacity = '0.5'; // 提示上传中
+
+        try {
+            const res = await fetch(`/api/group/${groupId}/upload_avatar`, {
+                method: 'POST',
+                body: formData
+            });
+            const result = await res.json();
+
+            if (result.status === 'success') {
+                imgEl.src = result.url;
+                imgEl.style.opacity = '1';
+                alert('群头像更新成功！');
+            } else {
+                alert('上传失败: ' + result.error);
+                imgEl.style.opacity = '1';
+            }
+        } catch (e) {
+            alert('网络错误');
+            imgEl.style.opacity = '1';
+        }
+
+        // 清空 input
+        inputElement.value = '';
+    }
 
     loadData();
 </script>

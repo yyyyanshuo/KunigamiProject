@@ -25,13 +25,7 @@ app = Flask(__name__, static_folder='static', template_folder='templates')
 
 # 配置项
 MAX_CONTEXT_LINES = 10
-MODEL_NAME = "gemini-2.5-pro"
-# MODEL_NAME = "gemini-3-pro-preview"gemini-3-flash-preview gemini-2.5-pro gemini-2.5-flash-lite
-
 DATABASE_FILE = "chat_history.db"
-
-# 当前对话的用户名字 (用于读取关系 JSON)
-CURRENT_USER_NAME = "篠原桐奈"
 
 # 定义基础路径
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -41,60 +35,31 @@ CONFIG_FILE = os.path.join(BASE_DIR, "configs", "characters.json")
 GROUPS_CONFIG_FILE = os.path.join(BASE_DIR, "configs", "groups.json")
 GROUPS_DIR = os.path.join(BASE_DIR, "groups")
 
-PERSONA_GENERATION_PROMPT = """
-あなたは熟練したキャラクター設定作家です。
-ユーザーから提供された「キャラクター名」と「作品名(IP)」に基づいて、以下の厳格なフォーマットに従ってキャラクター設定を作成してください。
+USER_SETTINGS_FILE = os.path.join(BASE_DIR, "configs", "user_settings.json")
 
-# 要件
-1. 言語：日本語
-2. 情報源：原作の公式設定やストーリーに基づき、正確かつ詳細に記述すること。
-3. 創作：もし情報が不足している部分は、キャラクターの性格に矛盾しない範囲で補完すること。
-4. フォーマット：以下の構造を厳守すること。
+def get_current_username():
+    """获取当前设置的用户名"""
+    default_name = "User"
+    if not os.path.exists(USER_SETTINGS_FILE):
+        return default_name
+    try:
+        with open(USER_SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get("current_user_name", default_name)
+    except:
+        return default_name
 
-# 出力フォーマット例
-# 役割
-(名前) (年齢/身長/誕生日)
-
-# 外見
-- 髪・瞳：(詳細な描写)
-- (その他の身体的特徴)
-
-# 経歴（年表）
-- (幼少期、学生時代、現在に至るまでの重要な出来事)
-
-# 生活状況
-- 拠点：(現在の住居や所属)
-- (寮や部屋割りなどの詳細があれば記述)
-如果是蓝色监狱的角色：
-- 寮（ベッド順）：
-    - ①潔世一(11)、千切豹馬(4)、御影玲王(14)、**國神錬介(50)**
-    - ②烏旅人(6)、乙夜影汰(19)、雪宮剣優(5)、冰織羊(16)
-    - ③黒名蘭世(96)、清羅刃(69)、雷市陣吾(22)、五十嵐栗夢(108)
-    - ④糸師凛(9)、蜂楽廻(8)、七星虹郎(17)、（空）
-    - ⑤我牙丸吟(1)、時光青志(20)、蟻生十兵衛(3)、（空）
-    - ⑥オリーウェ・エゴ(2)、閃堂秋人(18)、士道龍聖(111)、（空）
-    - ⑦馬狼照英(13)、凪誠士郎(7)、二子一揮(25)、剣城斬鉄(15)
-- 寮配置：①②③④/⑦⑥○⑤（①真正面は⑦）
-
-# 人間関係
-- (家族、友人、ライバル、敵対関係など)
-
-# 性格（キーワード）
-- 表面：(他人に見せる態度)
-- 内面：(隠された本音、デレ要素、執着など)
-- 特徴：
-- 弱点：
-
-# 好きなこと・詳細
-- 代表色：
-- 動物：
-- 好きな食べ物：
-- 苦手な食べ物：
-- 趣味：
-- 好きな季節/科目/座右の銘など：
-- 自認する長所/短所：
-- 嬉しいこと/悲しいこと：
-"""
+def get_ai_language():
+    """获取当前的 AI 回复语言设置 (默认日语 ja)"""
+    default_lang = "ja"
+    if not os.path.exists(USER_SETTINGS_FILE):
+        return default_lang
+    try:
+        with open(USER_SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get("ai_language", default_lang)
+    except:
+        return default_lang
 
 # ... (之前的 imports 和 常用语接口 保持不变) ...
 
@@ -148,6 +113,9 @@ def build_system_prompt(char_id):  # <--- 增加参数
     # 获取该角色的 Prompt 目录
     _, prompts_dir = get_paths(char_id)
 
+    # 【关键修改】获取当前动态用户名
+    current_user_name = get_current_username()
+
     print(f"--- [Debug] 正在为 [{char_id}] 构建 Prompt，路径: {prompts_dir} ---") # <--- 加这行调试
 
     # --- 1. 静态 Markdown 文件 (人设、用户、格式) ---
@@ -173,10 +141,10 @@ def build_system_prompt(char_id):  # <--- 增加参数
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8-sig") as f:
                 rel_data = json.load(f)
-                user_rel = rel_data.get(CURRENT_USER_NAME)
+                user_rel = rel_data.get(current_user_name)
                 if user_rel:
                     # 【修改】拼装文本改成日语
-                    rel_str = (f"対話相手：{CURRENT_USER_NAME}\n"
+                    rel_str = (f"対話相手：{current_user_name}\n"
                            f"関係性：{user_rel.get('role', '不明')}\n"
                            f"詳細：{user_rel.get('description', '')}")
                 prompt_parts.append(f"【Relationship / 関係設定】\n{rel_str}")
@@ -295,6 +263,17 @@ def build_system_prompt(char_id):  # <--- 增加参数
     # 【修改】说明文字改成日语
     prompt_parts.append(f"【Current Date / 現在の日付】\n今日は: {current_date_str}\n(以下の会話履歴には時間 [HH:MM] のみが含まれています。現在の日付に基づいて理解してください)")
 
+    # --- 【新增】语言控制 ---
+    lang = get_ai_language()
+    if lang == "zh":
+        # 强力指令：即使人设是日文，也要用中文回复
+        lang_instruction = (
+            "\n\n【Language Control / 语言控制】\n"
+            "请注意：无论上述设定使用何种语言，你**必须使用中文**进行回复。\n"
+            "在保留角色语气、口癖和性格特征的前提下，自然地转化为中文表达。"
+        )
+        prompt_parts.append(lang_instruction)
+
     return "\n\n".join(prompt_parts)
 
 # --- 工具：构建群聊时的关系 Prompt (ID -> Name 映射版) ---
@@ -360,16 +339,14 @@ def build_group_relationship_prompt(current_char_id, other_member_ids):
         print(f"Build Group Rel Error: {e}")
         return ""
 
-# --- 【修正版】AI 总结专用函数 (第一人称 + 纯净事实版) ---
+# --- 【修正版】AI 总结专用函数 (双语支持) ---
 def call_ai_to_summarize(text_content, prompt_type="short", char_id="kunigami"):
-    if not text_content:
-        return None
+    if not text_content: return None
 
-    # 获取角色名字 (用于辅助定位，虽说是第一人称，但AI知道自己是谁更好)
+    # 获取角色名和语言
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     CONFIG_FILE = os.path.join(BASE_DIR, "configs", "characters.json")
-    char_name = "私" # 默认自称
-
+    char_name = "私"
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             chars_config = json.load(f)
@@ -377,64 +354,79 @@ def call_ai_to_summarize(text_content, prompt_type="short", char_id="kunigami"):
                 char_name = chars_config[char_id]["name"]
     except: pass
 
-    system_instruction = ""
+    lang = get_ai_language()
 
-    # 1. 短期记忆 (保持时间点列表，强调第一人称事实)
-    if prompt_type == "short":
-        system_instruction = (
-            f"あなたは{char_name}本人として、自身の記憶を整理しています。"
-            "以下の会話ログから、重要な出来事を抽出してください。"
-            "感情的な感想は不要です。「誰と何をしたか」「何が起きたか」という事実のみを簡潔に記録してください。"
-            "出力フォーマット：\n- [HH:MM] (自分または相手の行動・会話の要点)"
-        )
+    # --- Prompt 字典 ---
+    prompts = {
+        "ja": {
+            "short": (
+                f"あなたは{char_name}本人として、自身の記憶を整理しています。"
+                "以下の会話ログから、重要な出来事を抽出してください。"
+                "出力フォーマット：\n- [HH:MM] (自分または相手の行動・会話の要点)"
+            ),
+            "medium": (
+                f"あなたは{char_name}本人です。この一日の出来事を振り返り、**一つの繋がった文章（段落形式）**で要約してください。"
+                "**要件**：\n1. 時間表記は不可。\n2. 箇条書きは禁止。\n3. **一人称視点**で、事実のみを淡々と記述すること。"
+            ),
+            "long": (
+                f"あなたは{char_name}本人です。この一週間の記録を振り返り、全体的な流れを要約してください。"
+                "**要件**：\n1. 時間表記は不可。\n2. 箇条書きは禁止。\n3. 事実ベースで記述すること。"
+            ),
+            "group_log": (
+                "あなたはグループチャットの書記係（第三者）です。"
+                "以下の会話ログから、重要なトピックや出来事を**客観的に**抽出してください。"
+                "出力フォーマット：\n- [HH:MM] 出来事の内容"
+            )
+        },
+        "zh": {
+            "short": (
+                f"你现在是{char_name}本人，正在整理自己的记忆。"
+                "请从以下的对话记录中提取重要的事件。"
+                "输出格式：\n- [HH:MM] (自己或对方的行动/对话要点)"
+            ),
+            "medium": (
+                f"你现在是{char_name}本人。请回顾这一天发生的事情，将其总结为**一段连贯的文章（段落格式）**。"
+                "**要求**：\n1. **不要**包含具体时间点（如[HH:MM]）。\n2. 禁止使用列表/条目格式。\n3. 使用**第一人称**（我），仅平实地记录发生的事实（不要过度抒情）。"
+            ),
+            "long": (
+                f"你现在是{char_name}本人。请回顾这一周的记录，总结整体的流程。"
+                "**要求**：\n1. **不要**包含具体时间点。\n2. 禁止使用列表/条目格式。\n3. 基于事实，进行客观总结。"
+            ),
+            "group_log": (
+                "你是群聊的书记员（第三方视角）。"
+                "请从以下的对话记录中，**客观地**提取重要的话题或事件。"
+                "要求：\n1. 不要使用第一人称。\n2. 明确主语（如“[名字]说了...”、“大家决定...”）。\n"
+                "输出格式：\n- [HH:MM] 事件内容"
+            )
+        }
+    }
 
-    # 2. 【新增】群聊记录模式 (纯客观、上帝视角)
-    elif prompt_type == "group_log":
-        system_instruction = (
-            "あなたはグループチャットの書記係（第三者）です。"
-            "以下の会話ログから、重要なトピックや出来事を**客観的に**抽出してください。"
-            "**要件**：\n"
-            "1. 特定のキャラクターの視点（私/俺）を使わないでください。\n"
-            "2. 「[名前]が〜と言った」「全員で〜に行くことになった」のように、主語を明確にしてください。\n"
-            "3. 感情的な装飾は省き、事実のみを記録してください。\n"
-            "出力フォーマット：\n- [HH:MM] 出来事の内容"
-        )
-
-    # 2. 中期记忆 (日结) - 【修改】去时间戳，变段落
-    elif prompt_type == "medium":
-        system_instruction = (
-            f"あなたは{char_name}本人です。この一日の出来事を振り返り、**一つの繋がった文章（段落形式）**で要約してください。"
-            "**要件**：\n"
-            "1. **時間表記（[HH:MM]など）は一切含めないでください**。\n"
-            "2. 箇条書きは禁止です。\n"
-            "3. **一人称視点**（俺/私）で、起きた事実のみを淡々と記述してください（感情的なポエムは不可）。\n"
-            "4. ユーザーとの会話や活動内容を中心に、300文字以内でまとめてください。"
-        )
-
-    # 3. 长期记忆 (周结) - 【修改】去时间戳，变段落
-    elif prompt_type == "long":
-        system_instruction = (
-            f"あなたは{char_name}本人です。この一週間の記録を振り返り、全体的な流れを要約してください。"
-            "**要件**：\n"
-            "1. **具体的な日時や時間表記は不要**です。\n"
-            "2. 箇条書きは禁止です。**一つのまとまった文章**にしてください。\n"
-            "3. ユーザーとの関係性の変化や、重要な出来事の因果関係を一人称で客観的に記述してください。\n"
-            "4. 200文字程度。"
-        )
+    # 选择对应语言和类型的 Prompt
+    system_instruction = prompts.get(lang, prompts["ja"]).get(prompt_type, "")
 
     messages = [
         {"role": "system", "content": system_instruction},
-        {"role": "user", "content": f"記憶ログ：\n{text_content}"}
+        {"role": "user", "content": f"Log:\n{text_content}"}
     ]
 
-    print(f"--- 正在进行记忆总结 ({prompt_type}) [第一人称事实模式] ---")
+    print(f"--- Memory Summary ({prompt_type}) [Lang:{lang}] ---")
 
     if USE_OPENROUTER:
         return call_openrouter(messages, char_id=char_id)
     else:
         return call_gemini(messages, char_id=char_id)
 
-# --- 【修正版】核心逻辑：增量更新 (支持多角色) ---
+    # 1. 获取当前配置
+    route, current_model = get_model_config("summary") # 任务类型是 chat
+
+    print(f"--- [Dispatch] Route: {route}, Model: {current_model} ---")
+
+    if route == "relay":
+        reply_text_raw = call_openrouter(messages, char_id=char_id, model_name=current_model)
+    else:
+        reply_text_raw = call_gemini(messages, char_id=char_id, model_name=current_model)
+
+# --- 【修正版】核心逻辑：增量更新 (带群聊记忆保护) ---
 def update_short_memory_for_date(char_id, target_date_str):
     # 1. 动态获取路径
     db_path, prompts_dir = get_paths(char_id)
@@ -458,36 +450,47 @@ def update_short_memory_for_date(char_id, target_date_str):
         existing_events = day_data.get("events", [])
         last_id = day_data.get("last_id", 0)
 
-    # 3. 查询数据库 (连接动态 DB)
+    # 3. 查询数据库 (私聊 DB)
     if not os.path.exists(db_path):
-        print(f"Database not found: {db_path}")
         return 0, []
 
-    conn = sqlite3.connect(db_path) # <--- 使用动态 db_path
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
     start_time = f"{target_date_str} 00:00:00"
     end_time = f"{target_date_str} 23:59:59"
 
+    # 读取新消息
     cursor.execute("SELECT id, timestamp, role, content FROM messages WHERE timestamp >= ? AND timestamp <= ? AND id > ?", (start_time, end_time, last_id))
     rows = cursor.fetchall()
     conn.close()
 
     if not rows:
+        print(f"[{target_date_str}] 没有新增私聊消息需要总结。")
         return 0, []
 
     new_max_id = rows[-1][0]
 
     # 4. 拼接文本
+    # 加载名字映射
+    id_to_name = {}
+    try:
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        CHAR_CONFIG_FILE = os.path.join(BASE_DIR, "configs", "characters.json")
+        with open(CHAR_CONFIG_FILE, "r", encoding="utf-8") as f:
+            c_conf = json.load(f)
+            for k, v in c_conf.items(): id_to_name[k] = v["name"]
+    except: pass
+
     chat_log = ""
     for _, ts, role, content in rows:
         time_part = ts.split(' ')[1][:5]
-        # 这里的称呼也可以根据 char_id 优化，但暂时用通用的
-        name = "ユーザー" if role == "user" else "私"
+        name = "ユーザー" if role == "user" else id_to_name.get(role, role)
         chat_log += f"[{time_part}] {name}: {content}\n"
 
     # 5. 调用 AI 总结
     try:
+        # 传入 char_id 以匹配人设
         summary_text = call_ai_to_summarize(chat_log, "short", char_id)
         if not summary_text: return 0, []
 
@@ -503,13 +506,29 @@ def update_short_memory_for_date(char_id, target_date_str):
 
         if not new_events_raw: return 0, []
 
-        # 合并逻辑 (带 last_id 判断)
+        # --- 【关键修改】合并逻辑 (群聊记忆保护) ---
+
         all_events = []
+
         if last_id > 0:
+            # A. 增量模式 (Append)：直接追加
+            print(f"   -> [增量模式] 追加 {len(new_events_raw)} 条私聊记忆")
             all_events = existing_events + new_events_raw
         else:
-            all_events = new_events_raw
+            # B. 覆盖模式 (Reset/First Run)：
+            # 以前是直接 all_events = new_events_raw (导致群聊丢失)
+            # 现在我们要：保留旧数据里的【群聊】条目，只覆盖【私聊】条目
 
+            print(f"   -> [覆盖模式] 正在保护群聊记忆...")
+
+            # 筛选出旧数据里的群聊记忆 (特征：包含 "[群聊:")
+            # 或者更严谨：我们假设 AI 总结的私聊不会自己加 [群聊:...] 前缀
+            protected_group_events = [e for e in existing_events if "[群聊:" in e.get('event', '')]
+
+            # 合并：旧的群聊 + 新总结的私聊
+            all_events = protected_group_events + new_events_raw
+
+        # 按时间重新排序 (让群聊和私聊按时间线穿插)
         all_events.sort(key=lambda x: x['time'])
 
         # 保存
@@ -941,12 +960,16 @@ def chat(char_id):
 
     messages.append({"role": "user", "content": f"{current_time_str} {user_msg_raw}"})
 
-    # 5. 核心交互 (API调用)
+    # 1. 获取当前配置
+    route, current_model = get_model_config("chat") # 任务类型是 chat
+
+    print(f"--- [Dispatch] Route: {route}, Model: {current_model} ---")
+
     try:
-        if USE_OPENROUTER:
-            reply_text_raw = call_openrouter(messages)
+        if route == "relay":
+            reply_text_raw = call_openrouter(messages, char_id=char_id, model_name=current_model)
         else:
-            reply_text_raw = call_gemini(messages, char_id=char_id)
+            reply_text_raw = call_gemini(messages, char_id=char_id, model_name=current_model)
 
         # 清理时间戳
         timestamp_pattern = r'\[(?:(?:\d{2}-\d{2}\s+)?\d{1,2}:\d{2})\]\s*'
@@ -1101,12 +1124,16 @@ def group_chat(group_id):
             buf_content = f"{cur_ts} [{buf_msg['display_name']}]: {buf_msg['content']}"
             messages.append({"role": "user", "content": buf_content})
 
-        # --- D. 调用 AI ---
+        # 1. 获取当前配置
+        route, current_model = get_model_config("chat") # 任务类型是 chat
+
+        print(f"--- [Dispatch] Route: {route}, Model: {current_model} ---")
+
         try:
-            if USE_OPENROUTER:
-                reply_text = call_openrouter(messages, char_id=speaker_id)
+            if route == "relay":
+                reply_text = call_openrouter(messages, char_id=speaker_id, model_name=current_model)
             else:
-                reply_text = call_gemini(messages, char_id=speaker_id)
+                reply_text = call_gemini(messages, char_id=speaker_id, model_name=current_model)
 
             timestamp_pattern = r'\[(?:(?:\d{2}-\d{2}\s+)?\d{1,2}:\d{2})\]\s*'
             cleaned_reply = re.sub(timestamp_pattern, '', reply_text).strip()
@@ -1294,15 +1321,71 @@ def edit_group_message(group_id, msg_id):
         print(f"   ❌ 群消息编辑失败: {e}")
         return jsonify({"error": str(e)}), 500
 
+# --- 【新增】API 设置接口 ---
+API_CONFIG_FILE = os.path.join(BASE_DIR, "configs", "api_settings.json")
+
+@app.route("/api/system_config", methods=["GET", "POST"])
+def handle_system_config():
+    # 在 handle_system_config 函数里
+
+    # 初始化默认配置 (增加了 model_options 字段)
+    default_config = {
+        "active_route": "gemini",
+        "routes": {
+            "gemini": {
+                "name": "线路一：Gemini 直连",
+                "models": {"chat": "gemini-2.5-pro", "gen_persona": "gemini-3-pro-preview", "summary": "gemini-2.5-pro"}
+            },
+            "relay": {
+                "name": "线路二：国内中转",
+                "models": {"chat": "gpt-3.5-turbo", "gen_persona": "gpt-3.5-turbo", "summary": "gpt-3.5-turbo"}
+            }
+        },
+        # 【新增】可用的模型列表 (把以前前端写死的搬到这里)
+        "model_options": {
+            'gemini': [
+                'gemini-3-pro-preview',
+                'gemini-3-flash-preview',
+                'gemini-2.5-pro',
+                'gemini-2.5-flash-lite'
+            ],
+            'relay': [
+                'gpt-3.5-turbo',
+                'deepseek-ai/DeepSeek-R1',
+                'gpt-3.5-turbo-0125',
+                'deepseek-ai/DeepSeek-V3',
+                'gpt-4o'
+            ]
+        }
+    }
+
+    if request.method == "GET":
+        if not os.path.exists(API_CONFIG_FILE):
+            return jsonify(default_config)
+        try:
+            with open(API_CONFIG_FILE, "r", encoding="utf-8") as f:
+                return jsonify(json.load(f))
+        except:
+            return jsonify(default_config)
+
+    if request.method == "POST":
+        new_config = request.json
+        try:
+            with open(API_CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(new_config, f, ensure_ascii=False, indent=2)
+            return jsonify({"status": "success"})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
 # 这是在 app.py 文件中的 call_openrouter 函数
 
 # ---------------------- OpenRouter / Compatible API ----------------------
 
-def call_openrouter(messages, char_id="unknown"):
+def call_openrouter(messages, char_id="unknown", model_name="google/gemini-2.5-pro"):
     import requests
 
     # 【新增】打印日志
-    log_full_prompt(f"OpenRouter ({MODEL_NAME})", messages)
+    log_full_prompt(f"OpenRouter ({model_name})", messages)
 
     # 构造请求地址，我们现在用的是 .env 里配置的新地址
     # 它会自动拼接成 "https://vg.v1api.cc/v1/chat/completions"
@@ -1317,10 +1400,10 @@ def call_openrouter(messages, char_id="unknown"):
     # 他们支持哪些模型，你就填哪个。例如 "gpt-3.5-turbo", "gpt-4", "claude-3-opus" 等
     # 如果不确定，"gpt-3.5-turbo" 通常是最安全的选择。
     payload = {
-        "model": "gemini-3-pro",
+        "model": model_name, # 【修改】这里用传入的 model_name
         "messages": messages,
-        "temperature": 0.6,
-        "max_tokens": 1024
+        "temperature": 1,
+        "max_tokens": 10240
     }
 
     print(f"--- [Debug] Calling Compatible API at: {url}")  # 增加一个调试日志
@@ -1339,8 +1422,8 @@ def call_openrouter(messages, char_id="unknown"):
         return f"[ERROR] API request failed: {e}"
 
 # ---------------------- Gemini ----------------------
-# 【修改】增加 char_id 参数
-def call_gemini(messages, char_id="unknown"):
+# 修改 call_gemini 定义
+def call_gemini(messages, char_id="unknown", model_name="gemini-2.5-pro"):
     """
     Google 官方直连 (配合 Cloudflare Worker) - 增强版
     """
@@ -1349,7 +1432,7 @@ def call_gemini(messages, char_id="unknown"):
 
     # 1. 动态获取 Cloudflare 地址
     base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
-    url = f"{base_url}/v1beta/models/{MODEL_NAME}:generateContent?key={GEMINI_KEY}"
+    url = f"{base_url}/v1beta/models/{model_name}:generateContent?key={GEMINI_KEY}"
 
     # 2. 转换消息格式
     gemini_contents = []
@@ -1396,7 +1479,7 @@ def call_gemini(messages, char_id="unknown"):
         if token_usage:
             record_token_usage(
                 char_id,
-                MODEL_NAME,
+                model_name,
                 token_usage.get('promptTokenCount', 0),
                 token_usage.get('candidatesTokenCount', 0),
                 # 【新增】直接提取 totalTokenCount
@@ -1419,13 +1502,60 @@ def call_gemini(messages, char_id="unknown"):
             text = f"[未生成文本] 原因: {finish_reason}"
 
         # --- 【修改】调用日志时，把 token_usage 传进去 ---
-        log_full_prompt(f"Gemini Interaction ({MODEL_NAME})", messages, response_text=text, usage=token_usage)
+        log_full_prompt(f"Gemini Interaction ({model_name})", messages, response_text=text, usage=token_usage)
 
         return text
 
     except Exception as e:
-        log_full_prompt(f"Gemini ERROR ({MODEL_NAME})", messages, response_text=str(e))
+        log_full_prompt(f"Gemini ERROR ({model_name})", messages, response_text=str(e))
         raise e
+
+def get_model_config(task_type="chat"):
+    """
+    根据配置文件，获取当前应该用的 路由方式 和 模型名称
+    task_type: 'chat' | 'gen_persona' | 'summary'
+    """
+    if not os.path.exists(API_CONFIG_FILE):
+        # 默认兜底
+        return "gemini", "gemini-2.5-pro"
+
+    try:
+        with open(API_CONFIG_FILE, "r", encoding="utf-8") as f:
+            config = json.load(f)
+
+        route = config.get("active_route", "gemini")
+        models = config.get("routes", {}).get(route, {}).get("models", {})
+        model_name = models.get(task_type, "gemini-2.5-pro")
+
+        return route, model_name
+    except:
+        return "gemini", "gemini-2.5-pro"
+
+# --- 【新增】获取/更新当前用户信息 ---
+@app.route("/api/user/profile_settings", methods=["GET", "POST"])
+def user_profile_settings():
+    if request.method == "GET":
+        name = get_current_username()
+        lang = get_ai_language()
+        return jsonify({"name": name, "ai_language": lang})
+
+    if request.method == "POST":
+        data_in = request.json
+        # 读取旧数据
+        data = {}
+        if os.path.exists(USER_SETTINGS_FILE):
+            with open(USER_SETTINGS_FILE, "r", encoding="utf-8") as f:
+                try: data = json.load(f)
+                except: pass
+
+        # 更新字段
+        if "name" in data_in: data["current_user_name"] = data_in["name"]
+        if "ai_language" in data_in: data["ai_language"] = data_in["ai_language"] # 保存语言
+
+        with open(USER_SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+        return jsonify({"status": "success"})
 
 # --- 【修正版】API：手动触发记忆整理 ---
 @app.route("/api/<char_id>/memory/snapshot", methods=["POST"])
@@ -1802,19 +1932,26 @@ def get_group_prompts_data(group_id):
 
     return jsonify(data)
 
-# 3. 保存群聊记忆 (仅 memory_short)
+# --- 【确认/修正】保存群聊记忆接口 ---
 @app.route("/api/group/<group_id>/save_memory", methods=["POST"])
 def save_group_memory(group_id):
-    new_content = request.json.get("content")
-
+    # 1. 获取路径
     group_dir = os.path.join(GROUPS_DIR, group_id)
     memory_file = os.path.join(group_dir, "memory_short.json")
 
+    # 2. 获取内容
+    new_content = request.json.get("content")
+
+    if not os.path.exists(group_dir):
+        return jsonify({"error": "Group dir not found"}), 404
+
     try:
+        # 3. 写入文件
         with open(memory_file, "w", encoding="utf-8") as f:
             json.dump(new_content, f, ensure_ascii=False, indent=2)
         return jsonify({"status": "success"})
     except Exception as e:
+        print(f"Save Group Memory Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 # 4. 更新群聊元数据 (头像/名称)
@@ -2072,6 +2209,61 @@ def upload_char_avatar(char_id):
             print(f"Upload Error: {e}")
             return jsonify({"error": str(e)}), 500
 
+# --- 【新增】获取群聊资源 (图片等) ---
+@app.route('/group_assets/<group_id>/<filename>')
+def get_group_asset(group_id, filename):
+    # 指向 groups/<group_id> 文件夹
+    directory = os.path.join(GROUPS_DIR, group_id)
+    return send_from_directory(directory, filename)
+
+# --- 【新增】上传群聊头像 ---
+@app.route("/api/group/<group_id>/upload_avatar", methods=["POST"])
+def upload_group_avatar(group_id):
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+
+    if file:
+        try:
+            # 1. 确定保存路径: groups/<group_id>/
+            target_group_dir = os.path.join(GROUPS_DIR, group_id)
+            if not os.path.exists(target_group_dir):
+                os.makedirs(target_group_dir)
+
+            # 2. 统一重命名为 avatar.png
+            filename = "avatar.png"
+            file_path = os.path.join(target_group_dir, filename)
+
+            # 保存文件
+            file.save(file_path)
+
+            # 3. 更新 groups.json 配置
+            if os.path.exists(GROUPS_CONFIG_FILE):
+                with open(GROUPS_CONFIG_FILE, "r", encoding="utf-8") as f:
+                    groups_config = json.load(f)
+
+                if group_id in groups_config:
+                    # 生成新的访问 URL (带时间戳防缓存)
+                    timestamp = int(time.time())
+                    new_url = f"/group_assets/{group_id}/{filename}?v={timestamp}"
+
+                    groups_config[group_id]["avatar"] = new_url
+
+                    with open(GROUPS_CONFIG_FILE, "w", encoding="utf-8") as f:
+                        json.dump(groups_config, f, ensure_ascii=False, indent=2)
+
+                    return jsonify({"status": "success", "url": new_url})
+                else:
+                    return jsonify({"error": "Group config not found"}), 404
+            else:
+                return jsonify({"error": "Groups config file missing"}), 500
+
+        except Exception as e:
+            print(f"Group Upload Error: {e}")
+            return jsonify({"error": str(e)}), 500
+
 # --- 【新增】上传用户全局头像 ---
 @app.route("/api/upload_user_avatar", methods=["POST"])
 def upload_user_avatar():
@@ -2323,6 +2515,119 @@ def generate_persona():
     char_name = data.get("char_name")
     source_ip = data.get("source_ip")
 
+    lang = get_ai_language()
+
+    # 日语 Prompt
+    prompt_ja = """
+    あなたは熟練したキャラクター設定作家です。
+    ユーザーから提供された「キャラクター名」と「作品名(IP)」に基づいて、以下の厳格なフォーマットに従ってキャラクター設定を作成してください。
+    
+    # 要件
+    1. 言語：日本語
+    2. 情報源：原作の公式設定やストーリーに基づき、正確かつ詳細に記述すること。
+    3. 創作：もし情報が不足している部分は、キャラクターの性格に矛盾しない範囲で補完すること。
+    4. フォーマット：以下の構造を厳守すること。
+    
+    # 出力フォーマット例
+    # 役割
+    (名前) (年齢/身長/誕生日)
+    
+    # 外見
+    - 髪・瞳：(詳細な描写)
+    - (その他の身体的特徴)
+    
+    # 経歴（年表）
+    - (幼少期、学生時代、現在に至るまでの重要な出来事)
+    
+    # 生活状況
+    - 拠点：(現在の住居や所属)
+    - (寮や部屋割りなどの詳細があれば記述)
+    - もしそのキャラクターがブルーロックの登場人物である場合：
+    - 寮（ベッド順）：
+        - ①潔世一(11)、千切豹馬(4)、御影玲王(14)、**國神錬介(50)**(現在のキャラクターをこのように示す)
+        - ②烏旅人(6)、乙夜影汰(19)、雪宮剣優(5)、冰織羊(16)
+        - ③黒名蘭世(96)、清羅刃(69)、雷市陣吾(22)、五十嵐栗夢(108)
+        - ④糸師凛(9)、蜂楽廻(8)、七星虹郎(17)、（空）
+        - ⑤我牙丸吟(1)、時光青志(20)、蟻生十兵衛(3)、（空）
+        - ⑥オリーウェ・エゴ(2)、閃堂秋人(18)、士道龍聖(111)、（空）
+        - ⑦馬狼照英(13)、凪誠士郎(7)、二子一揮(25)、剣城斬鉄(15)
+    - 寮配置：①②③④/⑦⑥○⑤（①真正面は⑦）
+    
+    # 人間関係
+    - (家族、友人、ライバル、敵対関係など)
+    
+    # 性格（キーワード）
+    - 表面：(他人に見せる態度)
+    - 内面：(隠された本音、デレ要素、執着など)
+    - 特徴：
+    - 弱点：
+    
+    # 好きなこと・詳細
+    - 代表色：
+    - 動物：
+    - 好きな食べ物：
+    - 苦手な食べ物：
+    - 趣味：
+    - 好きな季節/科目/座右の銘など：
+    - 自認する長所/短所：
+    - 嬉しいこと/悲しいこと：
+    """
+
+    # 中文 Prompt (结构一致，语言不同)
+    prompt_zh = """
+    你是一位资深的角色设定师。
+    请根据用户提供的“角色名”和“作品名(IP)”，严格按照以下格式撰写角色设定。
+
+    # 要求
+    1. 语言：中文
+    2. 信息源：基于原作官方设定，准确详细。
+    3. 格式：严格遵守以下结构。
+
+    # 输出格式示例
+    # 角色
+    (姓名) (年龄/身高/生日)
+
+    # 外貌
+    - 发型瞳色：(详细描写)
+    - (其他特征)
+
+    # 经历 (年表)
+    - (重要生平事件)
+
+    # 生活状况
+    - 据点：
+    - (宿舍/房间等细节)
+    - 如果是蓝色监狱的角色：
+    - 寝室（床位顺序）：
+        - ①洁世一(11)、千切豹马(4)、御影玲王(14)、**国神炼介(50)**(当前角色像这样标出)
+        - ②乌旅人(6)、乙夜影汰(19)、雪宫剑优(5)、冰织羊(16)
+        - ③黑名兰世(96)、清罗刃(69)、雷市阵吾(22)、五十岚栗梦(108)
+        - ④糸师凛(9)、蜂乐廻(8)、七星虹郎(17)、（空）
+        - ⑤我牙丸吟(1)、时光青志(20)、蚁生十兵卫(3)、（空）
+        - ⑥奥利维·埃戈(2)、闪堂秋人(18)、士道龙圣(111)、（空）
+        - ⑦马狼照英(13)、凪诚士郎(7)、二子一挥(25)、剑城斩铁(15)
+    - 寝室配置：①②③④/⑦⑥○⑤（①正对面是⑦）
+
+    # 人际关系
+    - (家族、朋友、宿敌等)
+
+    # 性格 (关键词)
+    - 表面：
+    - 内心：
+    - 特征：
+    - 弱点：
+
+    # 喜好与细节
+    - 代表色：
+    - 喜欢的食物：
+    - 讨厌的食物：
+    - 兴趣：
+    - 特长/弱项：
+    - 座右铭：
+    """
+
+    system_prompt = prompt_zh if lang == "zh" else prompt_ja
+
     if not char_name or not source_ip:
         return jsonify({"error": "请输入角色名和作品名"}), 400
 
@@ -2332,7 +2637,7 @@ def generate_persona():
     # 这里的 PERSONA_GENERATION_PROMPT 就是上面定义的那一大段字符串
     # 请务必把它定义在文件顶部或这个函数外面
     messages = [
-        {"role": "system", "content": PERSONA_GENERATION_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_content}
     ]
 
@@ -2342,11 +2647,15 @@ def generate_persona():
         # 定义一个特殊的记账 ID
         log_id = f"System:GenPersona({char_name})"
 
-        # 复用现有的 LLM 调用函数
-        if USE_OPENROUTER:
-            generated_text = call_openrouter(messages)
+        # 1. 获取当前配置
+        route, current_model = get_model_config("gen_persona") # 任务类型是 chat
+
+        print(f"--- [Dispatch] Route: {route}, Model: {current_model} ---")
+
+        if route == "relay":
+            generated_text = call_openrouter(messages, char_id=log_id, model_name=current_model)
         else:
-            generated_text = call_gemini(messages, char_id=log_id)
+            generated_text = call_gemini(messages, char_id=log_id, model_name=current_model)
 
         return jsonify({"status": "success", "content": generated_text})
 

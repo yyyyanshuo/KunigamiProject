@@ -100,9 +100,29 @@
     <input type="file" id="user-avatar-input" accept="image/*" style="display: none;" onchange="uploadUserAvatar(this)">
   </div>
 
-  <div class="username">篠原桐奈</div>
-  <!-- 这里的 ID 其实没有什么实际用处，或者您可以从后端获取 -->
-  <!-- <div class="user-id">ID: User_001</div> -->
+  <!-- 头像部分保持不变 -->
+
+  <!-- 【修改】用户名区域 -->
+  <div style="margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+    <input type="text" id="current-username-input" value="加载中..."
+           style="font-size: 18px; font-weight: bold; color: #333; text-align: center; border: none; background: transparent; border-bottom: 1px dashed #ccc; width: 150px;"
+           onfocus="this.style.borderBottom='1px solid #ffb6b9'"
+           onblur="saveUserName(this)">
+
+    <!-- 一个小小的编辑图标提示 -->
+    <svg viewBox="0 0 24 24" style="width:16px; height:16px; color:#aaa; cursor:pointer;" onclick="document.getElementById('current-username-input').focus()">
+      <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+    </svg>
+  </div>
+
+  <!-- 语言选择 -->
+  <div style="margin-top: 15px; text-align: center;">
+    <label style="font-size: 12px; color: #999; margin-right: 5px;">AI 语言 / Language:</label>
+    <select id="ai-lang-select" onchange="saveAiLanguage(this)" style="padding: 4px; border: 1px solid #ddd; border-radius: 6px; font-size: 12px; color: #555;">
+      <option value="ja">🇯🇵 日本語 (默认)</option>
+      <option value="zh">🇨🇳 中文 (Chinese)</option>
+    </select>
+  </div>
 </div>
 
 <!-- 模块 1: 用户设定 -->
@@ -149,6 +169,125 @@
   </div>
 </div>
 
+<!-- 【重构版】API 线路与模型设置 -->
+<div class="section-title">🔌 线路与模型设置 (API Settings)</div>
+
+<div class="module" id="module-api">
+  <div class="config-card">
+
+    <!-- 1. 查看模式 (View Mode) -->
+    <div class="view-mode" id="api-view-mode" style="padding: 10px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+        <div style="font-weight:bold; color:#555;">当前状态</div>
+        <button class="btn-edit-toggle" onclick="toggleApiEdit(true)">编辑配置 / Edit</button>
+      </div>
+
+      <!-- 展示当前选中的内容 -->
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
+        <div>
+          <div style="font-size:12px; color:#999;">当前线路</div>
+          <div id="view-route-name" style="font-weight:bold; color:#d81b60; font-size:15px;">-</div>
+        </div>
+        <div>
+          <div style="font-size:12px; color:#999;">聊天模型</div>
+          <div id="view-chat-model" style="font-family:monospace; background:#f0f0f0; padding:2px 6px; border-radius:4px; display:inline-block;">-</div>
+        </div>
+        <div>
+          <div style="font-size:12px; color:#999;">记忆总结模型</div>
+          <div id="view-summary-model" style="font-family:monospace; background:#f0f0f0; padding:2px 6px; border-radius:4px; display:inline-block;">-</div>
+        </div>
+        <div>
+          <div style="font-size:12px; color:#999;">人设生成模型</div>
+          <div id="view-gen-model" style="font-family:monospace; background:#f0f0f0; padding:2px 6px; border-radius:4px; display:inline-block;">-</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. 编辑模式 (Edit Mode) -->
+    <div class="edit-mode" id="api-edit-mode" style="display:none; padding: 10px;">
+
+      <!-- A. 线路选择 -->
+      <div style="margin-bottom: 20px;">
+        <div style="font-size:13px; color:#888; margin-bottom:8px; font-weight:bold;">1. 选择线路 Route</div>
+        <div style="display:flex; gap:10px;">
+          <label class="radio-card" onclick="selectRoute('gemini')">
+            <input type="radio" name="route" value="gemini" id="radio-gemini">
+            <span>线路一：Gemini 直连</span>
+          </label>
+          <label class="radio-card" onclick="selectRoute('relay')">
+            <input type="radio" name="route" value="relay" id="radio-relay">
+            <span>线路二：国内中转</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- B. 模型选择 (下拉框) -->
+      <div id="model-settings" style="margin-bottom: 20px;">
+        <div style="font-size:13px; color:#888; margin-bottom:8px; font-weight:bold;">2. 选择模型 Select Models</div>
+        <div style="display:grid; grid-template-columns: 1fr; gap:10px;">
+          <div>
+            <div class="input-label">聊天 (Chat)</div>
+            <select id="model-chat" class="model-select"></select>
+          </div>
+          <div>
+            <div class="input-label">记忆总结 (Summary)</div>
+            <select id="model-summary" class="model-select"></select>
+          </div>
+          <div>
+            <div class="input-label">人设生成 (Persona)</div>
+            <select id="model-gen" class="model-select"></select>
+          </div>
+        </div>
+      </div>
+
+      <hr style="border:0; border-top:1px dashed #eee; margin:20px 0;">
+
+      <!-- C. 模型列表管理 (添加/删除) -->
+      <div style="margin-bottom: 20px;">
+        <div style="font-size:13px; color:#888; margin-bottom:8px; font-weight:bold;">
+          3. 管理列表 (自定义添加模型)
+          <span id="manage-route-name" style="font-weight:normal; color:#ffb6b9; margin-left:5px;">-</span>
+        </div>
+
+        <!-- 标签列表 -->
+        <div id="model-tags-list" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px;"></div>
+
+        <!-- 添加框 -->
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="new-model-input" placeholder="输入模型ID (如 gpt-4o)" class="model-select" style="flex:1;">
+          <button class="btn" style="background:#e3f2fd; color:#1565c0; padding:8px 15px; border:none; border-radius:6px; cursor:pointer;" onclick="addNewModel()">+ 添加</button>
+        </div>
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="action-bar">
+        <button class="btn btn-cancel" onclick="toggleApiEdit(false)">取消 / Cancel</button>
+        <button class="btn btn-save" onclick="saveApiConfig()">保存配置 / Save Config</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<style>
+  /* 配套样式 */
+  .radio-card {
+    flex: 1; border: 1px solid #ddd; padding: 10px; border-radius: 8px;
+    cursor: pointer; text-align: center; font-size: 13px; color: #555;
+    background: #fafafa; transition: all 0.2s;
+  }
+  .radio-card:has(input:checked) {
+    border-color: #ffb6b9; background: #fff0f2; color: #d81b60; font-weight: bold;
+  }
+  .radio-card input { display: none; }
+
+  .model-select {
+    width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px;
+    font-size: 12px; background: #fff;
+  }
+  .input-label { font-size: 11px; color: #999; margin-bottom: 4px; }
+</style>
+
 <!-- 【新增】API 消耗日志面板 -->
 <div class="section-title">📊 系统调用日志 (API Usage Logs)</div>
 <div class="config-card" style="padding: 0; overflow: hidden; margin-bottom: 80px;">
@@ -174,28 +313,71 @@
 {% include 'tabbar.html' %}
 
 <script>
-  // 缓存数据，用于取消编辑时恢复
+  // 缓存数据
   let cacheData = {
     user: '',
     format: ''
   };
 
-  // 1. 加载配置
+  // 1. 加载所有配置 (合并调用)
   async function loadConfigs() {
     try {
-      const res = await fetch('/api/global_config');
-      const data = await res.json();
+      // --- A. 加载全局人设 & 格式 (原有的逻辑) ---
+      const resConfig = await fetch('/api/global_config');
+      const dataConfig = await resConfig.json();
 
       // 更新缓存
-      cacheData.user = data.user_persona || '';
-      cacheData.format = data.system_format || '';
+      cacheData.user = dataConfig.user_persona || '';
+      cacheData.format = dataConfig.system_format || '';
 
       // 渲染页面
       renderUI('user');
       renderUI('format');
 
+      // --- B. 【新增】加载当前用户名 ---
+      const resUser = await fetch('/api/user/profile_settings');
+      const dataUser = await resUser.json();
+
+      // 找到那个顶部输入框并填值
+      const nameInput = document.getElementById('current-username-input');
+      if (nameInput) {
+        nameInput.value = dataUser.name || 'User';
+      }
+
+      // 【新增】设置语言下拉框的值
+      const langSelect = document.getElementById('ai-lang-select');
+      if (langSelect) langSelect.value = dataUser.ai_language || 'ja';
+
     } catch(e) {
-      alert('配置加载失败');
+      console.error("配置加载失败", e);
+      // alert('配置加载失败'); // 建议注释掉，防止一个接口失败导致一直弹窗
+    }
+  }
+
+  // 2. 【新增】保存用户名 (失去焦点时触发)
+  async function saveUserName(input) {
+    const newName = input.value.trim();
+    if (!newName) return; // 如果为空就不保存
+
+    try {
+      const res = await fetch('/api/user/profile_settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ name: newName })
+      });
+      const result = await res.json();
+
+      if (result.status === 'success') {
+        // 视觉反馈：边框变绿闪烁一下，提示保存成功
+        input.style.borderBottom = '2px solid #4cd964';
+        setTimeout(() => {
+          input.style.borderBottom = '1px dashed #ccc'; // 恢复原样
+        }, 1000);
+      } else {
+        alert("修改失败: " + result.error);
+      }
+    } catch(e) {
+      alert("网络错误，无法保存用户名");
     }
   }
 
@@ -308,6 +490,23 @@
     }
   }
 
+  // 【新增】保存语言设置
+  async function saveAiLanguage(select) {
+    const lang = select.value;
+    try {
+      const res = await fetch('/api/user/profile_settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ ai_language: lang })
+      });
+      if(res.ok) {
+        // 给个微小的视觉反馈
+        select.style.borderColor = '#4cd964';
+        setTimeout(() => select.style.borderColor = '#ddd', 1000);
+      }
+    } catch(e) { alert('设置保存失败'); }
+  }
+
   // 初始化
   loadConfigs();
 
@@ -345,6 +544,193 @@
 
   // 初始化时调用
   loadUsageLogs();
+
+  // --- 全局配置缓存 ---
+  let apiConfig = {};
+
+  // 1. 加载配置并初始化
+  async function loadApiConfig() {
+    try {
+      const res = await fetch('/api/system_config');
+      apiConfig = await res.json();
+
+      // 容错初始化
+      if (!apiConfig.model_options) {
+        apiConfig.model_options = { 'gemini': [], 'relay': [] };
+      }
+
+      // 渲染查看模式
+      renderApiView();
+
+      // 预渲染编辑模式 (但不显示)
+      const active = apiConfig.active_route;
+      document.getElementById(`radio-${active}`).checked = true;
+      refreshEditUI(active);
+
+    } catch(e) { console.error("API配置加载失败", e); }
+  }
+
+  // 2. 渲染查看模式 (View Mode)
+  function renderApiView() {
+    const route = apiConfig.active_route;
+    const routeName = (route === 'gemini') ? 'Gemini 直连' : '国内中转';
+    const models = apiConfig.routes[route].models;
+
+    document.getElementById('view-route-name').textContent = routeName;
+    document.getElementById('view-chat-model').textContent = models.chat;
+    document.getElementById('view-summary-model').textContent = models.summary;
+    document.getElementById('view-gen-model').textContent = models.gen_persona;
+  }
+
+  // 3. 切换编辑状态
+  function toggleApiEdit(isEditing) {
+    const viewMode = document.getElementById('api-view-mode');
+    const editMode = document.getElementById('api-edit-mode');
+
+    if (isEditing) {
+      viewMode.style.display = 'none';
+      editMode.style.display = 'block';
+      // 进入编辑时，重置为当前生效的配置
+      const active = apiConfig.active_route;
+      document.getElementById(`radio-${active}`).click(); // 触发点击来刷新UI
+    } else {
+      viewMode.style.display = 'block';
+      editMode.style.display = 'none';
+    }
+  }
+
+  // 4. 编辑模式：切换线路触发
+  function selectRoute(route) {
+    refreshEditUI(route);
+  }
+
+  // 5. 刷新编辑界面 UI (下拉框 + 标签列表)
+  function refreshEditUI(route) {
+    // 更新标题
+    document.getElementById('manage-route-name').textContent = (route === 'gemini') ? '[Gemini]' : '[中转]';
+
+    // A. 渲染下拉框选项
+    const options = apiConfig.model_options[route] || [];
+    // 如果列表为空，给个提示
+    const optionsHtml = options.length > 0
+            ? options.map(m => `<option value="${m}">${m}</option>`).join('')
+            : '<option value="">(暂无模型，请在下方添加)</option>';
+
+    document.getElementById('model-chat').innerHTML = optionsHtml;
+    document.getElementById('model-summary').innerHTML = optionsHtml;
+    document.getElementById('model-gen').innerHTML = optionsHtml;
+
+    // B. 选中当前(或默认)值
+    // 注意：这里我们优先显示配置文件里存的值。如果那个值不在列表里了(被删了)，就选列表第一个。
+    const savedModels = apiConfig.routes[route].models;
+
+    setSelectValue('model-chat', savedModels.chat);
+    setSelectValue('model-summary', savedModels.summary);
+    setSelectValue('model-gen', savedModels.gen_persona);
+
+    // C. 渲染管理标签列表
+    const listEl = document.getElementById('model-tags-list');
+    let tagsHtml = '';
+    options.forEach(m => {
+      tagsHtml += `
+          <div style="background:#fff; border:1px solid #ddd; border-radius:4px; padding:4px 8px; font-size:12px; display:flex; align-items:center; gap:6px;">
+              <span>${m}</span>
+              <span onclick="deleteModel('${m}')" style="cursor:pointer; color:#c62828; font-weight:bold;">×</span>
+          </div>`;
+    });
+    listEl.innerHTML = tagsHtml;
+  }
+
+  // 辅助：设置下拉框的值，如果不存在则选第一个
+  function setSelectValue(id, value) {
+    const select = document.getElementById(id);
+    // 尝试设置
+    select.value = value;
+    // 如果设置失败(value不在options里)，select.value 会是空或者第一个，
+    // 这里我们可以强制设为第一个有效值，或者保留空
+    if (select.selectedIndex === -1 && select.options.length > 0) {
+      select.selectedIndex = 0;
+    }
+  }
+
+  // 6. 添加新模型
+  function addNewModel() {
+    const input = document.getElementById('new-model-input');
+    const newVal = input.value.trim();
+    if (!newVal) return;
+
+    const currentRoute = document.querySelector('input[name="route"]:checked').value;
+
+    if (!apiConfig.model_options[currentRoute]) apiConfig.model_options[currentRoute] = [];
+
+    if (!apiConfig.model_options[currentRoute].includes(newVal)) {
+      apiConfig.model_options[currentRoute].push(newVal);
+
+      // 刷新 UI
+      refreshEditUI(currentRoute);
+
+      // 自动选中新加的模型到第一个下拉框(方便用户)
+      // document.getElementById('model-chat').value = newVal;
+
+      input.value = '';
+    } else {
+      alert('该模型已存在');
+    }
+  }
+
+  // 7. 删除模型
+  function deleteModel(val) {
+    const currentRoute = document.querySelector('input[name="route"]:checked').value;
+    if (confirm(`确定删除模型 "${val}" 吗？`)) {
+      const list = apiConfig.model_options[currentRoute];
+      const index = list.indexOf(val);
+      if (index > -1) {
+        list.splice(index, 1);
+        refreshEditUI(currentRoute);
+      }
+    }
+  }
+
+  // 8. 保存最终配置
+  async function saveApiConfig() {
+    const activeRoute = document.querySelector('input[name="route"]:checked').value;
+
+    // 更新内存中的配置对象
+    apiConfig.active_route = activeRoute;
+    apiConfig.routes[activeRoute].models.chat = document.getElementById('model-chat').value;
+    apiConfig.routes[activeRoute].models.summary = document.getElementById('model-summary').value;
+    apiConfig.routes[activeRoute].models.gen_persona = document.getElementById('model-gen').value;
+
+    const btn = document.querySelector('#module-api .btn-save');
+    const originalText = btn.textContent;
+    btn.textContent = '保存中...';
+    btn.disabled = true;
+
+    try {
+      const res = await fetch('/api/system_config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(apiConfig)
+      });
+      if(res.ok) {
+        // 重新渲染查看模式
+        renderApiView();
+        toggleApiEdit(false);
+        alert('API 配置已更新！');
+      } else {
+        alert('保存失败');
+      }
+    } catch(e) {
+      alert('网络错误');
+    } finally {
+      btn.textContent = originalText;
+      btn.disabled = false;
+    }
+  }
+
+  // 启动加载
+  loadApiConfig();
+  // loadConfigs(); // 别忘了保留原来加载 User/Format 的函数调用
 </script>
 
 </body>
