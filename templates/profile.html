@@ -115,6 +115,13 @@
     </svg>
   </div>
 
+  <!-- 【新增】密码修改区域 -->
+  <div style="margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+    <input type="password" id="new-password-input" placeholder="设置新密码 (留空不改)"
+           style="font-size: 14px; color: #555; text-align: center; border: 1px solid #eee; border-radius:15px; width: 180px; padding: 5px 10px;"
+           onchange="savePassword(this)">
+  </div>
+
   <!-- 语言选择 -->
   <div style="margin-top: 15px; text-align: center;">
     <label style="font-size: 12px; color: #999; margin-right: 5px;">AI 语言 / Language:</label>
@@ -307,6 +314,10 @@
       </tbody>
     </table>
   </div>
+</div>
+
+<div style="text-align:center; margin: 30px 0;">
+  <a href="/logout" style="color: #ffb6b9; text-decoration: none; font-size:14px;">🚪 退出登录 (Logout)</a>
 </div>
 
 <!-- 引入底部导航栏 -->
@@ -731,6 +742,38 @@
   // 启动加载
   loadApiConfig();
   // loadConfigs(); // 别忘了保留原来加载 User/Format 的函数调用
+
+  // 【新增】保存密码
+  async function savePassword(input) {
+    const newPass = input.value.trim();
+    if (!newPass) return; // 为空不改
+
+    if (!confirm("确定要修改登录密码吗？")) {
+      input.value = "";
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/user/profile_settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ password: newPass })
+      });
+      const result = await res.json();
+
+      if (result.status === 'success') {
+        alert("密码修改成功！下次登录请使用新密码。");
+        input.value = ""; // 清空防止误触
+      } else {
+        alert("修改失败: " + result.error);
+      }
+    } catch(e) {
+      alert("网络错误");
+    }
+  }
+
+  // 顺便加一个退出登录按钮在页面最底部
+  // 在 <body> 结束前，或者 tabbar 上面加一个
 </script>
 
 </body>

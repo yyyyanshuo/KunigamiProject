@@ -17,7 +17,6 @@
     /* --- 1. 锁死根元素高度 --- */
     html {
       height: 100%; /* 必须是 100% */
-      overflow: hidden; /* 禁止 html 滚动 */
     }
 
     body {
@@ -27,10 +26,13 @@
       height: 100%; /* 跟随 html 高度 */
       display: flex;
       flex-direction: column;
-      overflow: hidden; /* 禁止 body 滚动 */
+      /* 【关键修改】允许 Body 滚动/回弹，这样才能触发浏览器的刷新 */
+      overflow-y: auto;
+      overscroll-behavior-y: auto;
 
       /* 避让刘海屏 */
-      padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
     }
 
     /* --- 2. 聊天区域 (占据剩余空间) --- */
@@ -47,6 +49,9 @@
       /* iOS 惯性滚动 */
       -webkit-overflow-scrolling: touch;
       scroll-behavior: smooth;
+
+      /* 【关键修改】允许滚动事件穿透到 Body，触发刷新 */
+      overscroll-behavior-y: auto;
     }
 
     /* --- 3. 输入框区域 (固定在底部，不可压缩) --- */
@@ -395,6 +400,63 @@
     .message-group.assistant {
       /* 保持原样，但注意我们稍后会动态修改里面的头像 */
     }
+
+    /* --- @提及栏样式 --- */
+    #mention-bar {
+      display: none; /* 默认隐藏，JS控制 */
+      flex-shrink: 0;
+      padding: 8px 10px;
+      background: #fdfdfd;
+      border-top: 1px solid #f0f0f0;
+      overflow-x: auto; /* 横向滚动 */
+      white-space: nowrap; /* 不换行 */
+      -webkit-overflow-scrolling: touch; /* 丝滑滚动 */
+      gap: 8px;
+    }
+
+    /* 隐藏滚动条但保留功能 */
+    #mention-bar::-webkit-scrollbar { display: none; }
+
+    .mention-tag {
+      display: inline-block;
+      padding: 4px 10px;
+      background: #e3f2fd;
+      color: #1565c0;
+      border-radius: 15px;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      border: 1px solid #bbdefb;
+      margin-right: 6px;
+      transition: all 0.2s;
+    }
+    .mention-tag:active { background: #bbdefb; transform: scale(0.95); }
+
+    /* 【新增】特殊 Tag (@所有人) 样式 */
+    .mention-tag.special {
+      background: #fce4ec; /* 浅粉红背景 */
+      color: #c2185b;      /* 深红文字 */
+      border-color: #f8bbd0;
+    }
+
+    /* --- 重新生成按钮样式 --- */
+    .regen-btn {
+      display: none; /* 默认隐藏 */
+      width: 24px; height: 24px;
+      border: none; background: transparent;
+      cursor: pointer; color: #aaa;
+      padding: 4px; border-radius: 4px;
+      transition: all 0.2s;
+    }
+    .regen-btn:hover { color: #2196f3; background: rgba(33, 150, 243, 0.1); }
+    .regen-btn svg { width: 14px; height: 14px; fill: currentColor; }
+
+    /* 【CSS魔法】只有当该消息组是容器里的最后一个元素，且包含regen-btn时，才显示 */
+    /* 注意：.message-group 是直接子元素 */
+    #chatContainer > .message-group:last-child .regen-btn {
+      display: flex;
+      align-items: center; justify-content: center;
+    }
   </style>
 </head>
 <body>
@@ -450,6 +512,11 @@
   <div class="bubble assistant">
     ✿ こんにちは～ 我是桐奈の小聊天助手 💌
   </div>
+</div>
+
+<!-- 【新增】@提及栏 (默认隐藏) -->
+<div id="mention-bar">
+  <!-- JS 会在这里动态填充按钮 -->
 </div>
 
 <div class="input-container">
@@ -588,6 +655,11 @@
       const res = await fetch(url);
       const data = await res.json();
 
+      // --- 每次初始化先清空/隐藏 @栏 ---
+      const mentionBar = document.getElementById('mention-bar');
+      mentionBar.innerHTML = '';
+      mentionBar.style.display = 'none';
+
       if (isGroupMode) {
         // --- 群聊模式 ---
         currentConfig = data.group_info;
@@ -596,6 +668,49 @@
         document.querySelector('.header-name').textContent = currentConfig.name + ` (${Object.keys(groupMembers).length + 1}人)`;
         // 可以在 header 显示群头像，或者暂时不显示状态
         document.querySelector('.header-status').style.display = 'none'; // 群聊不显示“手机在线”
+
+        // === 【新增】生成 @ 按钮 ===
+        mentionBar.style.display = 'block'; // 显示栏目
+
+        // 1. 先添加 【@所有人】 按钮
+        const btnAll = document.createElement('span');
+        btnAll.className = 'mention-tag special'; // 加上特殊样式类
+        btnAll.textContent = '@所有人';
+        btnAll.onclick = () => {
+          const input = document.getElementById('messageInput');
+          input.value += `@所有人 `; // 插入文本
+          input.focus();
+          input.style.height = 'auto';
+          input.style.height = `${input.scrollHeight}px`;
+        };
+        mentionBar.appendChild(btnAll);
+
+        // 遍历群成员
+        Object.keys(groupMembers).forEach(memberId => {
+          // 跳过用户自己 (虽然用户ID是'user'不在members字典里，但为了保险)
+          if (memberId === 'user') return;
+
+          const info = groupMembers[memberId];
+          const name = info.remark || info.name; // 优先用备注
+
+          const btn = document.createElement('span');
+          btn.className = 'mention-tag';
+          btn.textContent = `@${name}`;
+
+          // 点击事件：插入输入框
+          btn.onclick = () => {
+            const input = document.getElementById('messageInput');
+            // 在当前光标处或者末尾插入
+            input.value += `@${name} `;
+            input.focus();
+            // 触发高度自适应
+            input.style.height = 'auto';
+            input.style.height = `${input.scrollHeight}px`;
+          };
+
+          mentionBar.appendChild(btn);
+        });
+        // ==========================
       } else {
         // --- 单人模式 ---
         currentConfig = data;
@@ -605,7 +720,42 @@
     } catch (e) { console.error("UI加载失败", e); }
   }
 
-    function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+  function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+  // --- 【新增】通用日期检查函数 ---
+  function checkAndAppendDateSeparator(newTimestamp) {
+    const newDate = new Date(newTimestamp);
+
+    // 1. 获取当前页面最底部的一条消息容器
+    const lastGroup = chatContainer.querySelector('.message-group:last-child');
+
+    // 如果页面是空的，或者上一条消息有时间戳
+    if (lastGroup && lastGroup.dataset.timestamp) {
+      const prevDate = new Date(lastGroup.dataset.timestamp);
+
+      // 2. 比较年月日
+      if (prevDate.getFullYear() !== newDate.getFullYear() ||
+              prevDate.getMonth() !== newDate.getMonth() ||
+              prevDate.getDate() !== newDate.getDate()) {
+
+        // 3. 跨天了，插入分隔符
+        const separator = document.createElement('div');
+        separator.classList.add('date-separator');
+        separator.textContent = newDate.toLocaleDateString([], {
+          year: 'numeric', month: 'long', day: 'numeric', weekday: 'long'
+        });
+        chatContainer.appendChild(separator);
+      }
+    } else if (!lastGroup) {
+      // 如果页面完全是空的（比如新对话第一句），也加个日期头
+      const separator = document.createElement('div');
+      separator.classList.add('date-separator');
+      separator.textContent = newDate.toLocaleDateString([], {
+        year: 'numeric', month: 'long', day: 'numeric', weekday: 'long'
+      });
+      chatContainer.appendChild(separator);
+    }
+  }
 
   function renderMessageGroup({ id, content, role, timestamp }, mode = 'append') {
     const bubbles = content.split('/').map(p => p.trim()).filter(Boolean);
@@ -650,6 +800,32 @@
     avatar.classList.add('avatar-img');
     avatar.src = avatarUrl;
 
+    // 【新增】添加点击事件
+    avatar.style.cursor = 'pointer'; // 鼠标放上去变手型
+    avatar.onclick = (e) => {
+      e.stopPropagation(); // 防止冒泡触发其他点击事件
+
+      if (isUser) {
+        // 1. 如果是用户头像 -> 跳转到“我的”页面
+        window.location.href = '/profile';
+      } else {
+        // 2. 如果是角色头像
+        if (isGroupMode) {
+          // 群聊模式：role 字段存的就是具体的 char_id (如 "isagi")
+          // 直接跳转到该角色的记忆页
+          window.location.href = `/memory/${role}`;
+        } else {
+          // 单聊模式：role 可能是 'assistant'，所以我们要用当前 URL 里的 currentId
+          window.location.href = `/memory/${currentId}`;
+        }
+      }
+    };
+
+    // 这里的 onerror 保持不变，用来处理图片加载失败的情况
+    avatar.onerror = function() {
+      this.src = '/static/default_avatar.png';
+    };
+
     // --- 气泡栈 ---
     const stack = document.createElement('div');
     stack.classList.add('bubble-stack');
@@ -679,6 +855,21 @@
         const controls = document.createElement('div');
         controls.classList.add('controls-container');
 
+        // 【新增】重新生成按钮 (只给助手加，是不是最后一条由 CSS 控制显示)
+        // 只有单聊模式才加，群聊不加 (因为群聊逻辑复杂)
+        if (role === 'assistant' && !isGroupMode) {
+          const regenBtn = document.createElement('button');
+          regenBtn.classList.add('regen-btn');
+          regenBtn.title = "重新生成 (删除此条并重试)";
+          // 刷新图标 SVG
+          regenBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>';
+
+          regenBtn.onclick = () => doRegenerate(wrapper); // 传入 wrapper 方便删除
+
+          // 把它插在最前面，或者时间戳后面
+          controls.appendChild(regenBtn);
+        }
+
         const timestampEl = document.createElement('div');
         timestampEl.classList.add('timestamp');
         timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -700,11 +891,21 @@
         copyBtn.className = 'action-btn';
         copyBtn.innerHTML = `<img src="${copyIconPath}" style="width:14px;height:14px;opacity:0.6;">`;
         copyBtn.onclick = () => {
-          if (navigator.clipboard) {
+          // --- 【核心修改】全环境兼容复制逻辑 ---
+
+          // 情况 A: 现代浏览器 + HTTPS 安全环境
+          if (navigator.clipboard && window.isSecureContext) {
             navigator.clipboard.writeText(fullText).then(() => {
-              icon.src = checkIconPath; copyBtn.classList.add('copied');
-              setTimeout(() => { icon.src = copyIconPath; copyBtn.classList.remove('copied'); }, 1500);
+              showCopySuccess(copyBtn, icon);
+            }).catch(err => {
+              // 如果 HTTPS 居然也报错（比如某些安卓 webview 抽风），就自动降级
+              console.warn('HTTPS复制出错，尝试降级:', err);
+              fallbackCopyTextToClipboard(fullText, copyBtn, icon);
             });
+          }
+          // 情况 B: HTTP 环境 (比如直接用 IP 访问)
+          else {
+            fallbackCopyTextToClipboard(fullText, copyBtn, icon);
           }
         }
 
@@ -722,8 +923,13 @@
     group.appendChild(avatar);
     group.appendChild(stack);
 
-    if (mode === 'prepend') chatContainer.prepend(group);
-    else chatContainer.appendChild(group);
+    if (mode === 'prepend') {
+      chatContainer.prepend(group);
+    } else {
+      chatContainer.appendChild(group);
+    }
+
+    return group; // 【新增】把这个做好的 DOM 元素返回出去
   }
 
     // --- 【新增】全局日期重排函数 (彻底解决日期重复/Invalid问题) ---
@@ -759,47 +965,76 @@
       });
     }
 
-    async function loadHistory(page = 1) {
-      if (isLoading) return;
-      isLoading = true;
-      loadMoreBtn.textContent = '加載中...';
-      try {
-        // 【修改】使用 getApiPrefix() 动态获取路径
-        const res = await fetch(`${getApiPrefix()}/history?page=${page}&limit=${messagesPerPage}`);
-        const data = await res.json();
-        if (data.messages && data.messages.length > 0) {
-          const oldScrollHeight = chatContainer.scrollHeight;
+  // --- 【修正版】加载历史记录 (基于 ID 锚点) ---
+  async function loadHistory(mode = 'scroll') {
+    // mode: 'scroll' (滚动加载) | 'initial' (初始加载)
+    if (isLoading) return;
+    isLoading = true;
+    loadMoreBtn.textContent = '加載中...';
 
-          // --- 1. 纯粹地渲染消息 (不在这里处理日期) ---
-          for (const msg of data.messages.reverse()) {
-            // 确保调用 renderMessageGroup 时不带日期逻辑，只负责生成 DOM
-            renderMessageGroup(msg, 'prepend');
-          }
+    try {
+      let url = `${getApiPrefix()}/history?limit=${messagesPerPage}`;
 
-          // --- 2. 【核心】所有消息插进去后，统一洗牌整理日期 ---
-          refreshDateSeparators();
+      // 【关键】获取当前视图中最老的一条消息 ID
+      let oldestId = null;
+      const topMsg = chatContainer.querySelector('.message-group');
+      if (topMsg) {
+        oldestId = topMsg.dataset.id;
+      }
 
-          // --- 3. 恢复滚动位置 ---
-          if (page === 1) { chatContainer.scrollTop = chatContainer.scrollHeight; }
-          else {
-            // 重新计算滚动高度，保证视觉位置不变
-            chatContainer.scrollTop = chatContainer.scrollHeight - oldScrollHeight;
-          }
+      // 如果是滚动加载，且有最老消息，带上 before_id 参数
+      if (mode === 'scroll' && oldestId) {
+        url += `&before_id=${oldestId}`;
+      }
+      // 如果是初始加载(或者强制刷新)，不带 before_id，后端默认返最新
 
-          totalMessages = data.total;
-          currentPage = page;
-          if ((currentPage * messagesPerPage) < totalMessages) { loadMoreContainer.style.display = 'block'; }
-          else { loadMoreContainer.style.display = 'none'; }
-        } else {
-          if (page === 1) {
-            // 如果是新对话，显示个欢迎语
-            renderMessageGroup({ content: '✿ こんにちは～ 我是桐奈の小聊天助手 💌', role: 'assistant', timestamp: new Date() });
-          }
-          loadMoreContainer.style.display = 'none';
+      const res = await fetch(url);
+      const data = await res.json();
+
+      if (data.messages && data.messages.length > 0) {
+        const oldScrollHeight = chatContainer.scrollHeight;
+        const oldTopMsg = chatContainer.querySelector('.message-group'); // 记录当前顶部的元素
+
+        // 渲染消息 (prepend 插到前面)
+        for (const msg of data.messages.reverse()) {
+          renderMessageGroup(msg, 'prepend');
         }
-      } catch (e) { console.error("Failed to load history:", e); }
-      finally { isLoading = false; loadMoreBtn.textContent = '加載更早的記錄'; }
-    }
+
+        // 刷新日期分隔符
+        refreshDateSeparators();
+
+        // 【关键】恢复滚动位置
+        if (mode === 'scroll' && oldTopMsg) {
+          // 保持之前的顶部元素位置不变，视觉上就是“向上加载了内容但屏幕没乱跳”
+          oldTopMsg.scrollIntoView();
+          // 或者使用 scrollTop 计算：
+          // chatContainer.scrollTop = chatContainer.scrollHeight - oldScrollHeight;
+        } else {
+          // 初始加载，滚到底部
+          chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        totalMessages = data.total;
+
+        // 判断是否还有更多：如果刚才拉回来的数量少于 limit，说明到头了
+        if (data.messages.length < messagesPerPage) {
+          loadMoreContainer.style.display = 'none';
+        } else {
+          loadMoreContainer.style.display = 'block';
+        }
+
+      } else {
+        // 没有数据了
+        loadMoreContainer.style.display = 'none';
+        if (chatContainer.children.length === 0) {
+          // 只有真的一条都没有时才显示欢迎语，避免滚动到头时弹出欢迎语
+          renderMessageGroup({ content: '✿ こんにちは～ 我是桐奈の小聊天助手 💌', role: 'assistant', timestamp: new Date() });
+        }
+        loadMoreContainer.style.display = 'none';
+      }
+    } catch (e) { console.error("Failed to load history:", e); }
+    finally { isLoading = false; loadMoreBtn.textContent = '加載更早的記錄'; }
+  }
 
   // --- 键盘弹起优化 ---
   // 当窗口大小改变（通常是键盘弹起）时，强制滚到底部
@@ -824,12 +1059,18 @@
         input.value = ''; input.style.height = 'auto';
         btn.disabled = true; btn.textContent = "发送中…";
 
-        // 渲染用户消息（作为一个整体）
-        const userMsg = { content: originalText, role: 'user', timestamp: new Date() };
-        renderMessageGroup(userMsg, 'append');
-        chatContainer.scrollTop = chatContainer.scrollHeight;
+      // --- 1. 处理用户消息 ---
+      const userMsgTime = new Date();
 
-        try {
+      // 【关键】渲染用户气泡前，先检查是否需要加日期
+      checkAndAppendDateSeparator(userMsgTime);
+
+      const userMsgObj = { content: originalText, role: 'user', timestamp: userMsgTime }
+      // 这里拿到返回的 DOM 元素
+      const userBubbleElement = renderMessageGroup(userMsgObj, 'append');
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+
+      try {
           // 【修改】使用 getApiPrefix()
           const res = await fetch(`${getApiPrefix()}/chat`, {
             method: 'POST',
@@ -837,6 +1078,34 @@
             body: JSON.stringify({message: originalText})
           });
           const data = await res.json();
+
+          // 2. 【关键】请求成功后，给刚才抓住的气泡补票
+          if (data.user_id && userBubbleElement) {
+            // A. 补上身份证号
+            userBubbleElement.dataset.id = data.user_id;
+
+            // B. 动态插入编辑/删除按钮 (找到控制栏)
+            const controls = userBubbleElement.querySelector('.controls-container');
+            if (controls) {
+              // 创建编辑按钮
+              const editBtn = document.createElement('button');
+              editBtn.className = 'action-btn';
+              editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+              editBtn.onclick = () => openEditModal(data.user_id, originalText, userBubbleElement);
+
+              // 创建删除按钮
+              const delBtn = document.createElement('button');
+              delBtn.className = 'action-btn';
+              delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+              delBtn.onclick = () => deleteMessage(data.user_id, userBubbleElement);
+
+              // 插入到时间戳后面 (controls 的第二个位置)
+              // 结构: [时间戳] [编辑] [删除] [复制]
+              // 现在的 controls 里是 [Timestamp, CopyBtn]
+              controls.insertBefore(delBtn, controls.lastChild); // 插在复制按钮前
+              controls.insertBefore(editBtn, delBtn);        // 插在删除按钮前
+            }
+          }
 
           if (data.replies && data.replies.length > 0) {
             // --- 【修正】区分 单聊(字符串) 和 群聊(对象) ---
@@ -848,11 +1117,17 @@
                 // 模拟一点打字延迟，更有真实感
                 await sleep(800);
 
+                const aiTime = reply.timestamp ? new Date(reply.timestamp) : new Date();
+
+                // 【关键】渲染每一条 AI 气泡前，都检查一次日期
+                // (防止 AI 回复太慢跨过了午夜，或者群聊接龙跨天)
+                checkAndAppendDateSeparator(aiTime);
+
                 renderMessageGroup({
-                  id: reply.id || Date.now(), // 如果后端没回传ID暂时用时间戳兜底
+                  id: reply.id || Date.now(),
                   content: reply.content,
-                  role: reply.char_id, // 【关键】把说话人的ID传进去，renderMessageGroup会自动找头像
-                  timestamp: new Date() // 或者使用 reply.timestamp
+                  role: reply.char_id,
+                  timestamp: aiTime
                 }, 'append');
 
                 // 滚到底部
@@ -862,15 +1137,23 @@
             // 2. 单聊模式 (旧逻辑，数组里是字符串)
             else {
               const fullReplyText = data.replies.join(' / ');
+              const aiTime = new Date();
+
+              // 【关键】单聊 AI 回复前检查
+              checkAndAppendDateSeparator(aiTime);
+
               const aiMsg = {
                 id: data.id,
                 content: fullReplyText,
                 role: 'assistant',
-                timestamp: new Date()
+                timestamp: aiTime
               };
               await sleep(1000);
               renderMessageGroup(aiMsg, 'append');
             }
+          } else {
+            // 错误处理回复
+            renderMessageGroup({ content: data.reply || '[无回复]', role: 'assistant', timestamp: new Date() }, 'append');
           }
         } catch (e) { console.error(e);
           // 【修正这里】不要用 displayBubbleGroup
@@ -883,65 +1166,60 @@
         finally { btn.disabled = false; btn.textContent = "发送"; chatContainer.scrollTop = chatContainer.scrollHeight; }
     }
 
-    // 2. 修改页面加载逻辑：加载完成后跳转到该 ID
     window.addEventListener('DOMContentLoaded', async () => {
       chatContainer.innerHTML = '';
 
-      // 【新增】先初始化 UI 信息 (这一步很快)
       await initUI();
 
-      // 【Fix 3】检查是否有需要跳转的消息
       const jumpId = sessionStorage.getItem('jump_to_msg_id');
+
       if (jumpId) {
-        // === 模式 A: 定位加载 (类似于搜索跳转) ===
-        // 既然我们要跳到某条消息，就必须保证它被加载出来
-        // 1. 先问后端：这条消息在第几页？
+        // === 跳转模式 ===
         try {
-          const checkRes = await fetch(`${getApiPrefix()}/history?limit=${messagesPerPage}&target_id=${jumpId}`);
-          const checkData = await checkRes.json();
-          const targetPage = checkData.page || 1;
+          // 直接请求带 target_id 的接口
+          const res = await fetch(`${getApiPrefix()}/history?target_id=${jumpId}`);
+          const data = await res.json();
 
-          // 2. 一次性加载足够深的数据 (Page 1 ~ TargetPage)
-          // 这样能保证目标消息及其下方的所有新消息都在
-          const totalCountToLoad = targetPage * messagesPerPage;
-          const loadRes = await fetch(`${getApiPrefix()}/history?page=1&limit=${totalCountToLoad}`);
-          const data = await loadRes.json();
-
-          // 3. 更新全局状态
           totalMessages = data.total;
-          currentPage = targetPage; // 欺骗系统我们在 targetPage，实际上是一次性拉取的
 
-          // 4. 渲染
           for (const msg of data.messages.reverse()) {
             renderMessageGroup(msg, 'prepend');
           }
           refreshDateSeparators();
 
-          // 5. 定位并高亮
           setTimeout(() => {
             const el = document.querySelector(`.message-group[data-id="${jumpId}"]`);
             if (el) {
               el.scrollIntoView({block: 'center', behavior: 'smooth'});
-              // 高亮特效
               el.style.transition = 'background 0.5s';
               el.style.backgroundColor = 'rgba(255, 251, 235, 1)';
               setTimeout(() => el.style.backgroundColor = 'transparent', 1500);
+
+              // 强制显示加载更多
+              loadMoreContainer.style.display = 'block';
             }
-            // 清除标记，以免下次刷新还跳
             sessionStorage.removeItem('jump_to_msg_id');
           }, 300);
 
         } catch (e) {
-          console.error("定位加载失败，回退到普通加载", e);
-          await loadHistory(1);
+          console.error("定位加载失败", e);
+          await loadHistory('initial');
         }
       } else {
-        // === 模式 B: 普通加载 (只加载最新一页) ===
-        await loadHistory(1);
+        // === 普通模式 ===
+        await loadHistory('initial');
       }
     });
     loadMoreBtn.addEventListener('click', () => loadHistory(currentPage + 1));
-    chatContainer.addEventListener('scroll', () => { if (chatContainer.scrollTop === 0 && !isLoading && (currentPage * messagesPerPage) < totalMessages) { loadHistory(currentPage + 1); } });
+    chatContainer.addEventListener('scroll', () => {
+      if (chatContainer.scrollTop === 0 && !isLoading) {
+        // 只有当还有数据没加载完时才触发
+        // 这里做一个简单的判断：只要 loadMoreContainer 是显示的，就说明可能还有
+        if (loadMoreContainer.style.display !== 'none') {
+          loadHistory('scroll'); // 传入 'scroll' 模式
+        }
+      }
+    });
     btn.addEventListener('click', sendMessage);
     input.addEventListener('keypress', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
     input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${input.scrollHeight}px`; });
@@ -1295,45 +1573,28 @@
       searchResults.innerHTML = html;
     }
 
-    // --- 核心：跳转定位 ---
-    async function jumpToMessage(id) {
-      closeSearchModal();
+  // --- 核心：跳转定位 (后端托管版) ---
+  async function jumpToMessage(id) {
+    closeSearchModal();
 
-      // 1. 尝试在当前已加载的 DOM 里找
-      let targetEl = document.querySelector(`.message-group[data-id="${id}"]`);
+    let targetEl = document.querySelector(`.message-group[data-id="${id}"]`);
 
-      if (targetEl) {
-        // 如果就在当前屏幕上，直接滚过去
-        highlightAndScroll(targetEl);
-      } else {
-        // 2. 如果不在，说明太久远了，需要重新加载历史记录
-        // 我们利用 loadHistory 的新特性，传 target_id 进去
-        chatContainer.innerHTML = ''; // 清空当前
-        isLoading = true; // 防止滚动触发
+    if (targetEl) {
+      highlightAndScroll(targetEl);
+    } else {
+      // 重新加载
+      chatContainer.innerHTML = '';
+      loadMoreContainer.style.display = 'block'; // 先显示出来
+      isLoading = true;
 
-        // 步骤 A: 询问后端这条消息在第几页 (使用之前的逻辑，limit=20)
-        // 这里我们只是为了获取 page 参数，不需要真正的 messages
-        const checkRes = await fetch(`${getApiPrefix()}/history?limit=${messagesPerPage}&target_id=${id}`);
-        const checkData = await checkRes.json();
+      try {
+        // 【修改】直接传 target_id，不传 page，让后端自己算 limit
+        const res = await fetch(`${getApiPrefix()}/history?target_id=${id}`);
+        const data = await res.json();
 
-        const targetPage = checkData.page;
-
-        // 步骤 B: 【关键】一次性加载从 Page 1 到 TargetPage 的所有数据
-        // 比如目标在第 5 页，我们就一次性加载 100 条。
-        // 这样就能保证目标消息下面的新消息都在屏幕上。
-        const totalCountToLoad = targetPage * messagesPerPage;
-
-        // 调用加载 (直接请求第一页，但 limit 巨大)
-        const loadRes = await fetch(`${getApiPrefix()}/history?page=1&limit=${totalCountToLoad}`);
-        const data = await loadRes.json();
-
-        // 更新全局状态 (假装我们只在第1页，实际上是一次性加载了一大坨)
-        // 这样处理后，如果往上滚，还能加载 targetPage + 1 页的数据
-        // 下面的逻辑需要稍微 Hack 一下，让 infinite scroll 衔接上
         totalMessages = data.total;
-        currentPage = targetPage; // 设置为当前实际的深度
 
-        // 渲染所有消息
+        // 渲染
         for (const msg of data.messages.reverse()) {
           renderMessageGroup(msg, 'prepend');
         }
@@ -1341,17 +1602,26 @@
 
         isLoading = false;
 
-        // 3. 渲染完毕，定位并高亮
+        // 3. 定位
         setTimeout(() => {
           targetEl = document.querySelector(`.message-group[data-id="${id}"]`);
           if (targetEl) {
             highlightAndScroll(targetEl);
+            // 定位成功后，强制显示加载更多，允许用户继续上滑
+            loadMoreContainer.style.display = 'block';
           } else {
-            alert("定位失败，可能消息已被删除");
+            // 这一次应该不会找不到了
+            alert("定位失败 (可能消息已被物理删除)");
           }
-        }, 300); // 留足渲染时间
+        }, 300);
+
+      } catch (e) {
+        console.error(e);
+        alert("跳转出错");
+        isLoading = false;
       }
     }
+  }
 
     function highlightAndScroll(el) {
       el.scrollIntoView({behavior: 'smooth', block: 'center'});
@@ -1505,6 +1775,139 @@
       window.location.href = `/memory/${currentId}`;
     }
   }
+
+  // --- 【辅助函数】复制成功后的视觉反馈 ---
+  function showCopySuccess(btn, iconImg) {
+    // 让按钮变绿，或者加个类名提示成功
+    btn.classList.add('copied');
+    btn.style.color = '#4cd964'; // 变绿
+
+    // 1.5秒后恢复原状
+    setTimeout(() => {
+      btn.classList.remove('copied');
+      btn.style.color = '#aaa'; // 恢复灰色
+    }, 1500);
+  }
+
+  // --- 【核心函数】兼容 HTTP 的老式复制法 ---
+  // 原理：偷偷造一个文本框，把字填进去，选中，然后模拟按下 Ctrl+C
+  function fallbackCopyTextToClipboard(text, btn, icon) {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+
+    // 把它藏在屏幕外面，但必须是“可见”状态浏览器才允许复制
+    textArea.style.position = "fixed";
+    textArea.style.left = "-9999px";
+    textArea.style.top = "0";
+    document.body.appendChild(textArea);
+
+    textArea.focus();
+    textArea.select();
+
+    try {
+      const successful = document.execCommand('copy');
+      if (successful) {
+        showCopySuccess(btn, icon);
+      } else {
+        alert('复制失败，请手动长按文字复制');
+      }
+    } catch (err) {
+      console.error('无法复制', err);
+      alert('复制失败，请手动长按文字复制');
+    }
+
+    document.body.removeChild(textArea);
+  }
+
+  // --- 【修正版】执行重新生成 (支持日期分隔符检测) ---
+  async function doRegenerate(wrapperElement) {
+    if (isLoading) return;
+
+    const messageGroup = wrapperElement.closest('.message-group');
+
+    if(messageGroup) {
+      messageGroup.style.transition = "opacity 0.3s";
+      messageGroup.style.opacity = '0.5';
+      messageGroup.style.cursor = 'wait';
+    }
+
+    isLoading = true;
+
+    try {
+      const res = await fetch(`${getApiPrefix()}/regenerate`, { method: 'POST' });
+      const data = await res.json();
+
+      if (data.status === 'success') {
+        // 1. 移除旧的整组消息
+        if (messageGroup) messageGroup.remove();
+
+        // 2. 渲染新的回复
+        if (data.replies && data.replies.length > 0) {
+          // 判断单群聊格式
+          const replies = (typeof data.replies[0] === 'object') ? data.replies : [{
+            id: data.id,
+            content: data.replies.join(' / '),
+            role: 'assistant', // 单聊默认角色
+            timestamp: new Date() // 这里其实应该后端传回 timestamp，如果没有就用当前时间
+          }];
+
+          for (const reply of replies) {
+            await sleep(800);
+
+            // === 【新增】日期检查逻辑 ===
+            // 找到当前页面最底部的一条消息 (也就是新消息的前一条)
+            const lastGroup = chatContainer.querySelector('.message-group:last-child');
+
+            if (lastGroup && lastGroup.dataset.timestamp) {
+              const prevDate = new Date(lastGroup.dataset.timestamp);
+              // 使用后端返回的时间，如果没有则用当前时间
+              const newDate = reply.timestamp ? new Date(reply.timestamp) : new Date();
+
+              // 比较年月日是否相同
+              if (prevDate.getFullYear() !== newDate.getFullYear() ||
+                      prevDate.getMonth() !== newDate.getMonth() ||
+                      prevDate.getDate() !== newDate.getDate()) {
+
+                // 如果跨天了，插入日期分隔符
+                const separator = document.createElement('div');
+                separator.classList.add('date-separator');
+                separator.textContent = newDate.toLocaleDateString([], {
+                  year: 'numeric', month: 'long', day: 'numeric', weekday: 'long'
+                });
+                chatContainer.appendChild(separator);
+              }
+            }
+            // ============================
+
+            renderMessageGroup({
+              id: reply.id || Date.now(),
+              content: reply.content,
+              role: reply.char_id || reply.role, // 兼容单群聊
+              timestamp: reply.timestamp || new Date()
+            }, 'append');
+
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+          }
+        }
+      } else {
+        alert("重生成失败: " + data.error);
+        if(messageGroup) {
+          messageGroup.style.opacity = '1';
+          messageGroup.style.cursor = 'default';
+        }
+      }
+    } catch(e) {
+      console.error(e);
+      alert("网络错误");
+      if(messageGroup) {
+        messageGroup.style.opacity = '1';
+        messageGroup.style.cursor = 'default';
+      }
+    } finally {
+      isLoading = false;
+    }
+  }
+
 </script>
 
 </body>

@@ -6,11 +6,14 @@ import time
 
 # 这里的引用非常关键
 # 我们从 app 导入 AI 总结功能 和 增量更新功能
-from app import call_ai_to_summarize, update_short_memory_for_date
+# --- 【修改】导入 update_group_short_memory ---
+from app import call_ai_to_summarize, update_short_memory_for_date, update_group_short_memory
 
 # 定义基础路径
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, "configs", "characters.json")
+# --- 【新增】群聊配置路径 ---
+GROUPS_CONFIG_FILE = os.path.join(BASE_DIR, "configs", "groups.json")
 
 # --- 辅助函数：获取指定角色的 Prompt 路径 ---
 def get_char_prompts_dir(char_id):
@@ -83,6 +86,43 @@ def _process_single_char_daily(char_id, target_date_str):
 
     print("     📝 日记写入完成")
 
+# --- 【新增】全员群聊日结 (Group Daily) ---
+def run_all_group_daily_rollovers(target_date_str=None):
+    """
+    遍历所有群聊，执行总结并分发给成员
+    """
+    if not target_date_str:
+        target_date_str = (datetime.datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+    print(f"⏰ [定时任务] 开始群聊日结: {target_date_str}")
+
+    if not os.path.exists(GROUPS_CONFIG_FILE):
+        print("   - 暂无群聊配置，跳过")
+        return
+
+    try:
+        with open(GROUPS_CONFIG_FILE, "r", encoding="utf-8") as f:
+            groups_config = json.load(f)
+
+        for group_id in groups_config.keys():
+            print(f"   > 处理群聊: [{group_id}]")
+            try:
+                # 调用 app.py 里的函数：总结 -> 存群记忆 -> 分发给个人
+                count, _ = update_group_short_memory(group_id, target_date_str)
+                if count > 0:
+                    print(f"     ✅ 总结并分发了 {count} 条群消息")
+                else:
+                    print(f"     - 无新消息")
+
+                # 休息一下防止 API 过载
+                time.sleep(1)
+            except Exception as e:
+                print(f"     ❌ 群聊 {group_id} 处理失败: {e}")
+
+    except Exception as e:
+        print(f"   ❌ 读取群配置失败: {e}")
+
+    print("✅ 群聊日结结束 (已同步至个人)。")
 
 def run_all_daily_rollovers(target_date_str=None):
     """【入口】遍历所有角色执行日结"""
@@ -101,7 +141,6 @@ def run_all_daily_rollovers(target_date_str=None):
             print(f"     ❌ 处理角色 {char_id} 时崩溃: {e}")
 
     print("✅ 全员日结结束。")
-
 
 # ================= 周结逻辑 (Weekly) =================
 

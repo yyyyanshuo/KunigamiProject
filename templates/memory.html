@@ -32,6 +32,19 @@
         .back-btn { font-size: 24px; margin-right: 15px; cursor: pointer; color: #ffb6b9; }
         h1 { margin: 0; font-size: 16px; color: #333; flex: 1; text-align: center; margin-right: 24px;}
 
+        /* 【新增】右上角聊天跳转按钮 */
+        .chat-link-btn {
+            font-size: 20px;
+            margin-left: 15px;
+            cursor: pointer;
+            color: #ffb6b9;
+            display: flex;
+            align-items: center;
+            transition: transform 0.2s;
+        }
+        .chat-link-btn:active { transform: scale(0.9); }
+        .chat-link-btn svg { width: 24px; height: 24px; fill: currentColor; }
+
         /* 模块通用 */
         .section-title { font-size: 13px; color: #aaa; margin: 25px 0 10px 5px; font-weight: bold; text-transform: uppercase; }
 
@@ -79,13 +92,6 @@
         .editing .btn-edit { display: none; }
         .editing .btn-save, .editing .btn-cancel { display: inline-block; }
 
-        /* --- 输入控件组 (Desktop 默认) --- */
-        .input-group {
-            display: flex; gap: 8px; margin-bottom: 12px;
-            align-items: flex-start; /* 顶部对齐 */
-            border-bottom: 1px dashed #f0f0f0; /* 分隔线 */
-            padding-bottom: 12px;
-        }
         .input-group:last-child { border-bottom: none; }
 
         /* 所有的输入框 */
@@ -96,22 +102,11 @@
         }
         input:focus, textarea:focus { border-color: #ffb6b9; outline: none; }
 
-        /* 1. Key 输入框 (时间/日期/键名) */
-        .input-key { width: 140px; flex-shrink: 0; background: #fff; font-weight: bold; color: #555; }
-
         /* 2. Value 输入框 (内容) - 解决“框太小”问题 */
-        .input-val { flex: 1; min-width: 0; } /* min-width:0 防止flex溢出 */
         textarea.input-val { min-height: 100px; resize: vertical; line-height: 1.5; }
 
         /* 3. Full 输入框 (大段描述) */
         .input-full { width: 100%; min-height: 80px; margin-top: 6px; resize: vertical; }
-
-        /* 删除按钮 */
-        .btn-del {
-            background: #ffebee; color: #c62828; width: 36px; height: 36px;
-            border-radius: 6px; border: none; cursor: pointer; flex-shrink: 0;
-            font-size: 18px; display: flex; align-items: center; justify-content: center;
-        }
 
         /* 添加按钮 */
         .btn-add {
@@ -130,19 +125,45 @@
         /* Markdown 文本域 */
         .md-editor { width: 100%; min-height: 300px; padding: 12px; line-height: 1.6; font-family: monospace; }
 
+        /* --- 【新增】短期记忆专用编辑行样式 --- */
+        .short-edit-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 8px;
+            align-items: center; /* 垂直居中 */
+            border-bottom: 1px dashed #f0f0f0;
+            padding-bottom: 8px;
+        }
+
+        /* 时间框：固定宽度 */
+        .short-edit-row .input-key {
+            width: 80px !important; /* 强制宽度 */
+            flex-shrink: 0;         /* 禁止被挤压 */
+            text-align: center;
+            font-family: monospace;
+        }
+
+        /* 事件框：占据剩余所有空间 */
+        .short-edit-row .input-val {
+            flex: 1;
+            min-width: 0;
+        }
+
+        /* 手机端适配 (保持之前的堆叠逻辑) */
+        @media (max-width: 600px) {
+            .short-edit-row {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .short-edit-row .input-key {
+                width: 100% !important;
+                text-align: left;
+            }
+        }
+
         /* ================= 📱 手机端适配 (关键！) ================= */
         @media (max-width: 600px) {
             body { padding: 10px; }
-
-            /* 1. 强制纵向排列：解决“飞出去”和“显示不全” */
-            .input-group {
-                flex-direction: column; /* 上下排 */
-                background: #fdfdfd;
-                border: 1px solid #eee;
-                border-radius: 8px;
-                padding: 10px;
-                gap: 10px; /* 控件间距加大 */
-            }
 
             /* 2. 所有输入框宽度 100% */
             .input-key, .input-val, .input-full {
@@ -151,17 +172,6 @@
                 max-width: 100%;
             }
 
-            /* 短期记忆的时间框可以稍微矮一点 */
-            .input-key { background-color: #fff8f8; }
-
-            /* 3. 删除按钮变成底部的宽条，方便手指点 */
-            .btn-del {
-                width: 100%;
-                height: 32px;
-                margin-top: 5px;
-                background-color: #fff0f0;
-                border: 1px solid #ffcdd2;
-            }
             .btn-del::after { content: ' 删除 / Delete'; font-size: 12px; margin-left: 5px; }
 
             /* 关系卡片里的布局调整 */
@@ -173,14 +183,213 @@
             .action-bar .btn { flex: 1; text-align: center; } /* 按钮均分宽度 */
         }
 
+        /* --- 编辑列表布局重构 --- */
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 12px;
+            align-items: flex-start; /* 顶部对齐 */
+            border-bottom: 1px dashed #f0f0f0;
+            padding-bottom: 12px;
+        }
+
+        /* 1. 左侧元数据区域 (Key, 日期, 按钮) */
+        .mem-meta-col {
+            display: flex;
+            flex-direction: column; /* 电脑端：垂直堆叠 */
+            gap: 5px;
+            width: 130px; /* 固定宽度，整齐 */
+            flex-shrink: 0;
+        }
+
+        /* Key 输入框 */
+        .input-key {
+            width: 100% !important; /* 填满容器 */
+            text-align: center;
+            background: #f9f9f9;
+            font-size: 12px;
+            padding: 6px;
+        }
+
+        /* 日期范围提示 */
+        .range-hint {
+            font-size: 11px;
+            color: #2196f3;
+            text-align: center;
+            line-height: 1.2;
+            background: #e3f2fd;
+            border-radius: 4px;
+            padding: 2px 0;
+        }
+
+        /* AI 重写按钮 */
+        .btn-regen {
+            width: 100%; /* 填满容器 */
+            background: #e1bee7;
+            color: #4a148c;
+            border: none;
+            border-radius: 4px;
+            padding: 5px 0;
+            font-size: 11px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+        .btn-regen:hover { background: #d1c4e9; }
+
+        /* 内容输入框 */
+        .input-val {
+            flex: 1; /* 占据剩余空间 */
+            min-width: 0;
+        }
+
+        /* 删除按钮 */
+        .btn-del {
+            width: 30px; height: 30px;
+            background: #ffebee; color: #c62828;
+            border: none; border-radius: 50%;
+            cursor: pointer; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+        }
+
+        /* ================= 📱 手机端适配 (竖屏模式) ================= */
+        @media (max-width: 600px) {
+            .input-group {
+                flex-direction: column; /* 整体变成上下结构 */
+                background: #fdfdfd;
+                border: 1px solid #eee;
+                border-radius: 8px;
+                padding: 10px;
+                gap: 8px;
+            }
+
+            /* 左侧元数据区域 -> 变成顶部的横排 */
+            .mem-meta-col {
+                width: 100%; /* 占满整行 */
+                flex-direction: row; /* 横向排列 */
+                align-items: center;
+                justify-content: space-between;
+            }
+
+            /* Key 左对齐 */
+            .input-key {
+                width: auto !important;
+                flex: 1; /* 占据左侧空间 */
+                text-align: left;
+                background: transparent;
+                border: none;
+                padding: 0;
+                font-size: 14px;
+                font-weight: bold;
+                color: #5c6bc0;
+            }
+
+            /* 右侧包裹 (日期 + 按钮) */
+            .meta-right-side {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .range-hint {
+                background: transparent;
+                padding: 0;
+                text-align: right;
+            }
+
+            .btn-regen {
+                width: auto; /* 按钮不要拉伸 */
+                padding: 4px 10px;
+                border-radius: 12px;
+            }
+
+            /* 内容框 */
+            .input-val { width: 100%; }
+
+            /* 删除按钮放到底部 */
+            .btn-del {
+                width: 100%;
+                height: 32px;
+                border-radius: 6px;
+                background: #fff0f0;
+                border: 1px solid #ffcdd2;
+            }
+            .btn-del::after { content: ' 删除 / Delete'; font-size: 12px; margin-left: 5px; }
+        }
+
+        /* --- 编辑器顶部操作栏 --- */
+        .editor-top-actions {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px dashed #eee;
+        }
+
+        .btn-action-top {
+            flex: 1;
+            padding: 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            text-align: center;
+            border: none;
+            transition: all 0.2s;
+        }
+
+        /* 添加按钮样式 */
+        .btn-add-top {
+            background: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb;
+        }
+        .btn-add-top:hover { background: #bbdefb; }
+
+        /* 清空按钮样式 */
+        .btn-clear-top {
+            background: #ffebee; color: #c62828; border: 1px solid #ffcdd2;
+        }
+        .btn-clear-top:hover { background: #ffcdd2; }
+
+        /* JSON 编辑器模式 */
+        .json-editor-container {
+            display: none; /* 默认隐藏 */
+        }
+        .json-textarea {
+            width: 100%;
+            min-height: 300px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #2d2d2d;
+            color: #ccc;
+            resize: vertical;
+            box-sizing: border-box;
+            line-height: 1.5;
+        }
+
+        /* 切换按钮样式 */
+        .btn-toggle-json {
+            background: #607d8b; color: white; padding: 4px 10px; border-radius: 4px; border: none; cursor: pointer; font-size: 12px;
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
     <div class="header">
-        <div class="back-btn" onclick="window.location.href='/chat/' + charId">←</div>
+        <!-- 1. 返回按钮：改为 history.back()，回到上一个页面(可能是群聊，也可能是单聊) -->
+        <div class="back-btn" onclick="window.history.back()">←</div>
+
         <h1>記憶の保管庫 (Memory Archive)</h1>
+
+        <!-- 2. 【新增】去单聊按钮：强制跳转到该角色的单聊页面 -->
+        <div class="chat-link-btn" onclick="window.location.href='/chat/' + charId" title="与他/她私聊">
+            <!-- 气泡图标 -->
+            <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+        </div>
     </div>
 
     <!-- 【新增】角色档案编辑模块 -->
@@ -188,7 +397,7 @@
 
     <!-- 【修正版】角色档案模块 (置顶开关移入编辑模式) -->
     <div class="module" id="module-meta">
-        <details>
+        <details open>
             <summary>基本信息 (Metadata)</summary>
 
             <!-- 1. 查看模式 (View Mode) -->
@@ -266,6 +475,13 @@
 
     <!-- 6. Markdown 文本类 -->
     <div id="module-base" class="module" data-type="base"></div>
+
+    <!-- 【新增】危险区域 -->
+    <div style="margin-top: 40px; padding: 20px; border: 1px dashed #ffcdd2; background: #fff5f5; border-radius: 12px; text-align: center;">
+        <div style="color: #c62828; font-weight: bold; margin-bottom: 10px;">⚠️ 危险区域 / Danger Zone</div>
+        <p style="font-size: 12px; color: #d32f2f; margin-bottom: 15px;">删除角色将无法恢复，所有记忆和聊天记录都将丢失。</p>
+        <button class="btn" style="background: #c62828; color: white; width: 100%;" onclick="deleteCharacter()">删除此角色 / Delete Character</button>
+    </div>
 </div>
 
 <!-- 模板：模块外壳 -->
@@ -666,37 +882,57 @@
         // 2. Short 编辑器 (特殊：只编辑最近一天，或者提供添加新日期的能力？为了简单，我们编辑“展示出来的那个日期”)
         if(key === 'short') {
             const dates = Object.keys(data).sort().reverse();
-            // 如果没有数据，默认创建今天
-            const targetDate = dates.length > 0 ? dates[0] : new Date().toISOString().split('T')[0];
+            const defaultDate = dates.length > 0 ? dates[0] : new Date().toISOString().split('T')[0];
+
+            // 如果 container 之前存过 dateKey，就用存的（防止刷新变回今天），否则用默认
+            const targetDate = container.dataset.dateKey || defaultDate;
+
+            container.dataset.dateKey = targetDate; // 存入 DOM
             const dayData = data[targetDate] || [];
             const events = Array.isArray(dayData) ? dayData : (dayData.events || []);
 
-            // 显示日期标题
-            container.innerHTML += `<div style="font-weight:bold; margin-bottom:10px; color:#ffb6b9; display:flex; justify-content:space-between;">
-                <span>编辑日期: ${targetDate}</span>
-                <!-- 【新增】重置进度复选框 -->
-                <label style="font-size:12px; color:#666; display:flex; align-items:center; cursor:pointer;">
-                    <input type="checkbox" id="reset-progress-chk" style="margin-right:4px;">
-                    重置读取进度 (允许重新总结)
-                </label>
-            </div>`;
+            // --- 【新增】日期切换 & 重新生成工具栏 ---
+            let html = `
+          <div style="background:#fff3e0; padding:10px; border-radius:8px; margin-bottom:15px; border:1px solid #ffe0b2;">
+            <div style="font-size:12px; color:#ef6c00; font-weight:bold; margin-bottom:5px;">📅 选择日期查看/生成 (Time Travel)</div>
+            <div style="display:flex; gap:8px;">
+                <input type="date" id="short-date-picker" value="${targetDate}" class="model-select" style="flex:1;">
+                <button class="btn" style="background:#ffcc80; color:#e65100;" onclick="switchShortDate(this)">跳转</button>
+                <button class="btn" style="background:#ffa726; color:white;" onclick="regenShortDate(this)">⚡ 重新总结</button>
+            </div>
+          </div>
 
-            // 隐藏域存储当前编辑的日期 Key
-            container.dataset.dateKey = targetDate;
+          <div style="font-weight:bold; margin-bottom:10px; color:#ffb6b9; display:flex; justify-content:space-between;">
+            <span>当前编辑: ${targetDate}</span>
+            <label style="font-size:12px; color:#666; display:flex; align-items:center; cursor:pointer;">
+                <input type="checkbox" id="reset-progress-chk" style="margin-right:4px;">
+                保存时重置进度
+            </label>
+          </div>
+
+          <!-- 下面的列表生成逻辑保持不变 -->
+          <div class="editor-top-actions">
+              <button class="btn-action-top btn-add-top" onclick="addShortRow(this)">+ 添加事件</button>
+              <button class="btn-action-top btn-clear-top" onclick="deleteAllItems(this)">🗑️ 全部删除</button>
+          </div>`;
 
             // 生成事件列表
             const listDiv = document.createElement('div');
-            listDiv.className = 'edit-list';
-            events.forEach(e => {
+            listDiv.className = 'edit-list-container'; // 关键类名
+            if (events.length === 0) {
+                listDiv.innerHTML = `<div style="text-align:center; color:#ccc; padding:10px;">该日期暂无记忆，点击上方“重新总结”尝试生成。</div>`;
+            } else {events.forEach(e => {
                 listDiv.innerHTML += `
-                  <div class="input-group">
+                  <!-- 【修改】使用新的 class: short-edit-row -->
+                  <div class="short-edit-row">
                       <input type="text" class="input-key" value="${e.time}" placeholder="HH:MM">
                       <input type="text" class="input-val" value="${e.event}" placeholder="事件内容">
                       <button class="btn-del" onclick="this.parentElement.remove()">×</button>
                   </div>`;
-            });
+                });
+            }
+            container.innerHTML += html;
             container.appendChild(listDiv);
-            container.innerHTML += `<button class="btn-add" onclick="addShortRow(this)">+ 添加事件</button>`;
             return;
         }
 
@@ -711,6 +947,17 @@
 
             // === 【新增】如果是 Schedule，插入复制工具栏 ===
             if (key === 'schedule') {
+                // 1. 顶部功能栏 (复制 + 分发 + JSON切换)
+                const toolBar = document.createElement('div');
+                toolBar.style.marginBottom = '15px';
+                toolBar.innerHTML = `
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                      <span style="font-weight:bold; color:#555;">高级工具</span>
+                      <button class="btn-toggle-json" onclick="toggleScheduleJsonMode(this)">📝 切换源代码模式 (Edit JSON)</button>
+                  </div>
+              `;
+                container.appendChild(toolBar);
+
                 const copyTool = document.createElement('div');
                 copyTool.style.cssText = "background:#f0f7ff; padding:10px; border-radius:8px; margin-bottom:15px; border:1px solid #cce5ff;";
                 copyTool.innerHTML = `
@@ -724,26 +971,92 @@
               `;
                 container.appendChild(copyTool);
 
-                // 【关键】立即调用加载函数，并且加个延时确保元素已渲染
+                // ================= 【新增】分发工具栏 (Copy TO Others) =================
+                const distributeTool = document.createElement('div');
+                distributeTool.style.cssText = "background:#fff8e1; padding:10px; border-radius:8px; margin-bottom:15px; border:1px solid #ffe0b2;";
+                distributeTool.innerHTML = `
+              <div style="font-size:12px; color:#f57c00; font-weight:bold; margin-bottom:5px;">📤 把当前日程同步给其他人 (Save & Sync To)</div>
+              <div id="distribute-char-list" style="max-height:100px; overflow-y:auto; border:1px solid #eee; background:#fff; padding:5px; margin-bottom:5px; border-radius:4px;">
+                  加载中...
+              </div>
+              <button class="btn" style="background:#f57c00; color:white; width:100%;" onclick="saveAndDistribute()">保存并同步给选中角色</button>
+          `;
+                container.appendChild(distributeTool);
+
+                // 3. 【新增】JSON 编辑区域 (默认隐藏)
+                const jsonDiv = document.createElement('div');
+                jsonDiv.className = 'json-editor-container';
+                jsonDiv.id = 'schedule-json-wrapper';
+                jsonDiv.innerHTML = `<textarea id="schedule-json-textarea" class="json-textarea" placeholder="在这里直接粘贴或编辑 JSON..."></textarea>`;
+                container.appendChild(jsonDiv);
+
+                // 加载联系人复选框
                 setTimeout(() => {
-                    loadContactsForSelect();
+                    loadContactsForDistribute(); // <--- 记得下面要实现这个函数
+                    loadContactsForSelect();     // 这是之前的“复制”下拉框
                 }, 50);
+                // ====================================================================
             }
             // ========================================================
 
+            // 【新增】顶部按钮组 (添加 + 清空)
+            const topBtns = document.createElement('div');
+            topBtns.className = 'editor-top-actions';
+            topBtns.innerHTML = `
+              <button class="btn-action-top btn-add-top" onclick="addKVRow(this)">+ 添加条目</button>
+              <button class="btn-action-top btn-clear-top" onclick="deleteAllItems(this)">🗑️ 全部删除</button>
+          `;
+            container.appendChild(topBtns);
+
             const sortedKeys = Object.keys(data).sort().reverse();
+
+            // 给列表容器加一个 ID，方便切换时隐藏/显示
             const listDiv = document.createElement('div');
+            listDiv.id = 'schedule-list-wrapper'; // 【关键】加个 ID
+            listDiv.className = 'edit-list-container'; // 关键类名
+
+            // ... (前置代码不变) ...
+
             sortedKeys.forEach(k => {
+                // 1. 准备数据
+                let rangeHtml = '';
+
+                // 长期记忆显示日期范围
+                if (key === 'long') {
+                    const range = getWeekRange(k);
+                    if (range) rangeHtml = `<div class="range-hint">${range}</div>`;
+                }
+
+                // 2. 准备按钮
+                // 中期和长期记忆显示重写按钮
+                let regenBtn = '';
+                if (key === 'medium' || key === 'long') {
+                    regenBtn = `<button class="btn-regen" onclick="regenerateMemory('${key}', '${k}', this)">✨AI重写</button>`;
+                }
+
+                // 3. 生成新结构
+                // 注意：我们在 mem-meta-col 里加了一个 meta-right-side 容器，方便手机端布局
                 listDiv.innerHTML += `
                   <div class="input-group">
-                      <input type="text" class="input-key" value="${k}" placeholder="Key/Date">
-                      <textarea class="input-val" rows="2">${data[k]}</textarea>
+                      <!-- 左侧/顶部 元数据栏 -->
+                      <div class="mem-meta-col">
+                          <input type="text" class="input-key" value="${k}" readonly>
+
+                          <div class="meta-right-side">
+                              ${rangeHtml} <!-- 日期放中间(PC) 或 右侧(Mobile) -->
+                              ${regenBtn}
+                          </div>
+                      </div>
+
+                      <!-- 中间 内容框 -->
+                      <textarea class="input-val" rows="4">${data[k]}</textarea>
+
+                      <!-- 右侧/底部 删除按钮 -->
                       <button class="btn-del" onclick="this.parentElement.remove()">×</button>
                   </div>`;
             });
-            container.appendChild(listDiv);
-            container.innerHTML += `<button class="btn-add" onclick="addKVRow(this)">+ 添加条目</button>`;
 
+            container.appendChild(listDiv);
             return; // <--- return 必须在最后！
         }
 
@@ -768,23 +1081,52 @@
         }
     }
 
-    // --- 动态添加行的辅助函数 ---
+    // --- 动态添加行 (修改版：查找容器的方式变了) ---
+
     function addShortRow(btn) {
-        const row = `<div class="input-group">
+        // 按钮在上面，列表容器在下面 (nextElementSibling 不一定对，改用查找)
+        const container = btn.closest('.edit-mode').querySelector('.edit-list-container');
+
+        const row = `<div class="short-edit-row">
           <input type="text" class="input-key" value="" placeholder="HH:MM">
           <input type="text" class="input-val" value="" placeholder="事件内容">
           <button class="btn-del" onclick="this.parentElement.remove()">×</button>
       </div>`;
-        btn.previousElementSibling.insertAdjacentHTML('beforeend', row);
+
+        // 插入到最前面，方便用户输入
+        container.insertAdjacentHTML('afterbegin', row);
     }
 
     function addKVRow(btn) {
+        const container = btn.closest('.edit-mode').querySelector('.edit-list-container');
+
+        // 对于中长期记忆，添加时最好自动填个今天的日期
+        const today = new Date().toISOString().split('T')[0];
+
         const row = `<div class="input-group">
-          <input type="text" class="input-key" value="" placeholder="Key/Date">
-          <textarea class="input-val" rows="2"></textarea>
+          <div class="mem-meta-col">
+              <input type="text" class="input-key" value="${today}" placeholder="Key/Date">
+              <div class="meta-right-side"></div>
+          </div>
+          <textarea class="input-val" rows="3" placeholder="输入内容..."></textarea>
           <button class="btn-del" onclick="this.parentElement.remove()">×</button>
       </div>`;
-        btn.previousElementSibling.insertAdjacentHTML('beforeend', row);
+
+        container.insertAdjacentHTML('afterbegin', row);
+    }
+
+    // --- 【新增】全部删除功能 ---
+    function deleteAllItems(btn) {
+        if (!confirm("⚠️ 危险操作：确定要清空列表里的所有条目吗？\n(需要点击底部的“保存”按钮才会生效)")) {
+            return;
+        }
+
+        const container = btn.closest('.edit-mode').querySelector('.edit-list-container');
+        container.innerHTML = ''; // 直接清空 HTML
+
+        // 视觉反馈：稍微提示一下
+        btn.textContent = "已清空";
+        setTimeout(() => btn.innerHTML = "🗑️ 全部删除", 1000);
     }
 
     function addRelRow(btn) {
@@ -816,19 +1158,24 @@
         // 2. Short 保存 (特殊：只更新了那一天，需要合并回 GLOBAL_DATA)
         else if(key === 'short') {
             const dateKey = container.dataset.dateKey;
-            const rows = container.querySelectorAll('.input-group');
+            // 【关键修正】这里要把选择器从 .input-group 改为 .short-edit-row
+            const rows = container.querySelectorAll('.short-edit-row');
             const newEvents = [];
             rows.forEach(row => {
                 const t = row.querySelector('.input-key').value.trim();
                 const v = row.querySelector('.input-val').value.trim();
-                if(t && v) newEvents.push({time: t, event: v});
+                // 只有时间或内容不为空才保存
+                if(t || v) {
+                    newEvents.push({time: t, event: v});
+                }
             });
 
             // 获取原始 last_id
-            const originalDayData = GLOBAL_DATA[key][dateKey] || {};
             let lastId = 0;
-            if(!Array.isArray(originalDayData)) lastId = originalDayData.last_id || 0;
-
+            if (GLOBAL_DATA[key] && GLOBAL_DATA[key][dateKey]) {
+                const oldInfo = GLOBAL_DATA[key][dateKey];
+                if (!Array.isArray(oldInfo)) lastId = oldInfo.last_id || 0;
+            }
             // 【新增】检查复选框是否勾选
             const resetChk = container.querySelector('#reset-progress-chk');
             if (resetChk && resetChk.checked) {
@@ -836,7 +1183,9 @@
                 console.log("已重置 last_id 为 0");
             }
 
-            newData = { ...GLOBAL_DATA[key] };
+            // 构造新数据结构
+            if (!newData) newData = { ...GLOBAL_DATA[key] }; // 确保 newData 初始化
+
             newData[dateKey] = {
                 events: newEvents,
                 last_id: lastId
@@ -845,13 +1194,29 @@
 
         // 3. KV 保存 (Medium, Long, Schedule)
         else if(CONFIG[key].method === 'renderKV') {
-            newData = {};
-            const rows = container.querySelectorAll('.input-group');
-            rows.forEach(row => {
-                const k = row.querySelector('.input-key').value.trim();
-                const v = row.querySelector('.input-val').value.trim();
-                if(k) newData[k] = v;
-            });
+            // 【新增】如果是 Schedule 且处于 JSON 模式
+            const jsonWrapper = document.getElementById('schedule-json-wrapper');
+            if (key === 'schedule' && jsonWrapper && jsonWrapper.style.display === 'block') {
+                const textarea = document.getElementById('schedule-json-textarea');
+                try {
+                    newData = JSON.parse(textarea.value);
+                } catch(e) {
+                    alert("JSON 格式有误，无法保存！\n" + e.message);
+                    btn.textContent = '保存 / Save';
+                    btn.disabled = false;
+                    return; // 阻止保存
+                }
+            }
+            // 普通列表模式
+            else {
+                newData = {};
+                const rows = container.querySelectorAll('.input-group');
+                rows.forEach(row => {
+                    const k = row.querySelector('.input-key').value.trim();
+                    const v = row.querySelector('.input-val').value.trim();
+                    if(k) newData[k] = v;
+                });
+            }
         }
 
         // 4. Relation 保存
@@ -1036,6 +1401,388 @@
         }
     }
 
+    // --- 加载分发目标列表 (复选框) ---
+    async function loadContactsForDistribute() {
+        const container = document.getElementById('distribute-char-list');
+        if (!container) return;
+
+        try {
+            const res = await fetch('/api/contacts');
+            const contacts = await res.json();
+
+            let html = '';
+            contacts.forEach(c => {
+                // 排除自己，只显示单人角色
+                if (c.id !== charId && c.type !== 'group') {
+                    html += `
+                  <label style="display:flex; align-items:center; padding:4px; font-size:13px; cursor:pointer;">
+                      <input type="checkbox" value="${c.id}" class="distribute-chk" style="margin-right:8px;">
+                      <span>${c.remark || c.name}</span>
+                  </label>`;
+                }
+            });
+
+            if (!html) html = '<div style="color:#999; font-size:12px;">没有其他角色可同步</div>';
+            container.innerHTML = html;
+
+        } catch(e) { container.innerHTML = '加载失败'; }
+    }
+
+    // --- 执行保存并分发 ---
+    async function saveAndDistribute() {
+        // 1. 获取选中的人
+        const checkboxes = document.querySelectorAll('.distribute-chk:checked');
+        const targetIds = Array.from(checkboxes).map(cb => cb.value);
+
+        if (targetIds.length === 0) {
+            if(!confirm("您没有选择任何同步对象，是否仅保存当前角色的日程？")) return;
+        } else {
+            if(!confirm(`确定要将当前编辑框里的日程，覆盖写入给 ${targetIds.length} 位角色吗？\n(这会清空他们原有的日程！)`)) return;
+        }
+
+        // 2. 【关键修改】获取当前数据
+        let newSchedule = {};
+        const jsonWrapper = document.getElementById('schedule-json-wrapper');
+
+        // 判断当前是否处于 JSON 编辑模式 (且显示中)
+        if (jsonWrapper && jsonWrapper.style.display === 'block') {
+            const textarea = document.getElementById('schedule-json-textarea');
+            try {
+                newSchedule = JSON.parse(textarea.value);
+            } catch (e) {
+                alert("JSON 格式错误，无法保存！\n请检查语法（如引号、逗号）。\n" + e.message);
+                return; // 终止执行
+            }
+        } else {
+            // 普通列表模式：从输入框抓取
+            // (我们可以直接调用之前写的辅助函数，或者在这里原地抓取)
+            const container = document.querySelector('#module-schedule .edit-mode');
+            const inputRows = container.querySelectorAll('.input-group');
+
+            inputRows.forEach(row => {
+                const k = row.querySelector('.input-key').value.trim();
+                const v = row.querySelector('.input-val').value.trim();
+                if (k) newSchedule[k] = v;
+            });
+        }
+
+        const btn = event.target;
+        const originalText = btn.textContent;
+        btn.textContent = "处理中...";
+        btn.disabled = true;
+
+        try {
+            // A. 先保存自己的 (复用 save_prompt 接口)
+            // 这一步是为了确保“当前角色”的数据先落袋为安
+            await fetch(`/api/${charId}/save_prompt`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ key: 'schedule', content: newSchedule })
+            });
+
+            // 更新本地缓存
+            GLOBAL_DATA['schedule'] = newSchedule;
+
+            // B. 如果选了人，分发给其他人
+            if (targetIds.length > 0) {
+                const res = await fetch('/api/distribute_schedule', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        target_ids: targetIds,
+                        content: newSchedule
+                    })
+                });
+                const result = await res.json();
+                if (result.status === 'success') {
+                    alert(`成功！\n已保存当前日程。\n并同步给了: ${result.updated.join(', ')}`);
+                } else {
+                    alert("部分同步失败: " + result.errors.join('; '));
+                }
+            } else {
+                alert("当前角色日程已保存。");
+            }
+
+            const module = document.getElementById('module-schedule');
+            module.classList.remove('editing');
+            renderView('schedule', newSchedule);
+
+            // 如果是在 JSON 模式下保存的，重置 UI 状态回列表模式，防止下次打开显示错乱
+            if (jsonWrapper) jsonWrapper.style.display = 'none';
+            const listWrapper = document.getElementById('schedule-list-wrapper');
+            if (listWrapper) listWrapper.style.display = 'block';
+
+            // 恢复切换按钮的文字
+            const toggleBtn = module.querySelector('.btn-toggle-json');
+            if(toggleBtn) toggleBtn.textContent = "📝 切换源代码模式 (Edit JSON)";
+
+        } catch(e) {
+            alert("网络错误或处理失败");
+            console.error(e);
+        } finally {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    }
+
+    // --- 【修正版】计算周 Key 对应的真实日期范围 ---
+    function getWeekRange(weekKey) {
+        try {
+            // 1. 解析 Key，例如 "2025-12-Week2"
+            const parts = weekKey.split('-Week');
+            if(parts.length !== 2) return '';
+
+            const ym = parts[0]; // "2025-12"
+            const weekNum = parseInt(parts[1], 10); // 2
+
+            const [yearStr, monthStr] = ym.split('-');
+            const year = parseInt(yearStr, 10);
+            const month = parseInt(monthStr, 10) - 1; // JS 月份是 0-11
+
+            // 2. 确定搜索范围
+            // 后端逻辑是：(日期-1)//7 + 1 = WeekNum
+            // 所以 Week 1 对应 1~7号，Week 2 对应 8~14号...
+            const startCheckDay = (weekNum - 1) * 7 + 1;
+            const endCheckDay = weekNum * 7;
+
+            let targetSunday = null;
+
+            // 3. 在这个范围内寻找“周日”
+            // 只要找到这一天是周日，它就是这周的结算点
+            for (let d = startCheckDay; d <= endCheckDay; d++) {
+                // 创建日期对象
+                const checkDate = new Date(year, month, d);
+
+                // 防止溢出月份 (比如 Week5 算出 32号，JS会自动变下月1号，需要排除)
+                if (checkDate.getMonth() !== month) continue;
+
+                // 0 代表周日
+                if (checkDate.getDay() === 0) {
+                    targetSunday = checkDate;
+                    break;
+                }
+            }
+
+            if (!targetSunday) return ''; // 这种情况理论上不该发生（除非Key造假）
+
+            // 4. 倒推开始日期 (周日 往前推 6 天 = 周一)
+            const startDate = new Date(targetSunday);
+            startDate.setDate(targetSunday.getDate() - 6);
+
+            // 5. 格式化显示 (M/D)
+            const fmt = date => `${date.getMonth() + 1}/${date.getDate()}`;
+            return `${fmt(startDate)} ~ ${fmt(targetSunday)}`;
+
+        } catch(e) {
+            console.error(e);
+            return '';
+        }
+    }
+
+    // --- 核心：调用 AI 重写记忆 ---
+    async function regenerateMemory(type, keyStr, btnElement) {
+        if (!confirm(`确定要让 AI 重新阅读素材并重写 [${keyStr}] 的记忆吗？\n这将覆盖当前的文本内容。`)) return;
+
+        // 【修改】通过 DOM 查找 textarea
+        // 现在的结构是：btn -> div(meta-right) -> div(mem-meta) -> div(input-group) -> textarea
+        const inputGroup = btnElement.closest('.input-group');
+        const textarea = inputGroup.querySelector('textarea');
+
+        const originalText = btnElement.textContent;
+        btnElement.textContent = '...';
+        btnElement.disabled = true;
+        textarea.style.opacity = '0.5';
+
+        try {
+            let url = '';
+            let body = {};
+
+            if (type === 'medium') {
+                url = `/api/${charId}/memory/regenerate_medium`;
+                body = { date: keyStr };
+            } else {
+                url = `/api/${charId}/memory/regenerate_long`;
+                body = { week_key: keyStr };
+            }
+
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            const result = await res.json();
+
+            if (result.status === 'success') {
+                textarea.value = result.content;
+                // 闪烁提示
+                textarea.style.backgroundColor = '#e8f5e9';
+                setTimeout(() => textarea.style.backgroundColor = '', 500);
+            } else {
+                alert('生成失败: ' + result.error);
+            }
+        } catch(e) {
+            alert('网络错误');
+        } finally {
+            btnElement.textContent = originalText;
+            btnElement.disabled = false;
+            textarea.style.opacity = '1';
+        }
+    }
+
+    // --- 【新增】删除角色 ---
+    async function deleteCharacter() {
+        const confirm1 = confirm("⚠️ 警告：您确定要删除这个角色吗？此操作不可逆！");
+        if (!confirm1) return;
+
+        const confirm2 = confirm("再次确认：真的要删除吗？所有聊天记录和记忆都会消失！");
+        if (!confirm2) return;
+
+        try {
+            const res = await fetch(`/api/character/${charId}/delete`, {
+                method: 'DELETE'
+            });
+            const result = await res.json();
+
+            if (result.status === 'success') {
+                alert("角色已删除。即将返回通讯录。");
+                window.location.href = '/'; // 跳回首页
+            } else {
+                alert("删除失败: " + result.error);
+            }
+        } catch(e) {
+            alert("网络错误");
+        }
+    }
+
+    // --- 【修正版】切换短期记忆日期 ---
+    function switchShortDate(btn) {
+        // 1. 找到当前所在的编辑区域 (.edit-mode)
+        const container = btn.closest('.edit-mode');
+        if (!container) {
+            console.error("找不到编辑容器");
+            return;
+        }
+
+        const datePicker = container.querySelector('#short-date-picker');
+        const newDate = datePicker.value;
+
+        if (!newDate) return;
+
+        // 更新 dataset
+        container.dataset.dateKey = newDate;
+
+        // 2. 【关键修复】直接把 container (也就是 .edit-mode div) 传进去重绘
+        // 不要传 container.parentElement，否则会破坏 DOM 结构
+        buildEditor('short', container);
+    }
+
+    // --- 重新总结指定日期 ---
+    async function regenShortDate(btn) {
+        const container = btn.closest('.edit-mode');
+        const datePicker = container.querySelector('#short-date-picker');
+        const targetDate = datePicker.value;
+
+        if (!targetDate) return alert("请选择日期");
+
+        if (!confirm(`确定要让 AI 重新阅读 ${targetDate} 的聊天记录并生成记忆吗？\n(这将追加或覆盖现有内容)`)) return;
+
+        const originalText = btn.textContent;
+        btn.textContent = "生成中...";
+        btn.disabled = true;
+
+        try {
+            const res = await fetch(`/api/${charId}/memory/regenerate_short`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    date: targetDate,
+                    force: true // 强制重读 (忽略 last_id)
+                })
+            });
+            const result = await res.json();
+
+            if (result.status === 'success') {
+                alert(`生成完成！新增 ${result.added_count} 条事件。`);
+
+                // 更新全局缓存
+                if (!GLOBAL_DATA['short']) GLOBAL_DATA['short'] = {};
+                GLOBAL_DATA['short'][targetDate] = result.data;
+
+                // 刷新界面
+                switchShortDate(btn);
+            } else {
+                alert("生成失败: " + result.error);
+            }
+        } catch(e) {
+            alert("网络错误");
+        } finally {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    }
+
+    // --- 切换日程的 JSON 编辑模式 ---
+    function toggleScheduleJsonMode(btn) {
+        const listWrapper = document.getElementById('schedule-list-wrapper');
+        const jsonWrapper = document.getElementById('schedule-json-wrapper');
+        const textarea = document.getElementById('schedule-json-textarea');
+
+        // 判断当前状态
+        const isJsonMode = jsonWrapper.style.display === 'block';
+
+        if (!isJsonMode) {
+            // -> 切换到 JSON 模式
+
+            // 1. 从当前的输入框列表里抓取最新数据 (防止用户修改了还没保存)
+            const currentData = scrapeScheduleDataFromInputs();
+
+            // 2. 填入文本框
+            textarea.value = JSON.stringify(currentData, null, 2);
+
+            // 3. 切换显示
+            listWrapper.style.display = 'none';
+            jsonWrapper.style.display = 'block';
+            btn.textContent = "📋 切换回列表模式 (List View)";
+
+            // 隐藏顶部的添加/删除按钮，因为JSON模式不需要
+            const topActions = document.querySelector('#module-schedule .editor-top-actions');
+            if(topActions) topActions.style.display = 'none';
+
+        } else {
+            // -> 切换回 列表 模式
+
+            // 1. 尝试解析 JSON
+            try {
+                const newData = JSON.parse(textarea.value);
+
+                // 2. 重新渲染列表 (需要临时调用 buildEditor 的内部逻辑，或者简单点：更新全局数据并重绘)
+                // 为了简单，我们更新 GLOBAL_DATA 并重新调用 buildEditor
+                GLOBAL_DATA['schedule'] = newData;
+
+                // 找到 module 容器重新构建
+                const moduleContent = document.querySelector('#module-schedule .edit-mode');
+                buildEditor('schedule', moduleContent);
+
+                // 记得恢复按钮文字 (因为 buildEditor 会重置 HTML，所以其实不用手动恢复 btn text，但也无妨)
+            } catch(e) {
+                alert("JSON 格式错误！请修正后再切换。\n\n" + e.message);
+            }
+        }
+    }
+
+    // 辅助：从输入框抓取当前数据
+    function scrapeScheduleDataFromInputs() {
+        const container = document.querySelector('#module-schedule .edit-mode');
+        const inputRows = container.querySelectorAll('.input-group');
+        const newData = {};
+
+        inputRows.forEach(row => {
+            const k = row.querySelector('.input-key').value.trim();
+            const v = row.querySelector('.input-val').value.trim();
+            if(k) newData[k] = v;
+        });
+        return newData;
+    }
 </script>
 
 </body>

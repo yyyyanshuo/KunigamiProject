@@ -115,6 +115,12 @@
         </div>
     </div>
 
+    <!-- 【新增】危险区域 -->
+    <div style="margin-top: 40px; padding: 20px; border: 1px dashed #ffcdd2; background: #fff5f5; border-radius: 12px; text-align: center;">
+        <div style="color: #c62828; font-weight: bold; margin-bottom: 10px;">⚠️ 危险区域 / Danger Zone</div>
+        <p style="font-size: 12px; color: #d32f2f; margin-bottom: 15px;">解散群聊将无法恢复，群聊记录将丢失。</p>
+        <button class="btn" style="background: #c62828; color: white; width: 100%;" onclick="deleteGroup()">解散群聊 / Delete Group</button>
+    </div>
 </div>
 
 <script>
@@ -354,6 +360,28 @@
     }
 
     loadData();
+
+    // --- 【新增】删除群聊 ---
+    async function deleteGroup() {
+        const confirm1 = confirm("⚠️ 警告：您确定要解散这个群聊吗？");
+        if (!confirm1) return;
+
+        try {
+            const res = await fetch(`/api/group/${groupId}/delete`, {
+                method: 'DELETE'
+            });
+            const result = await res.json();
+
+            if (result.status === 'success') {
+                alert("群聊已解散。");
+                window.location.href = '/'; // 跳回首页
+            } else {
+                alert("删除失败: " + result.error);
+            }
+        } catch(e) {
+            alert("网络错误");
+        }
+    }
 </script>
 
 </body>

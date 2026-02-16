@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录 | Kunigami</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#fff3f8">
+  <style>
+    body {
+      font-family: "Segoe UI", "PingFang SC", sans-serif;
+      background: linear-gradient(135deg, #fff3f8 0%, #ffe9e1 100%);
+      margin: 0; padding: 0;
+      display: flex; justify-content: center; align-items: center;
+      height: 100vh; color: #444;
+    }
+    .login-card {
+      background: rgba(255, 255, 255, 0.9);
+      backdrop-filter: blur(10px);
+      padding: 30px; border-radius: 20px;
+      box-shadow: 0 10px 30px rgba(255, 182, 185, 0.2);
+      width: 80%; max-width: 320px; text-align: center;
+      border: 1px solid #fff;
+    }
+    .logo {
+      width: 80px; height: 80px; border-radius: 50%;
+      margin-bottom: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    }
+    h2 { margin: 0 0 20px; font-size: 18px; color: #d81b60; }
+
+    input {
+      width: 100%; padding: 12px; margin-bottom: 15px;
+      border: 1px solid #ddd; border-radius: 10px;
+      box-sizing: border-box; outline: none; transition: 0.2s;
+      font-size: 14px;
+    }
+    input:focus { border-color: #ffb6b9; background: #fffbfb; }
+
+    button {
+      width: 100%; padding: 12px; background: #ffb6b9;
+      color: white; border: none; border-radius: 10px;
+      font-weight: bold; cursor: pointer; font-size: 15px;
+      transition: 0.2s;
+    }
+    button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(255,182,185,0.4); }
+
+    .error-msg { color: red; font-size: 12px; margin-bottom: 10px; display: none; }
+  </style>
+</head>
+<body>
+
+<div class="login-card">
+  <img src="/static/logo.png" class="logo" onerror="this.src='/static/default_avatar.png'">
+  <h2>欢迎回来</h2>
+
+  <div id="error-msg" class="error-msg"></div>
+
+  <!-- 用户名默认就是您的昵称，或者这里填 user 也可以，根据您的设置 -->
+  <input type="text" id="username" placeholder="用户名 (Username)">
+  <input type="password" id="password" placeholder="密码 (Password)">
+
+  <button onclick="doLogin()">登 录</button>
+</div>
+
+<script>
+  async function doLogin() {
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value.trim();
+    const errorEl = document.getElementById('error-msg');
+
+    if(!username || !password) {
+      errorEl.textContent = "请输入用户名和密码";
+      errorEl.style.display = 'block';
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ username, password })
+      });
+      const result = await res.json();
+
+      if(result.status === 'success') {
+        window.location.href = '/'; // 登录成功，跳回首页
+      } else {
+        errorEl.textContent = result.message;
+        errorEl.style.display = 'block';
+      }
+    } catch(e) {
+      errorEl.textContent = "网络错误";
+      errorEl.style.display = 'block';
+    }
+  }
+
+  // 回车提交
+  document.addEventListener('keydown', (e) => {
+    if(e.key === 'Enter') doLogin();
+  });
+</script>
+
+</body>
+</html>
