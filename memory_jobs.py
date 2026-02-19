@@ -7,7 +7,10 @@ import time
 # 这里的引用非常关键
 # 我们从 app 导入 AI 总结功能 和 增量更新功能
 # --- 【修改】导入 update_group_short_memory ---
-from app import call_ai_to_summarize, update_short_memory_for_date, update_group_short_memory
+from app import call_ai_to_summarize, update_short_memory_for_date, update_group_short_memory, trigger_active_chat, get_char_db_path
+
+import random
+import sqlite3
 
 # 定义基础路径
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -209,3 +212,164 @@ def run_all_weekly_rollovers():
             print(f"     ❌ 处理角色 {char_id} 时崩溃: {e}")
 
     print("✅ 全员周结结束。")
+
+# --- 【新增】自动睡眠/唤醒检查 ---
+def check_and_update_sleep_status():
+    """
+    每分钟运行一次。
+    如果当前时间 == 设定入睡时间 -> 开启深睡眠
+    如果当前时间 == 设定起床时间 -> 关闭深睡眠
+    """
+    # 1. 获取当前时间 HH:MM
+    now_time = datetime.datetime.now().strftime("%H:%M")
+
+    if not os.path.exists(CONFIG_FILE): return
+
+    try:
+        # 2. 读取配置
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            all_config = json.load(f)
+
+        updated = False
+
+        for char_id, info in all_config.items():
+            start_time = info.get("ds_start")
+            end_time = info.get("ds_end")
+            current_status = info.get("deep_sleep", False)
+
+            # 触发入睡
+            if start_time and start_time == now_time:
+                if not current_status: # 只有当前没睡时才操作，防止重复写入
+                    info["deep_sleep"] = True
+                    # 联动：深睡眠开 -> 浅睡眠必开
+                    info["light_sleep"] = True
+                    print(f"💤 [自动睡眠] {char_id} 到点睡觉了 ({now_time})")
+                    updated = True
+
+            # 触发起床
+            elif end_time and end_time == now_time:
+                if current_status:
+                    info["deep_sleep"] = False
+                    print(f"☀️ [自动唤醒] {char_id} 到点起床了 ({now_time})")
+                    updated = True
+
+        # 3. 如果有变化，保存文件
+        if updated:
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(all_config, f, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        print(f"❌ 睡眠检查出错: {e}")
+
+def run_active_messaging_check():
+    """
+    心跳任务：每10分钟运行一次。
+    计算概率，决定是否发起主动消息。
+    """
+    print("\n💓 [Heartbeat] 开始检测主动消息机会...")
+
+    if not os.path.exists(CONFIG_FILE): return
+
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            chars_config = json.load(f)
+
+        for char_id, info in chars_config.items():
+            # 1. 检查浅睡眠 (Light Sleep)
+            if info.get("light_sleep", False) or info.get("deep_sleep", False):
+                # print(f"   - {char_id}: 睡眠中，跳过")
+                continue
+
+            # 2. 获取最后一条消息时间
+            db_path = os.path.join(BASE_DIR, "characters", char_id, "chat.db")
+            if not os.path.exists(db_path): continue
+
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT timestamp, role FROM messages ORDER BY id DESC LIMIT 1")
+            row = cursor.fetchone()
+            conn.close()
+
+            # 【关键修复】↓↓↓ 加上这一行！↓↓↓
+            if not row:
+                # print(f"   - {char_id}: 没有聊天记录，跳过")
+                continue
+                # ----------------------------------
+
+            last_ts_str, last_role = row
+
+            # 3. 计算时间差 (分钟)
+            last_dt = datetime.datetime.strptime(last_ts_str, '%Y-%m-%d %H:%M:%S')
+            minutes_diff = (datetime.datetime.now() - last_dt).total_seconds() / 60
+
+            if minutes_diff < 10: continue # 没到10分钟CD
+
+            # 4. 计算概率 P
+            # 算法：P_time = 0.005 * t (t >= 10)
+            p_time = 0.005 * minutes_diff
+
+            # 情绪指数 (0.0 ~ 20.0)
+            emotion = info.get("emotion", 0.5)
+
+            # 最终概率
+            p_final = p_time * emotion
+
+            # 随机判定
+            dice = random.random() # 0.0 ~ 1.0
+
+            print(f"   > [{char_id}] 距上次 {int(minutes_diff)}分, 情绪 {emotion}, 概率 {p_final:.2f}, 骰子 {dice:.2f}")
+
+            if dice < p_final:
+                # 中奖了！触发发送！
+                trigger_active_chat(char_id)
+
+        # ... 在 run_active_messaging_check 函数内，角色遍历结束后 ...
+
+        # --- 群聊主动消息检测 ---
+        if os.path.exists(GROUPS_CONFIG_FILE):
+            with open(GROUPS_CONFIG_FILE, "r", encoding="utf-8") as f:
+                groups_config = json.load(f)
+
+            # 导入群聊触发函数
+            from app import trigger_group_active_chat
+
+            for group_id, info in groups_config.items():
+                # 1. 检查开关
+                if not info.get("active_mode", False):
+                    continue
+
+                # 2. 获取最后一条消息时间
+                group_dir = os.path.join(BASE_DIR, "groups", group_id)
+                db_path = os.path.join(group_dir, "chat.db")
+
+                if not os.path.exists(db_path): continue
+
+                conn = sqlite3.connect(db_path)
+                cursor = conn.cursor()
+                cursor.execute("SELECT timestamp FROM messages ORDER BY id DESC LIMIT 1")
+                row = cursor.fetchone()
+                conn.close()
+
+                if not row: continue # 没聊过的群不主动
+
+                last_ts_str = row[0]
+                last_dt = datetime.datetime.strptime(last_ts_str, '%Y-%m-%d %H:%M:%S')
+                minutes_diff = (datetime.datetime.now() - last_dt).total_seconds() / 60
+
+                if minutes_diff < 10: continue
+
+                # 3. 计算概率 (不乘情绪指数，只看时间)
+                # 逻辑：10min -> 5%, 60min -> 30%, 200min -> 100%
+                # 公式: p = 0.005 * t
+                p_final = 0.005 * minutes_diff
+                if p_final > 1.0: p_final = 1.0 # 封顶 100%
+
+                dice = random.random()
+                print(f"   > [群:{group_id}] 距上次 {int(minutes_diff)}分, 概率 {p_final:.2f}, 骰子 {dice:.2f}")
+
+                if dice < p_final:
+                    # 触发！
+                    trigger_group_active_chat(group_id)
+
+    except Exception as e:
+        print(f"❌ 心跳检测出错: {e}")

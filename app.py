@@ -10,7 +10,7 @@ import urllib3
 from apscheduler.schedulers.background import BackgroundScheduler # 新增
 import memory_jobs # 导入刚才那个模块
 import shutil # 如果以后需要创建新角色用
-
+import random
 
 # 这是在 app.py 文件的开头部分
 
@@ -41,6 +41,9 @@ GROUPS_CONFIG_FILE = os.path.join(BASE_DIR, "configs", "groups.json")
 GROUPS_DIR = os.path.join(BASE_DIR, "groups")
 
 USER_SETTINGS_FILE = os.path.join(BASE_DIR, "configs", "user_settings.json")
+
+# --- 【新增】已读状态管理 ---
+READ_STATUS_FILE = os.path.join(BASE_DIR, "configs", "read_status.json")
 
 def get_current_username():
     """获取当前设置的用户名"""
@@ -98,6 +101,26 @@ def init_char_db(char_id):
 # --- 工具函数：获取指定角色的 DB 路径 ---
 def get_char_db_path(char_id):
     return os.path.join(CHARACTERS_DIR, char_id, "chat.db")
+
+def mark_char_as_read(char_id):
+    """更新某个角色的最后阅读时间"""
+    try:
+        data = {}
+        if os.path.exists(READ_STATUS_FILE):
+            with open(READ_STATUS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+        # 记录当前时间
+        data[char_id] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        with open(READ_STATUS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except: pass
+
+@app.route("/api/<char_id>/mark_read", methods=["POST"])
+def mark_read_api(char_id):
+    mark_char_as_read(char_id)
+    return jsonify({"status": "success"})
 
 # ---------------------- 核心：Prompt 构建系统 ----------------------
 
@@ -753,6 +776,20 @@ def get_contacts():
 
     contact_list = []
 
+    # 1. 先读取已读状态文件
+    read_status = {}
+    if os.path.exists(READ_STATUS_FILE):
+        try:
+            with open(READ_STATUS_FILE, "r", encoding="utf-8") as f:
+                content = f.read().strip() # 先读成字符串
+                if content: # 只有不为空才解析
+                    read_status = json.loads(content)
+        except (json.JSONDecodeError, ValueError) as e:
+            # 如果正好撞上文件正在写入（为空），或者文件坏了
+            # 这里的 print 可以帮您确认是不是这个问题，但不影响程序运行
+            print(f"⚠️ [Warning] 读取已读状态冲突 (可忽略): {e}")
+            read_status = {} # 降级处理：假装没有已读记录
+
     # --- A. 处理单人角色 ---
     for char_id, info in chars_config.items():
         db_path = os.path.join(BASE_DIR, "characters", char_id, "chat.db")
@@ -760,6 +797,21 @@ def get_contacts():
         last_msg = ""
         last_time = ""
         timestamp_val = 0
+
+        # --- 【新增】计算未读数 ---
+        unread_count = 0
+        if os.path.exists(db_path):
+            try:
+                # 获取上次已读时间，如果没有则默认为很久以前
+                last_read = read_status.get(char_id, "2000-01-01 00:00:00")
+
+                # 查询：时间 > last_read 且 role != 'user' (不是我发的) 的消息数量
+                conn = sqlite3.connect(db_path)
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM messages WHERE timestamp > ? AND role != 'user'", (last_read,))
+                unread_count = cursor.fetchone()[0]
+                conn.close()
+            except: pass
 
         if os.path.exists(db_path):
             try:
@@ -788,32 +840,34 @@ def get_contacts():
             "last_msg": last_msg,
             "last_time": last_time,
             "timestamp": timestamp_val,
-            "pinned": info.get("pinned", False)
+            "pinned": info.get("pinned", False),
+            "unread": unread_count # <--- 加上这个
         })
 
-    # --- B. 处理群聊 (新增部分) ---
+    # --- B. 处理群聊 ---
     if os.path.exists(GROUPS_CONFIG_FILE):
         try:
             with open(GROUPS_CONFIG_FILE, "r", encoding="utf-8") as f:
                 groups_config = json.load(f)
 
             for group_id, info in groups_config.items():
-                # 群聊数据库路径
                 db_path = os.path.join(GROUPS_DIR, group_id, "chat.db")
 
                 last_msg = ""
                 last_time = ""
                 timestamp_val = 0
+                unread_count = 0  # <--- 初始化为 0
 
                 if os.path.exists(db_path):
                     try:
                         conn = sqlite3.connect(db_path)
                         cursor = conn.cursor()
+
+                        # 1. 获取最后一条消息
                         cursor.execute("SELECT content, timestamp FROM messages ORDER BY id DESC LIMIT 1")
                         row = cursor.fetchone()
-                        conn.close()
+
                         if row:
-                            # 群聊消息可能需要显示是谁发的，这里暂时只取内容
                             last_msg = row[0]
                             timestamp_val = datetime.strptime(row[1], '%Y-%m-%d %H:%M:%S').timestamp()
                             dt = datetime.fromtimestamp(timestamp_val)
@@ -821,19 +875,30 @@ def get_contacts():
                                 last_time = dt.strftime('%H:%M')
                             else:
                                 last_time = dt.strftime('%m-%d')
+
+                        # 2. 【新增】计算未读数
+                        # 获取该群的最后阅读时间
+                        last_read = read_status.get(group_id, "2000-01-01 00:00:00")
+
+                        # 统计：时间 > last_read 且 发言人不是 user 的消息
+                        cursor.execute("SELECT COUNT(*) FROM messages WHERE timestamp > ? AND role != 'user'", (last_read,))
+                        unread_count = cursor.fetchone()[0]
+
+                        conn.close()
                     except: pass
 
                 contact_list.append({
-                    "type": "group", # 标记类型
+                    "type": "group",
                     "id": group_id,
-                    "avatar": info.get("avatar", "/static/default_group.png"), # 需要准备个群聊默认头像
+                    "avatar": info.get("avatar", "/static/default_group.png"),
                     "name": info.get("name"),
-                    "remark": info.get("name"), # 群聊一般就叫群名
+                    "remark": info.get("name"),
                     "last_msg": last_msg,
                     "last_time": last_time,
                     "timestamp": timestamp_val,
                     "pinned": info.get("pinned", False),
-                    "members": info.get("members", [])
+                    "members": info.get("members", []),
+                    "unread": unread_count  # <--- 【关键】把计算结果放进去
                 })
         except Exception as e:
             print(f"Error loading groups: {e}")
@@ -952,6 +1017,8 @@ def get_group_history(group_id):
 def chat(char_id):
     # 1. 动态获取路径
     db_path, prompts_dir = get_paths(char_id)
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    CONFIG_FILE = os.path.join(BASE_DIR, "configs", "characters.json")
 
     # 2. 防御性初始化
     if not os.path.exists(db_path):
@@ -963,16 +1030,58 @@ def chat(char_id):
     if not user_msg_raw:
         return jsonify({"error": "empty message"}), 400
 
-    # 3. 动态构建 Prompt
+    # --- 3. 检查深睡眠状态 ---
+    is_deep_sleep = False
+    try:
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                all_config = json.load(f)
+            char_info = all_config.get(char_id, {})
+            # 获取开关状态
+            is_deep_sleep = char_info.get("deep_sleep", False)
+
+            # (可选) 高级逻辑：如果想配合时间段自动判断，可以在这里加
+            # 比如：虽然开关开了，但如果不在时间段内，视为醒着？
+            # 或者：开关只作为总开关。这里暂时按您的要求：开关开=不回。
+    except: pass
+
+    # --- 4. 无论睡没睡，先存入用户消息 ---
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    now = datetime.now()
+    user_ts = now.strftime('%Y-%m-%d %H:%M:%S')
+
+    # 存用户消息
+    cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", ("user", user_msg_raw, user_ts))
+    user_msg_id = cursor.lastrowid # 获取 ID
+
+    conn.commit()
+    conn.close()
+
+    # --- 5. 如果在深睡眠，直接返回空回复，不调 AI ---
+    if is_deep_sleep:
+        print(f"--- [Deep Sleep] {char_id} 正在熟睡，不回复消息 ---")
+
+        # 即使不回复，也把 user_id 传回去，这样用户发的气泡才有删除按钮
+        return jsonify({
+            "replies": [],
+            "id": None,
+            "user_id": user_msg_id
+        })
+
+    # ================= 醒着：正常调用 AI 逻辑 =================
+
+    # 6. 动态构建 System Prompt
     system_prompt = build_system_prompt(char_id)
 
-    # 4. 构建消息历史 (读取最近20条)
+    # 7. 构建消息历史 (读取最近20条)
     messages = [{"role": "system", "content": system_prompt}]
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT role, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT 20")
+    cursor.execute("SELECT role, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT 21")
     history_rows = [dict(row) for row in cursor.fetchall()][::-1]
     conn.close()
 
@@ -1012,14 +1121,6 @@ def chat(char_id):
             # 容错：原样添加
             messages.append({"role": row['role'], "content": row['content']})
 
-    # --- Part 3: 添加当前用户消息 ---
-    if show_full_date:
-        current_time_str = now.strftime('[%m-%d %H:%M]')
-    else:
-        current_time_str = now.strftime('[%H:%M]')
-
-    messages.append({"role": "user", "content": f"{current_time_str} {user_msg_raw}"})
-
     # 1. 获取当前配置
     route, current_model = get_model_config("chat") # 任务类型是 chat
 
@@ -1043,10 +1144,6 @@ def chat(char_id):
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
 
-        # 存用户消息
-        cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", ("user", user_msg_raw, user_ts))
-        user_msg_id = cursor.lastrowid # 【新增】获取刚存入的用户消息 ID
-
         # 存 AI 消息
         cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", ("assistant", cleaned_reply_text, ai_ts))
 
@@ -1069,7 +1166,7 @@ def chat(char_id):
         print(f"Chat Error: {e}")
         return jsonify({"error": str(e)}), 500
 
-# --- 【新增】重新生成 (Regenerate) 接口 ---
+# --- 【修正版】重新生成接口 (自动补全 User 引导) ---
 @app.route("/api/<char_id>/regenerate", methods=["POST"])
 def regenerate_message(char_id):
     # 1. 获取路径
@@ -1081,7 +1178,7 @@ def regenerate_message(char_id):
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        # 2. 检查最后一条消息是否为 assistant
+        # 2. 检查最后一条是否为 assistant (安全检查)
         cursor.execute("SELECT id, role, content FROM messages ORDER BY id DESC LIMIT 1")
         last_row = cursor.fetchone()
 
@@ -1097,19 +1194,16 @@ def regenerate_message(char_id):
         cursor.execute("DELETE FROM messages WHERE id = ?", (last_row['id'],))
         conn.commit()
 
-        # --- 接下来复用聊天的生成逻辑 ---
-
         # 4. 动态构建 System Prompt
         system_prompt = build_system_prompt(char_id)
         messages = [{"role": "system", "content": system_prompt}]
 
-        # 5. 读取历史记录 (此时已删除了最后一条，读取的是在那之前的)
+        # 5. 读取剩余的历史记录
         cursor.execute("SELECT role, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT 20")
         history_rows = [dict(row) for row in cursor.fetchall()][::-1]
-        conn.close() # 读完关闭
+        conn.close()
 
-        # 6. 构建上下文 (复用 chat 函数的逻辑)
-        # 这里的逻辑和 chat 函数里读取历史的一模一样
+        # 6. 构建上下文
         show_full_date = False
         now = datetime.now()
         if history_rows:
@@ -1122,14 +1216,32 @@ def regenerate_message(char_id):
             try:
                 dt_obj = datetime.strptime(row['timestamp'], '%Y-%m-%d %H:%M:%S')
                 ts_str = dt_obj.strftime('[%m-%d %H:%M]') if show_full_date else dt_obj.strftime('[%H:%M]')
-                messages.append({"role": row['role'], "content": f"{ts_str} {row['content']}"})
+                formatted_content = f"{ts_str} {row['content']}"
+                messages.append({"role": row['role'], "content": formatted_content})
             except:
                 messages.append({"role": row['role'], "content": row['content']})
 
-        # 7. 调用 AI (注意：不需要再 append 用户的 user_msg，因为历史记录里已经包含了用户上一句发的话)
-        # 获取当前配置
-        route, current_model = get_model_config("chat")
+        # ================= 【核心新增】智能补位逻辑 =================
+        # 检查发给 AI 的最后一条消息是谁说的
+        if len(messages) > 1: # 排除掉只有 System Prompt 的情况
+            last_msg_role = messages[-1]['role']
 
+            # 如果上一条依然是 assistant (说明是连续回复)，补一条假的 User 消息
+            if last_msg_role == 'assistant' or last_msg_role == 'model':
+                lang = get_ai_language()
+
+                # 构造引导词 (不存数据库，仅用于诱导 AI)
+                if lang == "zh":
+                    fake_prompt = "(继续说)"
+                else:
+                    fake_prompt = "(続き)"
+
+                print(f"--- [Regenerate] 检测到连续对话，插入隐形引导: {fake_prompt} ---")
+                messages.append({"role": "user", "content": fake_prompt})
+        # ===========================================================
+
+        # 7. 调用 AI
+        route, current_model = get_model_config("chat")
         print(f"--- [Regenerate] Route: {route}, Model: {current_model} ---")
 
         if route == "relay":
@@ -1177,24 +1289,26 @@ def group_chat(group_id):
     group_dir = os.path.join(GROUPS_DIR, group_id)
     db_path = os.path.join(group_dir, "chat.db")
 
-    # 2. 读取群成员
-    members = []
+    # 2. 读取群成员 (所有成员)
+    all_members = []
     if os.path.exists(GROUPS_CONFIG_FILE):
         with open(GROUPS_CONFIG_FILE, "r", encoding="utf-8") as f:
-            all_groups = json.load(f)
-            if group_id in all_groups:
-                members = all_groups[group_id].get("members", [])
+            group_conf = json.load(f)
+            if group_id in group_conf:
+                all_members = group_conf[group_id].get("members", [])
 
-    ai_members = [m for m in members if m != "user"]
-    if not ai_members: return jsonify({"error": "No AI members"}), 404
+    # 排除用户
+    ai_members_all = [m for m in all_members if m != "user"]
+    if not ai_members_all: return jsonify({"error": "No AI members"}), 404
 
     # --- 【关键修正 1】提前初始化变量 ---
     replies_for_frontend = []
 
-    # --- 【关键修正 2】提前建立 ID <-> Name 映射表 ---
-    # 这部分必须在解析 @ 之前做，因为解析需要用到名字
+    # --- 【关键步骤】获取在线成员 (过滤掉深睡眠的) ---
+    # 需要读取 characters.json 查看 deep_sleep 状态
     id_to_name = {}
     name_to_id = {}
+    online_ai_members = [] # 最终的在线名单
 
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -1210,6 +1324,28 @@ def group_chat(group_id):
                 # 映射 "英雄" (备注) -> "kunigami"
                 if cinfo.get("remark"):
                     name_to_id[cinfo.get("remark")] = cid
+
+                # 2. 检查是否在线 (Deep Sleep False)
+                # 只有在群成员列表里 且 没有深睡眠 的才算在线
+                if cid in ai_members_all:
+                    is_sleeping = cinfo.get("deep_sleep", False)
+                    if not is_sleeping:
+                        online_ai_members.append(cid)
+                    else:
+                        print(f"   [GroupChat] 成员 {name}({cid}) 正在熟睡，跳过。")
+
+    # 如果全员都在睡觉，直接返回空
+    if not online_ai_members:
+        print("--- [GroupChat] 全员睡眠中，无人回复 ---")
+        # 依然要存用户消息
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        now = datetime.now()
+        user_ts = now.strftime('%Y-%m-%d %H:%M:%S')
+        cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", ("user", user_msg, user_ts))
+        conn.commit()
+        conn.close()
+        return jsonify({"replies": []})
 
     # 3. 存入用户消息
     conn = sqlite3.connect(db_path)
@@ -1229,9 +1365,8 @@ def group_chat(group_id):
     # A. 【最高优先级】检测 @所有人
     # 这里的判断很简单：只要字符串里包含这个词就行
     if "@所有人" in user_msg:
-        print("--- [GroupChat] 检测到 @所有人 ---")
-        # 复制一份 AI 成员列表 (不含 user)
-        responder_ids = list(ai_members)
+        print("--- [GroupChat] 模式: @所有人 (在线全员) ---")
+        responder_ids = list(online_ai_members)
         # 打乱顺序，让每次“开会”的发言顺序都不一样，更真实
         random.shuffle(responder_ids)
 
@@ -1246,30 +1381,26 @@ def group_chat(group_id):
                 # 尝试匹配 ID
                 if name in name_to_id:
                     target_id = name_to_id[name]
-                    if target_id in ai_members: # 确保在群里
+                    # 只有在线的才回
+                    if target_id in online_ai_members:
                         responder_ids.append(target_id)
+                    else:
+                        print(f"   -> @{name} 在线状态不满足，不回复")
                 else:
                     print(f"   -> 未找到名为 '{name}' 的群成员")
 
     # C. 如果没有有效 @，回退到随机逻辑
     if not responder_ids:
         # 获取当前群里 AI 的实际数量
-        count_ai = len(ai_members)
-
-        if count_ai == 0:
-            print("--- [GroupChat] 异常：群里没有 AI 成员")
-            return jsonify({"replies": []})
+        count_online = len(online_ai_members)
 
         # 逻辑：想要随机回复 1~2 人，但不能超过实际人数
         # 比如：如果只有 1 个 AI，那就只能回 1 次
         # 如果有 3 个 AI，可以随机回 1 或 2 次
-        target_k = random.randint(1, 2)
+        target_k = random.randint(1, count_online)
 
-        # 【关键修正】取最小值，确保 k 不会大于总人数
-        real_k = min(count_ai, target_k)
-
-        responder_ids = random.sample(ai_members, k=real_k)
-        print(f"--- [GroupChat] 随机模式: 选中 {responder_ids} ---")
+        responder_ids = random.sample(online_ai_members, k=target_k)
+        print(f"--- [GroupChat] 模式: 随机抽取 {len(responder_ids)} 人 ---")
     else:
         print(f"--- [GroupChat] 指定模式: 顺序 {responder_ids} ---")
 
@@ -1304,7 +1435,7 @@ def group_chat(group_id):
 
         # --- A. 构建 Prompt ---
         sys_prompt = build_system_prompt(speaker_id)
-        other_members = [m for m in members if m != speaker_id]
+        other_members = [m for m in all_members if m != speaker_id]
         rel_prompt = build_group_relationship_prompt(speaker_id, other_members)
 
         full_sys_prompt = sys_prompt + "\n\n" + rel_prompt + "\n【Current Situation】\n当前是在群聊中。请注意上下文，与其他成员自然互动。"
@@ -1635,6 +1766,9 @@ def handle_system_config():
 def call_openrouter(messages, char_id="unknown", model_name="google/gemini-2.5-pro"):
     import requests
 
+    # 强制不走系统代理
+    no_proxy = {"http": None, "https": None}
+
     # 【新增】打印日志
     log_full_prompt(f"OpenRouter ({model_name})", messages)
 
@@ -1666,9 +1800,32 @@ def call_openrouter(messages, char_id="unknown", model_name="google/gemini-2.5-p
         if r.status_code != 200:
             return f"[ERROR] API call failed with status {r.status_code}: {r.text}"
 
-        r.raise_for_status()
-        jr = r.json()
-        return jr["choices"][0]["message"]["content"]
+        result = r.json()
+
+        # --- 【新增】Token 计费记录 (DeepSeek/OpenAI 格式) ---
+        if 'usage' in result:
+            usage = result['usage']
+            record_token_usage(
+                char_id,
+                model_name,
+                usage.get('prompt_tokens', 0),
+                usage.get('completion_tokens', 0),
+                usage.get('total_tokens', 0)
+            )
+
+        # --- 【关键修复】检查 choices 列表是否为空 ---
+        if "choices" not in result or len(result["choices"]) == 0:
+            print(f"⚠️ [Empty Response] API 返回了空列表。完整响应如下：")
+            print(result) # 打印出来看看是为什么
+            return "[API无回复] 可能是内容被过滤或服务繁忙。"
+
+        # 一切正常，提取内容
+        content = result["choices"][0]["message"]["content"]
+
+        # 记录日志
+        log_full_prompt(f"OpenRouter ({model_name})", messages, response_text=content)
+
+        return content
     except Exception as e:
         return f"[ERROR] API request failed: {e}"
 
@@ -2352,6 +2509,10 @@ def update_group_meta(group_id):
         if "name" in data: all_groups[group_id]["name"] = data["name"].strip()
         if "avatar" in data: all_groups[group_id]["avatar"] = data["avatar"].strip()
 
+        # 【新增】主动消息开关
+        if "active_mode" in data:
+            all_groups[group_id]["active_mode"] = bool(data["active_mode"])
+
         with open(GROUPS_CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(all_groups, f, ensure_ascii=False, indent=2)
 
@@ -2453,7 +2614,20 @@ def get_char_details(char_id):
 
         char_info = all_config.get(char_id)
         if char_info:
-            return jsonify(char_info)
+            # 【新增】定义默认配置字典
+            defaults = {
+                "emotion": 1,
+                "light_sleep": True,
+                "deep_sleep": False,
+                "ds_start": "23:00",
+                "ds_end": "07:00"
+            }
+            # 将默认值合并进去 (如果 char_info 里没有该字段，就用默认的)
+            # 这里的逻辑是：char_info 覆盖 defaults (已有的配置优先)
+            final_info = defaults.copy()
+            final_info.update(char_info)
+
+            return jsonify(final_info)
         else:
             return jsonify({"error": "Character not found"}), 404
 
@@ -2520,6 +2694,25 @@ def update_char_meta(char_id):
         # 【新增】更新置顶状态 (必须判断是否为 None，因为 False 也是有效值)
         if new_pinned is not None:
             all_config[char_id]["pinned"] = bool(new_pinned)
+
+        # --- 【新增】生理节律状态 ---
+        # 情绪 (0-100)
+        if data.get("emotion") is not None:
+            all_config[char_id]["emotion"] = float(data["emotion"])
+
+        # 浅睡眠 (Bool)
+        if data.get("light_sleep") is not None:
+            all_config[char_id]["light_sleep"] = bool(data["light_sleep"])
+
+        # 深睡眠 (Bool)
+        if data.get("deep_sleep") is not None:
+            all_config[char_id]["deep_sleep"] = bool(data["deep_sleep"])
+
+        # 深睡眠自动时间段 (Start, End)
+        if data.get("ds_start") is not None:
+            all_config[char_id]["ds_start"] = data["ds_start"]
+        if data.get("ds_end") is not None:
+            all_config[char_id]["ds_end"] = data["ds_end"]
 
         # 3. 写回文件
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -2781,7 +2974,14 @@ def add_character():
             "name": new_name,
             "remark": new_name, # 默认备注同名
             "avatar": "/static/default_avatar.png", # 默认头像
-            "pinned": False
+            "pinned": False,
+
+            # --- 新增默认参数 ---
+            "emotion": 1,
+            "light_sleep": True,
+            "deep_sleep": False,
+            "ds_start": "23:00",
+            "ds_end": "07:00"
         }
 
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -2847,7 +3047,8 @@ def add_group():
             "name": new_name,
             "avatar": "/static/default_group.png", # 记得在static放个图
             "pinned": False,
-            "members": members
+            "members": members,
+            "active_mode": True  # 【修改】新建群默认开启主动消息
         }
 
         with open(GROUPS_CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -3313,6 +3514,218 @@ def get_usage_logs():
     except:
         return jsonify([])
 
+# --- 【修正版】单人主动消息 (伪装成 User 消息触发) ---
+def trigger_active_chat(char_id):
+    print(f"💓 [Active] 尝试触发 {char_id} 的主动消息...")
+
+    db_path, _ = get_paths(char_id)
+    if not os.path.exists(db_path): return False
+
+    # 1. 获取基础 System Prompt (只包含人设、记忆，不包含主动指令)
+    base_system_prompt = build_system_prompt(char_id)
+    messages = [{"role": "system", "content": base_system_prompt}]
+
+    # 2. 读取历史记录
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT role, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT 20")
+    history_rows = [dict(row) for row in cursor.fetchall()][::-1]
+    conn.close()
+
+    # 3. 填充历史 (带智能时间戳)
+    now = datetime.now()
+    show_full_date = False
+    if history_rows:
+        try:
+            first_ts = datetime.strptime(history_rows[0]['timestamp'], '%Y-%m-%d %H:%M:%S')
+            if first_ts.date() != now.date(): show_full_date = True
+        except: pass
+
+    for row in history_rows:
+        try:
+            dt_object = datetime.strptime(row['timestamp'], '%Y-%m-%d %H:%M:%S')
+            ts_str = dt_object.strftime('[%m-%d %H:%M]') if show_full_date else dt_object.strftime('[%H:%M]')
+            formatted_content = f"{ts_str} {row['content']}"
+            messages.append({"role": row['role'], "content": formatted_content})
+        except:
+            messages.append({"role": row['role'], "content": row['content']})
+
+    # --- 4. 【关键修改】构造“伪造的”用户指令消息 ---
+    # 这条消息只发给 AI 看，不会存入数据库
+
+    lang = get_ai_language()
+    hour = now.hour
+    time_str = now.strftime('%H:%M')
+
+    # 计算时间段
+    if 5 <= hour < 11: period = "早上" if lang == "zh" else "朝"
+    elif 11 <= hour < 13: period = "中午" if lang == "zh" else "昼"
+    elif 13 <= hour < 18: period = "下午" if lang == "zh" else "午後"
+    elif 18 <= hour < 23: period = "晚上" if lang == "zh" else "夜"
+    else: period = "深夜" if lang == "zh" else "深夜"
+
+    if lang == "zh":
+        trigger_msg = (
+            f"（系统提示：现在是{period} {time_str}。）\n"
+            f"（用户已经很久没说话了。请你根据当前时间、之前的聊天内容，**主动**向用户发起一个新的话题。）\n"
+            f"（要求：自然、简短，不要重复上一句话。）"
+        )
+    else:
+        trigger_msg = (
+            f"（システム通知：現在は{period} {time_str}です。）\n"
+            f"（ユーザーからの返信が途絶えています。現在の時間帯やこれまでの会話を踏まえて、**自発的に**新しい話題を振ってください。）\n"
+            f"（要件：自然で簡潔に。直前の発言を繰り返さないこと。）"
+        )
+
+    # 把它伪装成 User 发的消息
+    messages.append({"role": "user", "content": trigger_msg})
+
+    # 5. 调用 AI
+    try:
+        route, current_model = get_model_config("chat")
+        print(f"   -> [Active] Calling AI ({route}/{current_model})...")
+
+        if route == "relay":
+            reply_text = call_openrouter(messages, char_id=char_id, model_name=current_model)
+        else:
+            reply_text = call_gemini(messages, char_id=char_id, model_name=current_model)
+
+        # 清理
+        timestamp_pattern = r'\[(?:(?:\d{2}-\d{2}\s+)?\d{1,2}:\d{2})\]\s*'
+        cleaned_reply = re.sub(timestamp_pattern, '', reply_text).strip()
+
+        if not cleaned_reply: return False
+
+        # 6. 存库
+        ai_ts = now.strftime('%Y-%m-%d %H:%M:%S')
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
+                       ("assistant", cleaned_reply, ai_ts))
+        conn.commit()
+        conn.close()
+
+        print(f"💓 [Active] 发送成功: {cleaned_reply}")
+        return True
+
+    except Exception as e:
+        print(f"💓 [Active] 发送失败: {e}")
+        return False
+
+# --- 【修正版】群聊主动消息 (伪装成 User 指令) ---
+def trigger_group_active_chat(group_id):
+    print(f"💓 [GroupActive] 尝试触发群 {group_id} 的主动消息...")
+
+    group_dir = os.path.join(GROUPS_DIR, group_id)
+    db_path = os.path.join(group_dir, "chat.db")
+
+    # 1. 基础读取逻辑 (保持不变)
+    if not os.path.exists(GROUPS_CONFIG_FILE): return False
+    with open(GROUPS_CONFIG_FILE, "r", encoding="utf-8") as f:
+        group_conf = json.load(f).get(group_id, {})
+
+    group_name = group_conf.get("name", "Group")
+    all_members = group_conf.get("members", [])
+    ai_members_all = [m for m in all_members if m != "user"]
+    if not ai_members_all: return False
+
+    # 2. 筛选在线成员 (保持不变)
+    online_members = []
+    id_to_name = {}
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            c_conf = json.load(f)
+            for cid, cinfo in c_conf.items():
+                id_to_name[cid] = cinfo.get("name", cid)
+                if cid in ai_members_all:
+                    if not cinfo.get("deep_sleep", False):
+                        online_members.append(cid)
+
+    if not online_members: return False
+
+    # 3. 随机抽取 1 人
+    speaker_id = random.choice(online_members)
+    speaker_name = id_to_name.get(speaker_id, speaker_id)
+    print(f"   -> 选中 [{speaker_name}] 发起话题")
+
+    # 4. 构建 Prompt (System只放人设)
+    sys_prompt = build_system_prompt(speaker_id)
+    other_members = [m for m in all_members if m != speaker_id and m != "user"]
+    rel_prompt = build_group_relationship_prompt(speaker_id, other_members)
+
+    full_sys_prompt = sys_prompt + "\n\n" + rel_prompt + "\n【Current Situation】\n当前是在群聊中。"
+    messages = [{"role": "system", "content": full_sys_prompt}]
+
+    # 5. 读取历史 (保持不变)
+    conn = sqlite3.connect(db_path)
+    # 【关键修复】↓↓↓ 加上这一行！没有它，数据库读出来的就是乱码 ↓↓↓
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT role, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT 10")
+    rows = [dict(row) for row in cursor.fetchall()][::-1]
+    conn.close()
+
+    for row in rows:
+        r_id = row['role']
+        d_name = "User" if r_id == "user" else id_to_name.get(r_id, r_id)
+        messages.append({"role": "user", "content": f"[{d_name}]: {row['content']}"})
+
+    # --- 6. 【关键修改】构造伪造的指令消息 ---
+    time_str = datetime.now().strftime('%H:%M')
+    lang = get_ai_language()
+
+    if lang == "zh":
+        trigger_msg = (
+            f"[System]: (现在是 {time_str}。群里很久没人说话了。)\n"
+            f"(请你主动发起一个话题，或者对之前的话题进行延伸。)\n"
+            f"(要求：自然、简短。)"
+        )
+    else:
+        trigger_msg = (
+            f"[System]: (現在は {time_str} です。グループチャットが静かです。)\n"
+            f"(自発的に新しい話題を振ってください。)\n"
+            f"(要件：自然で簡潔に。)"
+        )
+
+    # 这里的 role 是 user，模拟群里发了一条系统通知
+    messages.append({"role": "user", "content": trigger_msg})
+
+    # 7. 调用 AI (保持不变)
+    try:
+        route, current_model = get_model_config("chat")
+
+        if route == "relay":
+            reply_text = call_openrouter(messages, char_id=speaker_id, model_name=current_model)
+        else:
+            reply_text = call_gemini(messages, char_id=speaker_id, model_name=current_model)
+
+        timestamp_pattern = r'\[(?:(?:\d{2}-\d{2}\s+)?\d{1,2}:\d{2})\]\s*'
+        cleaned_reply = re.sub(timestamp_pattern, '', reply_text).strip()
+        name_pattern = f"^\\[{speaker_name}\\][:：]\\s*"
+        cleaned_reply = re.sub(name_pattern, '', cleaned_reply).strip()
+
+        if not cleaned_reply: return False
+
+        # 8. 存档
+        ai_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
+                       (speaker_id, cleaned_reply, ai_ts))
+        conn.commit()
+        conn.close()
+
+        log_event = f"[群聊: {group_name}] (主动) {cleaned_reply}"
+        update_group_log(speaker_id, log_event, ai_ts)
+
+        print(f"💓 [GroupActive] 发送成功: {cleaned_reply}")
+        return True
+
+    except Exception as e:
+        print(f"Group Active Error: {e}")
+        return False
+
 # ---------------------- 启动 ----------------------
 
 if __name__ == "__main__":
@@ -3321,6 +3734,11 @@ if __name__ == "__main__":
     scheduler = BackgroundScheduler()
     # 每天凌晨 4 点 0 分自动运行 (这个时候您肯定睡了，适合整理记忆)
     scheduler.add_job(func=scheduled_maintenance, trigger="cron", hour=4, minute=0)
+    # 2. 【新增】每分钟检查一次睡眠状态
+    scheduler.add_job(func=memory_jobs.check_and_update_sleep_status, trigger="cron", minute='*')
+    # 在 app.py 的 scheduler 启动部分
+    # 3. 【新增】主动消息心跳 (每 10 分钟)
+    scheduler.add_job(func=memory_jobs.run_active_messaging_check, trigger="cron", minute='*/10')
     scheduler.start()
     print("--- [Scheduler] 后台记忆整理服务已启动 (每天 04:00) ---")
 

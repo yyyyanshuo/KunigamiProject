@@ -58,6 +58,56 @@
             display: inline-block; background: #e8eaf6; color: #3f51b5;
             padding: 4px 10px; border-radius: 15px; font-size: 12px; margin-right: 5px; margin-bottom: 5px;
         }
+
+        /* --- 开关样式 (必须补上这一段，滑块才会动！) --- */
+        .switch {
+            position: relative; display: inline-block; width: 40px; height: 22px;
+            flex-shrink: 0; /* 防止被挤压 */
+        }
+
+        .switch input {
+            opacity: 0; width: 0; height: 0;
+        }
+
+        /* ... 其他开关样式 ... */
+
+        /* 【关键修复】当开关被勾选时，强制背景变绿 */
+        .switch input:checked + .slider {
+            background-color: #4cd964 !important; /* 加上 !important 覆盖行内样式 */
+        }
+
+        /* 可选：给圆点也加个阴影让它更明显 */
+        .switch input:focus + .slider {
+            box-shadow: 0 0 1px #4cd964;
+        }
+
+        /* 确保圆点移动 */
+        .switch input:checked + .slider:before {
+            transform: translateX(18px);
+        }
+
+        .slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc; transition: .4s; border-radius: 22px;
+        }
+
+        .slider:before {
+            position: absolute; content: ""; height: 18px; width: 18px;
+            left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%;
+        }
+
+        /* 【核心原理】当 input 被勾选时，改变 slider 的颜色和圆点位置 */
+        input:checked + .slider {
+            background-color: #4cd964; /* 绿色表示开启 */
+        }
+
+        input:focus + .slider {
+            box-shadow: 0 0 1px #4cd964;
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(18px); /* 向右移动 */
+        }
     </style>
 </head>
 <body>
@@ -83,6 +133,19 @@
             <div style="text-align:left; margin-bottom: 15px;">
                 <label style="font-size:12px; color:#888;">群名称</label>
                 <input type="text" id="group-name" class="input-full">
+            </div>
+
+            <!-- 【新增】主动消息开关 -->
+            <div style="text-align:left; margin-bottom: 15px; margin-top: 15px; display:flex; align-items:center; justify-content:space-between; background:#f9f9f9; padding:10px; border-radius:8px;">
+                <div>
+                    <label style="font-size:13px; font-weight:bold; color:#555;">🔔 主动消息 (Active Chat)</label>
+                    <div style="font-size:11px; color:#999;">群成员会根据时间随机发起话题</div>
+                </div>
+                <label class="switch" style="position: relative; display: inline-block; width: 40px; height: 22px;">
+                    <input type="checkbox" id="group-active-chk" onchange="saveGroupActiveState()">
+                    <span class="slider" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 22px;"></span>
+                    <!-- CSS 需要确保 slider:before 伪元素样式存在，如果没有请复用 memory.html 里的样式 -->
+                </label>
             </div>
 
             <div style="text-align:left;">
@@ -144,6 +207,10 @@
         const meta = globalData.meta;
         document.getElementById('group-name').value = meta.name;
         document.getElementById('group-avatar').src = meta.avatar || '/static/default_group.png';
+
+        // 【关键修改】默认打开逻辑
+        // 只有当 active_mode 严格等于 false 时才关闭，undefined (旧数据) 或 true 都算打开
+        document.getElementById('group-active-chk').checked = (meta.active_mode !== false);
 
         const membersDiv = document.getElementById('member-list');
         membersDiv.innerHTML = meta.members.map(m => `<span class="member-tag">${m}</span>`).join('');
@@ -307,11 +374,16 @@
     // 保存元数据
     async function saveGroupMeta() {
         const name = document.getElementById('group-name').value;
+        // 【新增】获取开关状态
+        const activeMode = document.getElementById('group-active-chk').checked;
         // 头像在上传时已保存
         const res = await fetch(`/api/group/${groupId}/update_meta`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ name: name })
+            body: JSON.stringify({
+                name: name,
+                active_mode: activeMode
+            })
         });
         if(res.ok) alert('更新成功');
     }
@@ -380,6 +452,37 @@
             }
         } catch(e) {
             alert("网络错误");
+        }
+    }
+
+    // --- 【新增】开关即时保存 ---
+    async function saveGroupActiveState() {
+        const isChecked = document.getElementById('group-active-chk').checked;
+
+        // 视觉反馈（可选，比如变个色或者打印个log）
+        console.log("正在保存开关状态:", isChecked);
+
+        try {
+            // 复用 update_meta 接口，只传 active_mode
+            // 注意：这里我们不需要传 name，后端 update_group_meta 支持部分更新
+            const res = await fetch(`/api/group/${groupId}/update_meta`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    active_mode: isChecked
+                })
+            });
+
+            if(res.ok) {
+                // 可以在这里加个小提示，比如 "状态已更新"
+            } else {
+                alert('保存状态失败');
+                // 失败了就拨回去
+                document.getElementById('group-active-chk').checked = !isChecked;
+            }
+        } catch(e) {
+            alert('网络错误');
+            document.getElementById('group-active-chk').checked = !isChecked;
         }
     }
 </script>

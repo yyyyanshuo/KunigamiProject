@@ -374,6 +374,70 @@
         .btn-toggle-json {
             background: #607d8b; color: white; padding: 4px 10px; border-radius: 4px; border: none; cursor: pointer; font-size: 12px;
         }
+
+        /* --- 状态控制样式 --- */
+        .status-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 0; border-bottom: 1px dashed #eee;
+        }
+        .status-label { font-size: 13px; font-weight: bold; color: #555; }
+        .status-desc { font-size: 11px; color: #999; margin-top: 2px; }
+
+        /* IOS 风格开关 */
+        .switch {
+            position: relative; display: inline-block; width: 40px; height: 22px;
+        }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc; transition: .4s; border-radius: 22px;
+        }
+        .slider:before {
+            position: absolute; content: ""; height: 18px; width: 18px;
+            left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%;
+        }
+        input:checked + .slider { background-color: #ffb6b9; }
+        input:focus + .slider { box-shadow: 0 0 1px #ffb6b9; }
+        input:checked + .slider:before { transform: translateX(18px); }
+
+        /* 禁用状态 */
+        input:disabled + .slider { background-color: #e0e0e0; cursor: not-allowed; }
+        input:disabled + .slider:before { background-color: #f0f0f0; }
+
+        /* 情绪滑块 */
+        .range-container { display: flex; align-items: center; gap: 10px; width: 60%; }
+        input[type=range] { flex: 1; accent-color: #ffb6b9; }
+        .num-input { width: 50px; text-align: center; padding: 4px; border: 1px solid #ddd; border-radius: 6px; }
+
+        /* 时间输入 */
+        .time-input {
+            border: 1px solid #ddd; border-radius: 6px; padding: 2px 5px;
+            font-family: monospace; font-size: 12px; color: #666;
+        }
+
+        /* 情绪模式切换按钮 */
+        .mode-btn {
+            border: none; background: transparent; padding: 4px 12px;
+            border-radius: 13px; font-size: 11px; color: #888; cursor: pointer;
+            transition: all 0.2s;
+        }
+        .mode-btn.active {
+            background: #ffb6b9; color: white; font-weight: bold; box-shadow: 0 2px 5px rgba(255,182,185,0.4);
+        }
+
+        /* --- 时间选择器不换行容器 --- */
+        .time-group {
+            display: inline-flex; /* 让它像文字一样排列，但内部用flex */
+            align-items: center;
+            white-space: nowrap;  /* 禁止文字换行 */
+        }
+
+        /* 稍微调整时间输入框在手机上的宽度 */
+        .time-input {
+            border: 1px solid #ddd; border-radius: 6px; padding: 2px 2px;
+            font-family: monospace; font-size: 12px; color: #666;
+            max-width: 65px; /* 限制宽度，防止手机上太宽 */
+        }
     </style>
 </head>
 <body>
@@ -449,6 +513,81 @@
                 </div>
             </div>
 
+        </details>
+    </div>
+
+    <!-- 【修正版】生理节律模块 (自动保存) -->
+    <div class="module" id="module-status">
+        <details>
+            <summary>
+                状态与节律 (Bio-Rhythm)
+                <!-- 保存状态提示 -->
+                <span id="save-tip" style="font-size:10px; color:#4cd964; font-weight:normal; opacity:0; transition:opacity 0.5s; margin-left:10px;">
+          ✓ 已保存
+        </span>
+            </summary>
+
+            <div class="content-box" style="padding: 15px 20px;">
+
+                <!-- 1. 情绪指数 (支持模式切换) -->
+                <div class="status-row" style="flex-direction: column; align-items: flex-start;">
+                    <div style="width:100%; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                        <div>
+                            <div class="status-label">❤️ 情绪指数 (Active Drive)</div>
+                            <div class="status-desc">影响主动发消息的频率与概率</div>
+                        </div>
+                        <!-- 模式切换开关 -->
+                        <div style="display:flex; background:#f0f0f0; border-radius:15px; padding:2px;">
+                            <button class="mode-btn active" id="mode-normal" onclick="switchEmotionMode('normal')">0~1</button>
+                            <button class="mode-btn" id="mode-high" onclick="switchEmotionMode('high')">1~20</button>
+                        </div>
+                    </div>
+
+                    <div class="range-container" style="width:100%;">
+                        <!-- 这里的 min/max/step 会由 JS 动态控制 -->
+                        <input type="range" id="emotion-range" min="0" max="1" step="0.01" value="0.5"
+                               style="flex:1;"
+                               oninput="syncEmotion('range'); triggerAutoSave()">
+                        <input type="number" id="emotion-num" min="0" max="1" step="0.01" value="0.5" class="num-input"
+                               style="width:70px;"
+                               oninput="syncEmotion('num'); triggerAutoSave()">
+                    </div>
+                </div>
+
+                <!-- 2. 浅睡眠 (修改了描述) -->
+                <div class="status-row">
+                    <div>
+                        <div class="status-label">🌙 浅睡眠 (Light Sleep)</div>
+                        <!-- 【修改】描述改为符合逻辑的 -->
+                        <div class="status-desc">停止主动发起话题，仅被动回复</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="light-sleep-chk" checked onchange="checkSleepLogic(); saveStatusDirect()">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <!-- 3. 深睡眠 (修复了排版) -->
+                <div class="status-row" style="border-bottom: none;">
+                    <div>
+                        <div class="status-label">💤 深睡眠 (Deep Sleep)</div>
+                        <div class="status-desc" style="display: flex; align-items: center; flex-wrap: wrap; gap: 5px;">
+                            <span>自动入睡:</span>
+                            <!-- 【修改】加了一个不换行的容器 time-group -->
+                            <span class="time-group">
+                                <input type="time" id="ds-start" class="time-input" value="23:00" onchange="saveStatusDirect()">
+                                <span style="margin: 0 4px;">~</span>
+                                <input type="time" id="ds-end" class="time-input" value="07:00" onchange="saveStatusDirect()">
+                            </span>
+                        </div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="deep-sleep-chk" onchange="checkSleepLogic(); saveStatusDirect()">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+            </div>
         </details>
     </div>
 
@@ -547,6 +686,9 @@
 
     const charId = window.location.pathname.split('/').pop();
 
+    // 【新增】用于缓存浅睡眠的原始状态
+    let cachedLightSleep = true;
+
     // 全局数据缓存 (存储完整的原始数据，确保保存时不丢失未显示的数据)
     let GLOBAL_DATA = {};
 
@@ -604,6 +746,49 @@
                 document.getElementById('edit-avatar-preview').src = avatarUrl;
                 document.getElementById('edit-remark-input').value = remarkText;
                 document.getElementById('meta-pinned').checked = isPinned;
+
+                // --- 【新增】回显状态 ---
+                // 情绪
+                const emo = data.emotion !== undefined ? data.emotion : 1;
+                // 自动判断是哪个模式
+                if (emo > 1) {
+                    switchEmotionMode('high');
+                } else {
+                    switchEmotionMode('normal');
+                }
+                // 赋值
+                updateEmotionUI(emo);
+                document.getElementById('emotion-range').value = emo;
+                document.getElementById('emotion-num').value = emo;
+
+                // 睡眠时间
+                document.getElementById('ds-start').value = data.ds_start || '23:00';
+                document.getElementById('ds-end').value = data.ds_end || '07:00';
+
+                // 睡眠开关 (注意顺序，先设值，再跑逻辑检查)
+                document.getElementById('deep-sleep-chk').checked = data.deep_sleep || false;
+                // 浅睡眠：如果没存，默认 true
+                document.getElementById('light-sleep-chk').checked = (data.light_sleep !== undefined) ? data.light_sleep : true;
+
+                // 【关键修改】先记录原始的浅睡眠状态
+                // 注意：如果加载时深睡眠已经是开的，数据库里的 light_sleep 肯定也是 true。
+                // 这种情况下我们只能默认它就是 true，因为丢失了“关闭”的记忆。
+                // 但如果是用户当前操作，我们可以记住。
+                cachedLightSleep = (data.light_sleep !== undefined) ? data.light_sleep : true;
+
+                document.getElementById('light-sleep-chk').checked = cachedLightSleep;
+                document.getElementById('deep-sleep-chk').checked = data.deep_sleep || false;
+
+                // 触发一次 UI 锁定状态更新 (不改变 cachedLightSleep)
+                const deepChk = document.getElementById('deep-sleep-chk');
+                const lightChk = document.getElementById('light-sleep-chk');
+                if (deepChk.checked) {
+                    lightChk.checked = true;
+                    lightChk.disabled = true;
+                }
+
+                // 触发一次联动检查，确保 UI 状态正确
+                checkSleepLogic();
             }
         } catch(e) { console.error("加载失败", e); }
     }
@@ -1782,6 +1967,163 @@
             if(k) newData[k] = v;
         });
         return newData;
+    }
+
+    // --- 状态逻辑 (自动保存版) ---
+
+    // --- 情绪模式逻辑 ---
+
+    // 切换模式 (0-1 vs 1-20)
+    function switchEmotionMode(mode) {
+        const range = document.getElementById('emotion-range');
+        const num = document.getElementById('emotion-num');
+        const btnNormal = document.getElementById('mode-normal');
+        const btnHigh = document.getElementById('mode-high');
+
+        let val = parseFloat(num.value);
+
+        if (mode === 'normal') {
+            // 切到 0~1 模式
+            btnNormal.classList.add('active');
+            btnHigh.classList.remove('active');
+
+            range.max = 1;
+            range.step = 0.01;
+            num.max = 1;
+            num.step = 0.01;
+
+            // 如果当前值太大，重置为 0.5，否则保留
+            if (val > 1) {
+                val = 0.5;
+                updateEmotionUI(val);
+                triggerAutoSave(); // 这种突变最好自动保存一下
+            }
+        } else {
+            // 切到 1~20 模式
+            btnHigh.classList.add('active');
+            btnNormal.classList.remove('active');
+
+            range.min = 1; // 【关键修改】最小值改为 1
+            range.max = 20;
+            range.step = 0.1;
+            num.min = 1;   // 【关键修改】最小值改为 1
+            num.max = 20;
+            num.step = 0.1;
+
+            // 切换过来时，如果值太小(比如0.5)，自动提升到 1
+            if (val < 1) {
+                val = 1;
+                updateEmotionUI(val);
+                triggerAutoSave();
+            }
+        }
+    }
+
+    function updateEmotionUI(val) {
+        document.getElementById('emotion-range').value = val;
+        document.getElementById('emotion-num').value = val;
+    }
+
+    // 修改 syncEmotion 以适配不同的 step
+    function syncEmotion(source) {
+        const range = document.getElementById('emotion-range');
+        const num = document.getElementById('emotion-num');
+        if (source === 'range') num.value = range.value;
+        else range.value = num.value;
+    }
+
+    // 2. 睡眠逻辑联动
+    function checkSleepLogic() {
+        const lightChk = document.getElementById('light-sleep-chk');
+        const deepChk = document.getElementById('deep-sleep-chk');
+
+        if (deepChk.checked) {
+            // --- 开启深睡眠 ---
+            // 1. 锁死浅睡眠前，先记住它现在的状态
+            // (前提是它现在是可操作状态，防止重复记录)
+            if (!lightChk.disabled) {
+                cachedLightSleep = lightChk.checked;
+            }
+
+            lightChk.checked = true;
+            lightChk.disabled = true;
+        } else {
+            lightChk.disabled = false;
+            // 2. 【关键】恢复到开启深睡眠之前的状态
+            lightChk.checked = cachedLightSleep;
+        }
+    }
+
+    // --- 自动保存核心 ---
+
+    let saveTimer = null;
+
+    // A. 防抖保存 (用于滑块，防止频繁请求)
+    function triggerAutoSave() {
+        // 显示正在保存...
+        showSaveStatus('saving');
+
+        if (saveTimer) clearTimeout(saveTimer);
+        // 延迟 800ms 后执行保存
+        saveTimer = setTimeout(() => {
+            saveStatusDirect();
+        }, 800);
+    }
+
+    // B. 直接保存 (用于开关和时间选择)
+    async function saveStatusDirect() {
+        const emotion = document.getElementById('emotion-num').value;
+        const lightSleep = document.getElementById('light-sleep-chk').checked;
+        const deepSleep = document.getElementById('deep-sleep-chk').checked;
+        const dsStart = document.getElementById('ds-start').value;
+        const dsEnd = document.getElementById('ds-end').value;
+
+        try {
+            showSaveStatus('saving'); // 显示保存中状态
+
+            const res = await fetch(`/api/${charId}/update_meta`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    emotion: emotion,
+                    light_sleep: lightSleep,
+                    deep_sleep: deepSleep,
+                    ds_start: dsStart,
+                    ds_end: dsEnd
+                })
+            });
+
+            if(res.ok) {
+                showSaveStatus('success'); // 显示成功
+            } else {
+                showSaveStatus('error');
+            }
+        } catch(e) {
+            console.error(e);
+            showSaveStatus('error');
+        }
+    }
+
+    // C. 视觉反馈小工具
+    function showSaveStatus(status) {
+        const tip = document.getElementById('save-tip');
+        if (!tip) return;
+
+        if (status === 'saving') {
+            tip.textContent = '...';
+            tip.style.color = '#aaa';
+            tip.style.opacity = '1';
+        } else if (status === 'success') {
+            tip.textContent = '✓ 已保存';
+            tip.style.color = '#4cd964';
+            tip.style.opacity = '1';
+            // 2秒后淡出
+            setTimeout(() => { tip.style.opacity = '0'; }, 2000);
+        } else {
+            tip.textContent = '✗ 保存失败';
+            tip.style.color = 'red';
+            tip.style.opacity = '1';
+        }
     }
 </script>
 

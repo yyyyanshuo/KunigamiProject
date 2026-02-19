@@ -85,6 +85,12 @@
 
         #plusMenu div:hover { background-color: #fff5f6; color: #ffb6b9; }
         #plusMenu div:last-child { border-bottom: none; }
+
+        .unread-badge {
+            background-color: #ff3b30; color: white;
+            border-radius: 10px; padding: 2px 8px; font-size: 12px;
+            font-weight: bold; margin-left: 5px;
+        }
     </style>
 </head>
 
@@ -262,12 +268,18 @@
                 jumpUrl = `/chat/${c.id}`;
             }
 
+            // 在遍历渲染列表时...
+            let unreadHtml = '';
+            if (c.unread && c.unread > 0) {
+                unreadHtml = `<span class="unread-badge">${c.unread}</span>`;
+            }
+
             html += `
           <div class="contact-item ${pinnedClass}" onclick="window.location.href='${jumpUrl}'">
               <img src="${c.avatar}" class="avatar" onerror="this.src='/static/default_avatar.png'">
               <div class="info">
                   <div class="top-row">
-                      <span class="name">${c.remark}</span>
+                      <span class="name">${c.remark} ${unreadHtml}</span> <!-- 加在这里 -->
                       <span class="time">${c.last_time}</span>
                   </div>
                   <div class="msg-preview">${c.last_msg || '暂无消息'}</div>

@@ -466,7 +466,8 @@
   <!-- 左边组：退出 + 搜索 -->
   <div class="header-left-group">
     <!-- 退出按钮 -->
-    <button class="header-btn" onclick="window.location.href='/'">
+    <!-- 左边：退出按钮 -->
+    <button class="header-btn" onclick="goBack()">
       <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
     </button>
     <!-- 搜索按钮 (移到这里了) -->
@@ -652,7 +653,8 @@
     try {
       // 根据模式请求不同接口
       const url = isGroupMode ? `/api/group/${currentId}/config` : `/api/${currentId}/config`;
-      const res = await fetch(url);
+      // 加个时间戳防止缓存，确保读取到最新的睡眠状态
+      const res = await fetch(`${url}?t=${new Date().getTime()}`);
       const data = await res.json();
 
       // --- 每次初始化先清空/隐藏 @栏 ---
@@ -716,7 +718,28 @@
         currentConfig = data;
         const displayName = data.remark || data.name;
         document.querySelector('.header-name').textContent = displayName;
+        // 【新增】状态指示灯逻辑
+        const statusDot = document.querySelector('.status-dot');
+        const statusText = document.querySelector('.header-status span:last-child');
+        const headerStatus = document.querySelector('.header-status');
+
+        // 确保状态栏显示 (防止从群聊切回来被隐藏)
+        headerStatus.style.display = 'flex';
+
+        if (data.deep_sleep) {
+          // 💤 深睡眠模式：灰色 + 离线
+          statusDot.style.backgroundColor = '#ccc'; // 灰色
+          statusText.textContent = '离线 (睡眠中)';
+          statusText.style.color = '#ccc';
+        } else {
+          // 🟢 正常模式：绿色 + 在线
+          statusDot.style.backgroundColor = '#4cd964'; // 绿色
+          statusText.textContent = '手机在线';
+          statusText.style.color = '#999';
+        }
       }
+      // 进入页面时，标记为已读
+      fetch(`/api/${currentId}/mark_read`, { method: 'POST' });
     } catch (e) { console.error("UI加载失败", e); }
   }
 
@@ -1151,9 +1174,6 @@
               await sleep(1000);
               renderMessageGroup(aiMsg, 'append');
             }
-          } else {
-            // 错误处理回复
-            renderMessageGroup({ content: data.reply || '[无回复]', role: 'assistant', timestamp: new Date() }, 'append');
           }
         } catch (e) { console.error(e);
           // 【修正这里】不要用 displayBubbleGroup
@@ -1263,20 +1283,41 @@
       closeEditModal();
     };
 
-    async function deleteMessage(id, groupElement) {
-      if(!confirm("确定要删除这条消息吗？")) return;
-      try {
-        // 【修改】使用 getApiPrefix()
-        const res = await fetch(`${getApiPrefix()}/messages/${id}`, { method: 'DELETE' });
-        if(res.ok) {
-          // 删除成功，带动画移除 DOM
-          groupElement.style.transition = "all 0.3s";
-          groupElement.style.opacity = "0";
-          groupElement.style.transform = "translateX(20px)";
-          setTimeout(() => groupElement.remove(), 300);
-        }
-      } catch(e) { alert("删除失败"); }
-    }
+  async function deleteMessage(id, groupElement) {
+    if(!confirm("确定要删除这条消息吗？")) return;
+    try {
+      const res = await fetch(`${getApiPrefix()}/messages/${id}`, { method: 'DELETE' });
+      if(res.ok) {
+        // 动画效果
+        groupElement.style.transition = "all 0.3s ease-out";
+        groupElement.style.opacity = "0";
+        groupElement.style.transform = "translateX(20px)"; // 往右滑出
+
+        setTimeout(() => {
+          // 1. 先拿到它的“上一个邻居” (可能是日期分隔符)
+          const prevSibling = groupElement.previousElementSibling;
+
+          // 2. 物理移除当前消息
+          groupElement.remove();
+
+          // 3. 【新增】检查“孤儿时间戳”
+          // 如果上一个邻居是日期分隔符
+          if (prevSibling && prevSibling.classList.contains('date-separator')) {
+            const nextSibling = prevSibling.nextElementSibling;
+
+            // 判据：如果后面没有元素了，或者后面紧接着还是一个日期分隔符
+            // 说明夹在中间的消息都被删光了
+            if (!nextSibling || nextSibling.classList.contains('date-separator')) {
+              console.log("移除孤儿时间戳");
+              prevSibling.remove();
+            }
+          }
+        }, 300); // 等动画播完再删
+      } else {
+        alert("删除失败 (后端返回错误)");
+      }
+    } catch(e) { alert("删除失败 (网络错误)"); }
+  }
 
     // --- 【新增】多选生成 & 范围选择功能 ---
     let isSelectionMode = false;
@@ -1908,6 +1949,42 @@
     }
   }
 
+  // --- 【新增】解决“返回不刷新”的问题 ---
+  window.addEventListener('pageshow', async (event) => {
+    // event.persisted 为 true 表示页面是从缓存里恢复的（比如点了后退键）
+    // window.performance.navigation.type === 2 也表示后退操作
+    if (event.persisted || (window.performance && window.performance.navigation.type === 2)) {
+      console.log("检测到页面从缓存恢复，正在刷新 UI...");
+
+      // 1. 刷新头像、名字、在线状态 (这是最轻量的)
+      await initUI();
+
+      // 2. (可选) 如果您希望聊天记录也刷新（比如刚才删了消息），可以把下面这行注释打开
+      // chatContainer.innerHTML = '';
+      // await loadHistory('initial');
+    }
+  });
+
+  // --- 【新增】强制更新已读状态 ---
+  function markAsRead() {
+    // 使用 keepalive: true，确保页面跳转/关闭时请求依然能发出去
+    fetch(`/api/${currentId}/mark_read`, {
+      method: 'POST',
+      keepalive: true
+    }).catch(err => console.error("标记已读失败", err));
+  }
+
+  function goBack() {
+    markAsRead(); // 1. 先标记已读
+    window.location.href = '/'; // 2. 再跳转
+  }
+
+  // 当页面隐藏（切后台、关闭、跳转）时，自动触发
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      markAsRead();
+    }
+  });
 </script>
 
 </body>
