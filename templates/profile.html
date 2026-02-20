@@ -132,6 +132,12 @@
   </div>
 </div>
 
+<div class="config-card" style="text-align:center; padding:20px;">
+  <div style="font-weight:bold; margin-bottom:10px;">🔔 消息通知</div>
+  <button class="btn" style="background:#6200ea; color:white; width:100%;" onclick="enableNotifications()">点击开启通知权限</button>
+  <div style="font-size:11px; color:#999; margin-top:5px;">* iOS需添加到主屏幕才能使用</div>
+</div>
+
 <!-- 模块 1: 用户设定 -->
 <div class="section-container" id="container-user">
   <div class="section-header">
@@ -774,6 +780,67 @@
 
   // 顺便加一个退出登录按钮在页面最底部
   // 在 <body> 结束前，或者 tabbar 上面加一个
+
+  // --- 通知注册逻辑 ---
+
+  // --- 【修正版】VAPID Key 转换工具 ---
+  function urlBase64ToUint8Array(base64String) {
+    if (!base64String) return new Uint8Array(0);
+
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+            .replace(/\-/g, '+')
+            .replace(/_/g, '/');
+
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  }
+
+  async function enableNotifications() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      alert('您的设备不支持 Web 推送');
+      return;
+    }
+
+    // 1. 获取公钥
+    try {
+      const resKey = await fetch('/api/vapid_public_key');
+      const dataKey = await resKey.json();
+      const publicVapidKey = dataKey.publicKey;
+
+      // 2. 请求权限
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        alert('您拒绝了通知权限');
+        return;
+      }
+
+      // 3. 注册订阅
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
+      });
+
+      // 4. 发送给后端保存
+      await fetch('/api/subscribe', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(subscription)
+      });
+
+      alert('通知开启成功！您可以锁屏等待消息了。');
+
+    } catch (e) {
+      console.error(e);
+      alert('开启失败: ' + e.message);
+    }
+  }
 </script>
 
 </body>

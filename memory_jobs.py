@@ -7,16 +7,37 @@ import time
 # 这里的引用非常关键
 # 我们从 app 导入 AI 总结功能 和 增量更新功能
 # --- 【修改】导入 update_group_short_memory ---
-from app import call_ai_to_summarize, update_short_memory_for_date, update_group_short_memory, trigger_active_chat, get_char_db_path
+#from app import call_ai_to_summarize, update_short_memory_for_date, update_group_short_memory, trigger_active_chat, get_char_db_path
 
 import random
 import sqlite3
+
+import tempfile # <--- 记得在最上面加这个 import
 
 # 定义基础路径
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, "configs", "characters.json")
 # --- 【新增】群聊配置路径 ---
 GROUPS_CONFIG_FILE = os.path.join(BASE_DIR, "configs", "groups.json")
+
+# --- 【新增】安全保存 JSON (防止文件损坏) ---
+def safe_save_json(filepath, data):
+    """
+    原子化写入：先写临时文件，再重命名。
+    防止多线程写入导致文件损坏 (Extra data 错误)。
+    """
+    dir_name = os.path.dirname(filepath)
+    # 创建临时文件
+    fd, temp_path = tempfile.mkstemp(dir=dir_name, text=True)
+
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        # 瞬间替换 (Atomic Operation)
+        os.replace(temp_path, filepath)
+    except Exception as e:
+        print(f"❌ Save JSON Error: {e}")
+        os.remove(temp_path) # 出错则删掉临时文件
 
 # --- 辅助函数：获取指定角色的 Prompt 路径 ---
 def get_char_prompts_dir(char_id):
@@ -38,6 +59,8 @@ def get_all_char_ids():
 
 def _process_single_char_daily(char_id, target_date_str):
     """处理单个角色的日结"""
+    # 【修复】在这里局部导入，避开启动时的循环依赖
+    from app import call_ai_to_summarize, update_short_memory_for_date
     print(f"   > 正在处理角色: [{char_id}]")
 
     prompts_dir = get_char_prompts_dir(char_id)
@@ -94,6 +117,9 @@ def run_all_group_daily_rollovers(target_date_str=None):
     """
     遍历所有群聊，执行总结并分发给成员
     """
+    # 【修复】局部导入群聊记忆更新函数
+    from app import update_group_short_memory
+
     if not target_date_str:
         target_date_str = (datetime.datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
 
@@ -149,6 +175,9 @@ def run_all_daily_rollovers(target_date_str=None):
 
 def _process_single_char_weekly(char_id):
     """处理单个角色的周结"""
+    # 【修复】局部导入 AI 总结函数
+    from app import call_ai_to_summarize
+
     print(f"   > 正在处理角色: [{char_id}] (周结)")
 
     prompts_dir = get_char_prompts_dir(char_id)
@@ -242,7 +271,7 @@ def check_and_update_sleep_status():
                 if not current_status: # 只有当前没睡时才操作，防止重复写入
                     info["deep_sleep"] = True
                     # 联动：深睡眠开 -> 浅睡眠必开
-                    info["light_sleep"] = True
+                    # info["light_sleep"] = True  <--- 【删除这行！】不要改数据库里的浅睡眠
                     print(f"💤 [自动睡眠] {char_id} 到点睡觉了 ({now_time})")
                     updated = True
 
@@ -255,8 +284,8 @@ def check_and_update_sleep_status():
 
         # 3. 如果有变化，保存文件
         if updated:
-            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump(all_config, f, ensure_ascii=False, indent=2)
+            # 使用安全保存
+            safe_save_json(CONFIG_FILE, all_config)
 
     except Exception as e:
         print(f"❌ 睡眠检查出错: {e}")
@@ -266,6 +295,9 @@ def run_active_messaging_check():
     心跳任务：每10分钟运行一次。
     计算概率，决定是否发起主动消息。
     """
+    # 【修复】局部导入触发主动消息的函数
+    from app import trigger_active_chat
+
     print("\n💓 [Heartbeat] 开始检测主动消息机会...")
 
     if not os.path.exists(CONFIG_FILE): return

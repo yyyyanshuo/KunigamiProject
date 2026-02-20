@@ -383,11 +383,28 @@
         .status-label { font-size: 13px; font-weight: bold; color: #555; }
         .status-desc { font-size: 11px; color: #999; margin-top: 2px; }
 
-        /* IOS 风格开关 */
+        /* --- 修正开关点击区域 --- */
         .switch {
-            position: relative; display: inline-block; width: 40px; height: 22px;
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 22px;
+            flex-shrink: 0;
+            vertical-align: middle; /* 防止和文字不对齐 */
         }
-        .switch input { opacity: 0; width: 0; height: 0; }
+
+        .switch input {
+            opacity: 0;
+            /* 【关键】强制撑满父容器，确保哪里都能点到 */
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            margin: 0;
+            z-index: 10; /* 【关键】保证在最上层 */
+            cursor: pointer;
+        }
         .slider {
             position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
             background-color: #ccc; transition: .4s; border-radius: 22px;
@@ -401,8 +418,8 @@
         input:checked + .slider:before { transform: translateX(18px); }
 
         /* 禁用状态 */
-        input:disabled + .slider { background-color: #e0e0e0; cursor: not-allowed; }
-        input:disabled + .slider:before { background-color: #f0f0f0; }
+        input:disabled + .slider { background-color: #e0e0e0; cursor: not-allowed !important; opacity: 0.6;}
+        input:disabled + .slider:before { transform: translateX(18px) !important; background-color: #f0f0f0; }
 
         /* 情绪滑块 */
         .range-container { display: flex; align-items: center; gap: 10px; width: 60%; }
@@ -437,6 +454,25 @@
             border: 1px solid #ddd; border-radius: 6px; padding: 2px 2px;
             font-family: monospace; font-size: 12px; color: #666;
             max-width: 65px; /* 限制宽度，防止手机上太宽 */
+        }
+
+        /* --- 【修正】睡眠开关的状态样式 (放在最底部) --- */
+
+        /* 1. 正常开启状态 (粉色) */
+        .switch input:checked + .slider {
+            background-color: #ffb6b9;
+        }
+
+        /* 2. 【关键】禁用状态 (强制变灰，不管是否开启) */
+        .switch input:disabled + .slider {
+            background-color: #e0e0e0 !important; /* 强制灰色 */
+            cursor: not-allowed !important;        /* 禁止手型 */
+            opacity: 0.6;
+        }
+
+        /* 3. 禁用且开启时的圆点位置 (保持在右边) */
+        .switch input:checked:disabled + .slider:before {
+            transform: translateX(18px);
         }
     </style>
 </head>
@@ -562,7 +598,8 @@
                         <div class="status-desc">停止主动发起话题，仅被动回复</div>
                     </div>
                     <label class="switch">
-                        <input type="checkbox" id="light-sleep-chk" checked onchange="checkSleepLogic(); saveStatusDirect()">
+                        <!-- 【修改】只绑定 onLightSleepChange -->
+                        <input type="checkbox" id="light-sleep-chk" onchange="onLightSleepChange()">
                         <span class="slider"></span>
                     </label>
                 </div>
@@ -582,7 +619,8 @@
                         </div>
                     </div>
                     <label class="switch">
-                        <input type="checkbox" id="deep-sleep-chk" onchange="checkSleepLogic(); saveStatusDirect()">
+                        <!-- 【修改】只绑定 onDeepSleepChange -->
+                        <input type="checkbox" id="deep-sleep-chk" onchange="onDeepSleepChange()">
                         <span class="slider"></span>
                     </label>
                 </div>
@@ -770,25 +808,26 @@
                 // 浅睡眠：如果没存，默认 true
                 document.getElementById('light-sleep-chk').checked = (data.light_sleep !== undefined) ? data.light_sleep : true;
 
-                // 【关键修改】先记录原始的浅睡眠状态
-                // 注意：如果加载时深睡眠已经是开的，数据库里的 light_sleep 肯定也是 true。
-                // 这种情况下我们只能默认它就是 true，因为丢失了“关闭”的记忆。
-                // 但如果是用户当前操作，我们可以记住。
+                // === 【核心修改：睡眠状态回显】 ===
+                // 1. 读取数据库里真实的浅睡眠设定 (如果是 undefined 默认为 true)
                 cachedLightSleep = (data.light_sleep !== undefined) ? data.light_sleep : true;
 
-                document.getElementById('light-sleep-chk').checked = cachedLightSleep;
-                document.getElementById('deep-sleep-chk').checked = data.deep_sleep || false;
-
-                // 触发一次 UI 锁定状态更新 (不改变 cachedLightSleep)
-                const deepChk = document.getElementById('deep-sleep-chk');
+                const deepSleepOn = data.deep_sleep || false;
                 const lightChk = document.getElementById('light-sleep-chk');
-                if (deepChk.checked) {
+                const deepChk = document.getElementById('deep-sleep-chk');
+
+                deepChk.checked = deepSleepOn;
+
+                if (deepSleepOn) {
+                    // 如果深睡眠开着：视觉上强制把浅睡眠打钩并禁用，但在变量里记住它原本的样子
                     lightChk.checked = true;
                     lightChk.disabled = true;
+                } else {
+                    // 如果深睡眠关着：恢复真实的浅睡眠状态
+                    lightChk.checked = cachedLightSleep;
+                    lightChk.disabled = false;
                 }
-
-                // 触发一次联动检查，确保 UI 状态正确
-                checkSleepLogic();
+                // ===================================
             }
         } catch(e) { console.error("加载失败", e); }
     }
@@ -1971,6 +2010,39 @@
 
     // --- 状态逻辑 (自动保存版) ---
 
+    // 1. 点击“浅睡眠”时触发
+    function onLightSleepChange() {
+        // 只有在非禁用状态下才保存
+        const lightChk = document.getElementById('light-sleep-chk');
+        if (!lightChk.disabled) {
+            // 用户手动改了，更新缓存
+            cachedLightSleep = lightChk.checked;
+            saveStatusDirect();
+        }
+    }
+
+    // 2. 点击“深睡眠”时触发 (联动逻辑)
+    function onDeepSleepChange() {
+        const lightChk = document.getElementById('light-sleep-chk');
+        const deepChk = document.getElementById('deep-sleep-chk');
+
+        if (deepChk.checked) {
+            // 开启深睡眠 -> 强制开启浅睡眠并锁定
+            // 先缓存当前手动状态(如果还没被禁用)
+            if (!lightChk.disabled) cachedLightSleep = lightChk.checked;
+
+            lightChk.checked = true;
+            lightChk.disabled = true;
+        } else {
+            // 关闭深睡眠 -> 解锁浅睡眠，并恢复之前的状态
+            lightChk.disabled = false;
+            lightChk.checked = cachedLightSleep;
+        }
+
+        // 逻辑处理完后，再保存
+        saveStatusDirect();
+    }
+
     // --- 情绪模式逻辑 ---
 
     // 切换模式 (0-1 vs 1-20)
@@ -1980,24 +2052,29 @@
         const btnNormal = document.getElementById('mode-normal');
         const btnHigh = document.getElementById('mode-high');
 
-        let val = parseFloat(num.value);
+        let currentVal = parseFloat(num.value);
 
         if (mode === 'normal') {
             // 切到 0~1 模式
             btnNormal.classList.add('active');
             btnHigh.classList.remove('active');
 
+            // 【关键修复】先判断值是否越界，如果越界先强制重置 Value
+            // 否则 range.max = 1 生效瞬间，value 还是 20，浏览器会由错
+            if (currentVal > 1) {
+                currentVal = 1;
+                range.value = 1;
+                num.value = 1;
+            }
+
+            // 然后再设置属性
+            range.min = 0;
             range.max = 1;
             range.step = 0.01;
+            num.min = 0;
             num.max = 1;
             num.step = 0.01;
 
-            // 如果当前值太大，重置为 0.5，否则保留
-            if (val > 1) {
-                val = 0.5;
-                updateEmotionUI(val);
-                triggerAutoSave(); // 这种突变最好自动保存一下
-            }
         } else {
             // 切到 1~20 模式
             btnHigh.classList.add('active');
@@ -2010,13 +2087,15 @@
             num.max = 20;
             num.step = 0.1;
 
-            // 切换过来时，如果值太小(比如0.5)，自动提升到 1
-            if (val < 1) {
-                val = 1;
-                updateEmotionUI(val);
-                triggerAutoSave();
+            // 【关键修复】如果值太小(比如0.5)，自动提升到 1
+            if (currentVal < 1) {
+                currentVal = 1;
+                range.value = 1;
+                num.value = 1;
             }
         }
+        // 触发一次保存，确保后端同步新的数值范围
+        triggerAutoSave();
     }
 
     function updateEmotionUI(val) {
@@ -2078,6 +2157,12 @@
         const dsStart = document.getElementById('ds-start').value;
         const dsEnd = document.getElementById('ds-end').value;
 
+        // === 【核心修改】决定存什么值 ===
+        // 如果深睡眠开着，我们不存页面上那个强制勾选的 true，而是存用户之前的设定 cachedLightSleep
+        // 如果深睡眠关着，就存页面上当前的 checked 状态
+        const lightSleepCurrent = document.getElementById('light-sleep-chk').checked;
+        const lightSleepToSave = deepSleep ? cachedLightSleep : lightSleepCurrent;
+
         try {
             showSaveStatus('saving'); // 显示保存中状态
 
@@ -2086,7 +2171,7 @@
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     emotion: emotion,
-                    light_sleep: lightSleep,
+                    light_sleep: lightSleepToSave, // <--- 传这个修正后的值
                     deep_sleep: deepSleep,
                     ds_start: dsStart,
                     ds_end: dsEnd

@@ -32,3 +32,7 @@ static/avatar_user.png
 debug_network.py
 test_final_connect.py
 test_google_pay.py
+auto_push.bat
+gen_keys.py
+private_key.pem
+public_key.pem

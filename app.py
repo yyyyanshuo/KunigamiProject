@@ -11,6 +11,13 @@ from apscheduler.schedulers.background import BackgroundScheduler # 新增
 import memory_jobs # 导入刚才那个模块
 import shutil # 如果以后需要创建新角色用
 import random
+from pywebpush import webpush, WebPushException # 记得导入
+import smtplib
+from email.mime.text import MIMEText
+from email.header import Header
+import threading # 用于异步发送，防止卡顿
+from email.utils import formataddr # <--- 新增这个导入
+import tempfile # <--- 记得在最上面加这个 import
 
 # 这是在 app.py 文件的开头部分
 
@@ -44,6 +51,32 @@ USER_SETTINGS_FILE = os.path.join(BASE_DIR, "configs", "user_settings.json")
 
 # --- 【新增】已读状态管理 ---
 READ_STATUS_FILE = os.path.join(BASE_DIR, "configs", "read_status.json")
+
+# --- 【新增】推送订阅管理 ---
+SUBSCRIPTIONS_FILE = os.path.join(BASE_DIR, "configs", "subscriptions.json")
+VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY")
+VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY")
+# 这里的邮箱随便填一个您的，用于标识发送者
+VAPID_CLAIMS = {"sub": "mailto:yyyyanshuo@foxmail.com"}
+
+# --- 【新增】安全保存 JSON (防止文件损坏) ---
+def safe_save_json(filepath, data):
+    """
+    原子化写入：先写临时文件，再重命名。
+    防止多线程写入导致文件损坏 (Extra data 错误)。
+    """
+    dir_name = os.path.dirname(filepath)
+    # 创建临时文件
+    fd, temp_path = tempfile.mkstemp(dir=dir_name, text=True)
+
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        # 瞬间替换 (Atomic Operation)
+        os.replace(temp_path, filepath)
+    except Exception as e:
+        print(f"❌ Save JSON Error: {e}")
+        os.remove(temp_path) # 出错则删掉临时文件
 
 def get_current_username():
     """获取当前设置的用户名"""
@@ -1407,25 +1440,6 @@ def group_chat(group_id):
     # 5. 预加载历史记录 (Context Buffer)
     context_buffer = []
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    # 读取最近 15 条 (包含刚才用户的发言)
-    cursor.execute("SELECT role, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT 16")
-    rows = [dict(row) for row in cursor.fetchall()][::-1]
-    conn.close()
-
-    for row in rows:
-        role_id = row['role']
-        # 这里用到了 id_to_name，前面已经定义好了，不会报错
-        display_name = "User" if role_id == "user" else id_to_name.get(role_id, role_id)
-
-        context_buffer.append({
-            "role_id": role_id,
-            "display_name": display_name,
-            "content": row['content']
-        })
-
     # 6. 串行循环生成
     # 【注意】这里遍历的是确定的 responder_ids 列表
     for i, speaker_id in enumerate(responder_ids):
@@ -1488,15 +1502,6 @@ def group_chat(group_id):
             content_with_tag = f"{ts_str} [{d_name}]: {row['content']}"
 
             messages.append({"role": msg_role, "content": content_with_tag})
-
-        # --- C. 注入本轮已生成的 Context Buffer (也要带时间) ---
-        # 这些是刚刚生成还没存库的，或者刚存库但逻辑上属于连贯对话
-        # 其实上面的 SQL 查询已经包含了 user_msg，所以 buffer 里只存 AI 刚刚生成的
-        for buf_msg in context_buffer:
-            # 简单起见，Buffer 里的默认为当前时间
-            cur_ts = now.strftime('[%H:%M]')
-            buf_content = f"{cur_ts} [{buf_msg['display_name']}]: {buf_msg['content']}"
-            messages.append({"role": "user", "content": buf_content})
 
         # 1. 获取当前配置
         route, current_model = get_model_config("chat") # 任务类型是 chat
@@ -2715,8 +2720,8 @@ def update_char_meta(char_id):
             all_config[char_id]["ds_end"] = data["ds_end"]
 
         # 3. 写回文件
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(all_config, f, ensure_ascii=False, indent=2)
+        # 【修改】使用安全保存
+        safe_save_json(CONFIG_FILE, all_config)
 
         return jsonify({"status": "success"})
 
@@ -2984,8 +2989,8 @@ def add_character():
             "ds_end": "07:00"
         }
 
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(all_config, f, ensure_ascii=False, indent=2)
+        # 【修改】使用安全保存
+        safe_save_json(CONFIG_FILE, all_config)
 
         return jsonify({"status": "success"})
 
@@ -3048,7 +3053,7 @@ def add_group():
             "avatar": "/static/default_group.png", # 记得在static放个图
             "pinned": False,
             "members": members,
-            "active_mode": True  # 【修改】新建群默认开启主动消息
+            "active_mode": False  # 【修改】新建群默认开启主动消息
         }
 
         with open(GROUPS_CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -3377,6 +3382,109 @@ def regenerate_short_memory_api(char_id):
         print(f"Regen Short Error: {e}")
         return jsonify({"error": str(e)}), 500
 
+# 1. 保存订阅接口
+@app.route("/api/subscribe", methods=["POST"])
+def subscribe():
+    subscription = request.json
+    if not subscription: return jsonify({"error": "No data"}), 400
+
+    subs = []
+    if os.path.exists(SUBSCRIPTIONS_FILE):
+        with open(SUBSCRIPTIONS_FILE, "r", encoding="utf-8") as f:
+            try: subs = json.load(f)
+            except: pass
+
+    # 避免重复添加
+    if subscription not in subs:
+        subs.append(subscription)
+        with open(SUBSCRIPTIONS_FILE, "w", encoding="utf-8") as f:
+            json.dump(subs, f)
+
+    return jsonify({"status": "success"})
+
+# 2. 获取公钥接口 (前端需要用)
+@app.route("/api/vapid_public_key")
+def get_vapid_key():
+    return jsonify({"publicKey": VAPID_PUBLIC_KEY})
+
+# 3. 发送通知工具函数 (供 trigger_active_chat 调用)
+def send_push_notification(title, body, url="/"):
+    if not os.path.exists(SUBSCRIPTIONS_FILE): return
+
+    with open(SUBSCRIPTIONS_FILE, "r", encoding="utf-8") as f:
+        subs = json.load(f)
+
+    print(f"🔔 [Push] 正在向 {len(subs)} 个设备发送通知...")
+
+    cleanup_needed = False
+    valid_subs = []
+
+    for sub_info in subs:
+        try:
+            webpush(
+                subscription_info=sub_info,
+                data=json.dumps({"title": title, "body": body, "url": url}),
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims=VAPID_CLAIMS
+            )
+            valid_subs.append(sub_info)
+        except WebPushException as ex:
+            # 如果返回 410 Gone，说明用户取消了订阅，需要清理
+            if ex.response and ex.response.status_code == 410:
+                print("   - 设备已取消订阅，移除")
+                cleanup_needed = True
+            else:
+                print(f"   - 推送失败: {ex}")
+                valid_subs.append(sub_info) # 暂时保留，可能是网络问题
+
+    # 清理失效的订阅
+    if cleanup_needed:
+        with open(SUBSCRIPTIONS_FILE, "w", encoding="utf-8") as f:
+            json.dump(valid_subs, f)
+
+# --- 【修正版】邮件发送功能 (符合 RFC 标准) ---
+def _send_email_thread(subject, content):
+    """实际发送邮件的线程函数"""
+    sender = os.getenv("MAIL_SENDER")
+    password = os.getenv("MAIL_PASSWORD")
+    receiver = os.getenv("MAIL_RECEIVER")
+    smtp_server = os.getenv("MAIL_SERVER", "smtp.qq.com")
+    # 注意：QQ邮箱 SSL 端口通常是 465
+    smtp_port = int(os.getenv("MAIL_PORT", 465))
+
+    if not sender or not password or not receiver:
+        print("❌ [Email] 邮件配置缺失，无法发送")
+        return
+
+    try:
+        # 构造邮件对象
+        message = MIMEText(content, 'plain', 'utf-8')
+
+        # 【关键修改】使用 formataddr 生成标准发件人格式
+        # 格式会自动处理为: "Kunigami AI" <xxxx@qq.com>
+        message['From'] = formataddr(["Kunigami AI", sender])
+
+        # 收件人同理 (也可以直接传字符串，但这样更稳)
+        message['To'] = formataddr(["User", receiver])
+
+        message['Subject'] = Header(subject, 'utf-8')
+
+        # 连接服务器 (使用 SSL)
+        server = smtplib.SMTP_SSL(smtp_server, smtp_port)
+        server.login(sender, password)
+        server.sendmail(sender, [receiver], message.as_string())
+        server.quit()
+
+        print(f"📧 [Email] 邮件发送成功: {subject}")
+    except Exception as e:
+        print(f"❌ [Email] 发送失败: {e}")
+
+def send_email_notification(title, body):
+    """外部调用的异步接口"""
+    # 启动一个新线程去发邮件，这样不会阻塞主程序
+    thread = threading.Thread(target=_send_email_thread, args=(title, body))
+    thread.start()
+
 # --- 定时任务配置 ---
 def scheduled_maintenance():
     """
@@ -3607,6 +3715,28 @@ def trigger_active_chat(char_id):
         conn.close()
 
         print(f"💓 [Active] 发送成功: {cleaned_reply}")
+
+        # --- 【新增】发送手机通知 ---
+        # 这里的 title 可以是角色名
+        # body 是回复内容（截取前50字）
+        char_name_display = char_id # 或者去读配置获取 name
+        try:
+            # 获取名字逻辑略... 假设您已有 id_to_name
+            pass
+        except: pass
+
+        send_push_notification(
+            title=f"{char_id} 发来一条消息",
+            body=cleaned_reply[:50],
+            url=f"/chat/{char_id}" # 点击跳转到单聊
+        )
+
+        # ✅ 【修改】换成邮件通知
+        email_title = f"【Kunigami】{char_id} 发来了一条消息"
+        email_body = f"请前去查收"
+        send_email_notification(email_title, email_body)
+        # --------------------------
+
         return True
 
     except Exception as e:
@@ -3644,87 +3774,164 @@ def trigger_group_active_chat(group_id):
 
     if not online_members: return False
 
-    # 3. 随机抽取 1 人
-    speaker_id = random.choice(online_members)
-    speaker_name = id_to_name.get(speaker_id, speaker_id)
-    print(f"   -> 选中 [{speaker_name}] 发起话题")
-
-    # 4. 构建 Prompt (System只放人设)
-    sys_prompt = build_system_prompt(speaker_id)
-    other_members = [m for m in all_members if m != speaker_id and m != "user"]
-    rel_prompt = build_group_relationship_prompt(speaker_id, other_members)
-
-    full_sys_prompt = sys_prompt + "\n\n" + rel_prompt + "\n【Current Situation】\n当前是在群聊中。"
-    messages = [{"role": "system", "content": full_sys_prompt}]
-
-    # 5. 读取历史 (保持不变)
-    conn = sqlite3.connect(db_path)
-    # 【关键修复】↓↓↓ 加上这一行！没有它，数据库读出来的就是乱码 ↓↓↓
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT role, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT 10")
-    rows = [dict(row) for row in cursor.fetchall()][::-1]
-    conn.close()
-
-    for row in rows:
-        r_id = row['role']
-        d_name = "User" if r_id == "user" else id_to_name.get(r_id, r_id)
-        messages.append({"role": "user", "content": f"[{d_name}]: {row['content']}"})
-
-    # --- 6. 【关键修改】构造伪造的指令消息 ---
-    time_str = datetime.now().strftime('%H:%M')
-    lang = get_ai_language()
-
-    if lang == "zh":
-        trigger_msg = (
-            f"[System]: (现在是 {time_str}。群里很久没人说话了。)\n"
-            f"(请你主动发起一个话题，或者对之前的话题进行延伸。)\n"
-            f"(要求：自然、简短。)"
-        )
+    # --- 3. 决定对话轮数 (随机 2~4 句，营造热闹感) ---
+    # 如果只有1个人在线，就只能发1句
+    max_rounds = len(online_members)
+    if len(online_members) == 1:
+        num_rounds = 1
     else:
-        trigger_msg = (
-            f"[System]: (現在は {time_str} です。グループチャットが静かです。)\n"
-            f"(自発的に新しい話題を振ってください。)\n"
-            f"(要件：自然で簡潔に。)"
-        )
+        num_rounds = random.randint(2, max_rounds)
 
-    # 这里的 role 是 user，模拟群里发了一条系统通知
-    messages.append({"role": "user", "content": trigger_msg})
+    print(f"   -> 计划生成 {num_rounds} 条消息连击")
 
-    # 7. 调用 AI (保持不变)
-    try:
-        route, current_model = get_model_config("chat")
+    # 内存中的临时上下文缓存 (用于让后面的人看到前面的人说了啥)
+    context_buffer = []
 
-        if route == "relay":
-            reply_text = call_openrouter(messages, char_id=speaker_id, model_name=current_model)
+    # 记录是否发送了通知 (只发第一条的通知，防止手机炸了)
+    notification_sent = False
+
+    # --- 4. 开始循环生成 ---
+    for i in range(num_rounds):
+        # 随机选人 (尽量不选上一个人，除非只有一个人)
+        candidates = [m for m in online_members]
+        if i > 0 and len(candidates) > 1:
+            last_speaker = context_buffer[-1]['role_id']
+            if last_speaker in candidates:
+                candidates.remove(last_speaker)
+
+        speaker_id = random.choice(candidates)
+        speaker_name = id_to_name.get(speaker_id, speaker_id)
+
+        print(f"   -> Round {i+1}: [{speaker_name}] 准备发言")
+
+        # --- A. 构建 Prompt ---
+        sys_prompt = build_system_prompt(speaker_id)
+        other_members = [m for m in all_members if m != speaker_id and m != "user"]
+        rel_prompt = build_group_relationship_prompt(speaker_id, other_members)
+
+        now = datetime.now()
+        time_str = now.strftime('%H:%M')
+        lang = get_ai_language()
+
+        # 【关键】区分“发起者”和“跟风者”的指令
+        if i == 0:
+            # 第一条：发起话题
+            if lang == "zh":
+                instruction = (
+                    f"\n\n【System Event / 系统事件】\n"
+                    f"现在是 {time_str}。群里很久没人说话了。\n"
+                    f"请根据当前时间、群聊氛围及人际关系，**主动发起**一个新话题。\n"
+                    f"要求：自然、简短。"
+                )
+            else:
+                instruction = (
+                    f"\n\n【System Event】\n"
+                    f"現在は {time_str} です。チャットが静かです。\n"
+                    f"**自発的に**新しい話題を振ってください。自然で簡潔に。"
+                )
         else:
-            reply_text = call_gemini(messages, char_id=speaker_id, model_name=current_model)
+            # 后续：自然接话
+            if lang == "zh":
+                instruction = (
+                    f"\n\n【System Event / 系统事件】\n"
+                    f"现在是 {time_str}。这是群聊的后续对话。\n"
+                    f"请根据上文其他成员的发言，自然地接话、吐槽或附和。\n"
+                    f"要求：简短，符合人设。"
+                )
+            else:
+                instruction = (
+                    f"\n\n【System Event】\n"
+                    f"現在は {time_str} です。\n"
+                    f"他のメンバーの発言を受けて、自然に会話を続けてください。"
+                )
 
-        timestamp_pattern = r'\[(?:(?:\d{2}-\d{2}\s+)?\d{1,2}:\d{2})\]\s*'
-        cleaned_reply = re.sub(timestamp_pattern, '', reply_text).strip()
-        name_pattern = f"^\\[{speaker_name}\\][:：]\\s*"
-        cleaned_reply = re.sub(name_pattern, '', cleaned_reply).strip()
+        full_sys_prompt = sys_prompt + "\n\n" + rel_prompt + instruction
+        messages = [{"role": "system", "content": full_sys_prompt}]
 
-        if not cleaned_reply: return False
-
-        # 8. 存档
-        ai_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        # --- B. 读取历史 (带智能时间戳) ---
         conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
-                       (speaker_id, cleaned_reply, ai_ts))
-        conn.commit()
+        cursor.execute("SELECT role, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT 15")
+        history_rows = [dict(row) for row in cursor.fetchall()][::-1]
         conn.close()
 
-        log_event = f"[群聊: {group_name}] (主动) {cleaned_reply}"
-        update_group_log(speaker_id, log_event, ai_ts)
+        # 智能时间戳逻辑
+        show_full_date = False
+        if history_rows:
+            try:
+                first_ts = datetime.strptime(history_rows[0]['timestamp'], '%Y-%m-%d %H:%M:%S')
+                if first_ts.date() != now.date(): show_full_date = True
+            except: pass
 
-        print(f"💓 [GroupActive] 发送成功: {cleaned_reply}")
-        return True
+        for row in history_rows:
+            try:
+                dt_obj = datetime.strptime(row['timestamp'], '%Y-%m-%d %H:%M:%S')
+                ts_str = dt_obj.strftime('[%m-%d %H:%M]') if show_full_date else dt_obj.strftime('[%H:%M]')
+            except: ts_str = ""
 
-    except Exception as e:
-        print(f"Group Active Error: {e}")
-        return False
+            r_id = row['role']
+            d_name = "User" if r_id == "user" else id_to_name.get(r_id, r_id)
+            messages.append({"role": "user", "content": f"{ts_str} [{d_name}]: {row['content']}"})
+
+        # --- D. 调用 AI ---
+        try:
+            route, current_model = get_model_config("chat")
+
+            if route == "relay":
+                reply_text = call_openrouter(messages, char_id=speaker_id, model_name=current_model)
+            else:
+                reply_text = call_gemini(messages, char_id=speaker_id, model_name=current_model)
+
+            timestamp_pattern = r'\[(?:(?:\d{2}-\d{2}\s+)?\d{1,2}:\d{2})\]\s*'
+            cleaned_reply = re.sub(timestamp_pattern, '', reply_text).strip()
+            name_pattern = f"^\\[{speaker_name}\\][:：]\\s*"
+            cleaned_reply = re.sub(name_pattern, '', cleaned_reply).strip()
+
+            if not cleaned_reply: continue
+
+            # --- E. 存档 ---
+            ai_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
+                           (speaker_id, cleaned_reply, ai_ts))
+            conn.commit()
+            conn.close()
+
+            # 更新 Buffer (供下一轮看)
+            context_buffer.append({
+                "role_id": speaker_id,
+                "display_name": speaker_name,
+                "content": cleaned_reply
+            })
+
+            print(f"   -> 生成成功: {cleaned_reply}")
+
+            # --- F. 发送通知 (仅第一条) ---
+            if not notification_sent:
+                send_push_notification(
+                    title=f"群聊 {group_name} 有新消息",
+                    body=f"{speaker_name}: {cleaned_reply}",
+                    url=f"/chat/group/{group_id}"
+                )
+
+                # ✅ 【修改】换成邮件通知
+                email_title = f"【群聊】{group_name} 有新动态"
+                email_body = f"请前去查收"
+                send_email_notification(email_title, email_body)
+
+                notification_sent = True
+
+            # 稍微停顿一下，防止并发请求过快
+            time.sleep(2)
+
+        except Exception as e:
+            print(f"Active Chat Error: {e}")
+            # 如果出错就不继续后面几轮了，直接结束
+            break
+
+    return True
 
 # ---------------------- 启动 ----------------------
 

@@ -5,3 +5,4 @@ requests
 Flask
 APScheduler
 urllib3
+pywebpush

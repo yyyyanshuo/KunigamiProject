@@ -208,9 +208,8 @@
         document.getElementById('group-name').value = meta.name;
         document.getElementById('group-avatar').src = meta.avatar || '/static/default_group.png';
 
-        // 【关键修改】默认打开逻辑
-        // 只有当 active_mode 严格等于 false 时才关闭，undefined (旧数据) 或 true 都算打开
-        document.getElementById('group-active-chk').checked = (meta.active_mode !== false);
+        // 【修改】默认为 false (如果 active_mode 是 undefined 或者是 false 都算 false)
+        document.getElementById('group-active-chk').checked = meta.active_mode || false;
 
         const membersDiv = document.getElementById('member-list');
         membersDiv.innerHTML = meta.members.map(m => `<span class="member-tag">${m}</span>`).join('');
