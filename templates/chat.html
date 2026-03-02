@@ -115,12 +115,27 @@
     .status-dot { width: 8px; height: 8px; background-color: #4cd964; border-radius: 50%; display: inline-block; }
 
     /* --- 【重构】头像 + 气泡组 布局 --- */
+    /* 气泡始终在头像内侧（横向并排）， never 在头像下侧 */
     .message-group {
       display: flex;
-      margin: 8px 0; /* 每组对话的上下间距 */
-      align-items: flex-start; /* 顶对齐：头像始终在消息组的最上方 */
-      /*max-width: 90%;*/
-      max-width: 100%;    /* <-- 改为 100% */
+      flex-wrap: wrap;
+      margin: 8px 0;
+      align-items: flex-start;
+      max-width: 100%;
+    }
+
+    /* 头像+气泡的横向容器：保证永远同一行，不换行到上下排列 */
+    .message-content-row {
+      display: flex;
+      flex-wrap: nowrap;
+      align-items: flex-start;
+      min-width: 0;
+    }
+    .message-group.assistant .message-content-row {
+      flex-direction: row;
+    }
+    .message-group.user .message-content-row {
+      flex-direction: row-reverse;
     }
 
     /* 用户：右对齐，反向排列(头像在右) */
@@ -205,6 +220,41 @@
       border: 1px solid #ffb6b9; /* 加个浅粉色边框，更好看 */
       border-bottom-left-radius: 4px;
       box-shadow: 0 1px 3px rgba(0,0,0,0.05); /* 加一点阴影增加立体感 */
+    }
+    /* 空消息气泡：保证有可见框体，支持编辑/删除/重发 */
+    .bubble.bubble-empty {
+      min-height: 2em;
+      min-width: 60px;
+    }
+    .bubble .empty-placeholder {
+      color: #bbb;
+      font-style: italic;
+      font-size: 13px;
+    }
+
+    /* 拍一拍：整页居中，在气泡组上方；下方头像+气泡始终横向并排（气泡在头像内侧） */
+    .message-group.has-tickle {
+      width: 100%;
+      align-self: stretch;
+      margin-left: 0 !important;
+      margin-right: 0 !important;
+      flex-direction: column;
+    }
+    .message-group.assistant.has-tickle { align-items: flex-start; }
+    .message-group.user.has-tickle { align-items: flex-end; }
+    .tickle-row {
+      flex: 0 0 auto;
+      width: 100%;
+      order: -1; /* 始终在最上方 */
+      text-align: center;
+      font-size: 12px;
+      color: #999;
+      margin: 4px 0 8px 0;
+      padding: 2px 0;
+    }
+    /* 仅拍一拍时隐藏头像和气泡容器 */
+    .message-group.tickle-only .message-content-row {
+      display: none !important;
     }
 
     /* 3. 外部控制容器 (修改版：一直显示 + 水平对齐) */
@@ -612,10 +662,21 @@
   // 缓存配置
   let currentConfig = {}; // 存群信息 或 角色信息
   let groupMembers = {};  // 存群成员详细信息 (ID -> Avatar/Name)
+  let userTickleSuffix = '的狐狸脑袋'; // 用户拍一拍后缀
+  let aiLanguage = 'ja';  // 拍一拍展示语言：ja=日语 zh=中文
 
   // API 路径前缀生成器
   function getApiPrefix() {
     return isGroupMode ? `/api/group/${currentId}` : `/api/${currentId}`;
+  }
+
+  // 记忆同步失败提示（非阻塞，照常生成消息）
+  function showMemorySyncWarning(msg) {
+    const el = document.createElement('div');
+    el.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);max-width:90%;padding:10px 16px;background:#fff3cd;color:#856404;border:1px solid #ffc107;border-radius:8px;font-size:13px;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.15);transition:opacity .3s;';
+    el.textContent = '⚠️ ' + msg;
+    document.body.appendChild(el);
+    setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 4000);
   }
 
   if ('serviceWorker' in navigator) {
@@ -737,6 +798,22 @@
           statusText.textContent = '手机在线';
           statusText.style.color = '#999';
         }
+        // 加载用户拍一拍配置及 AI 语言（拍一拍展示用）
+        try {
+          const ur = await fetch('/api/user/profile_settings');
+          const ud = await ur.json();
+          if (ud.tickle_suffix) userTickleSuffix = ud.tickle_suffix;
+          if (ud.ai_language) aiLanguage = ud.ai_language;
+        } catch(e) {}
+      }
+      // 群聊也加载用户拍一拍配置及 AI 语言
+      if (isGroupMode) {
+        try {
+          const ur = await fetch('/api/user/profile_settings');
+          const ud = await ur.json();
+          if (ud.tickle_suffix) userTickleSuffix = ud.tickle_suffix;
+          if (ud.ai_language) aiLanguage = ud.ai_language;
+        } catch(e) {}
       }
       // 进入页面时，标记为已读
       fetch(`/api/${currentId}/mark_read`, { method: 'POST' });
@@ -744,6 +821,49 @@
   }
 
   function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+  // 拍一拍展示文案。tag: tickle_self|tickle_user|tickle|tickle_xxx
+  // 日语模式下显示日语版，中文模式下显示中文版
+  const DEF_SUFFIX_ZH = '的狐狸脑袋';
+  const DEF_SUFFIX_JA = '狐の頭';
+  function formatTickleText(tag, senderRole, senderId) {
+    const isJa = aiLanguage === 'ja';
+    const subZh = senderRole === 'user' ? '我' : (groupMembers[senderId] || currentConfig || {}).remark || (groupMembers[senderId] || currentConfig || {}).name || 'TA';
+    const sub = isJa ? (senderRole === 'user' ? '私' : subZh) : subZh;
+    let obj, suffix;
+    if (tag === 'tickle_self') {
+      obj = isJa ? '自分' : '自己';
+      const s = senderRole === 'user' ? userTickleSuffix : (currentConfig?.tickle_suffix || groupMembers[senderId]?.tickle_suffix || DEF_SUFFIX_ZH);
+      suffix = isJa && s === DEF_SUFFIX_ZH ? DEF_SUFFIX_JA : s;
+    } else if (tag === 'tickle_user') {
+      obj = isJa ? '私' : '我';
+      const s = userTickleSuffix;
+      suffix = isJa && s === DEF_SUFFIX_ZH ? DEF_SUFFIX_JA : s;
+    } else if (tag === 'tickle') {
+      obj = senderRole === 'user' ? (currentConfig?.name || currentConfig?.remark || 'TA') : (isJa ? '自分' : '自己');
+      const s = senderRole === 'user' ? (currentConfig?.tickle_suffix || DEF_SUFFIX_ZH) : (currentConfig?.tickle_suffix || groupMembers[senderId]?.tickle_suffix || DEF_SUFFIX_ZH);
+      suffix = isJa && s === DEF_SUFFIX_ZH ? DEF_SUFFIX_JA : s;
+    } else if (tag && tag.startsWith('tickle_')) {
+      const targetId = tag.replace('tickle_', '');
+      obj = targetId === 'user' ? (isJa ? '私' : '我') : (groupMembers[targetId]?.remark || groupMembers[targetId]?.name || targetId);
+      const s = targetId === 'user' ? userTickleSuffix : (groupMembers[targetId]?.tickle_suffix || DEF_SUFFIX_ZH);
+      suffix = isJa && s === DEF_SUFFIX_ZH ? DEF_SUFFIX_JA : s;
+    } else {
+      return '';
+    }
+    if (isJa) return `${sub}が${obj}の${suffix}をぽんぽん`;
+    return `${sub}拍了拍${obj}${suffix}`;
+  }
+
+  function extractTicklesFromContent(text) {
+    if (!text || typeof text !== 'string') return { tickles: [], rest: '' };
+    const re = /\[(tickle(?:_\w+)?)\]/g;
+    const tickles = [];
+    let m;
+    while ((m = re.exec(text)) !== null) tickles.push(m[1]);
+    const rest = text.replace(re, '/').replace(/\/+/g, '/').replace(/^\/|\/$/g, '').trim();
+    return { tickles, rest };
+  }
 
   // --- 【新增】通用日期检查函数 ---
   function checkAndAppendDateSeparator(newTimestamp) {
@@ -781,11 +901,20 @@
   }
 
   function renderMessageGroup({ id, content, role, timestamp }, mode = 'append') {
-    const bubbles = content.split('/').map(p => p.trim()).filter(Boolean);
-    if (bubbles.length === 0 && mode === 'append') bubbles.push(content);
-    if (bubbles.length === 0) return;
+    const isAssistant = role !== 'user';
+    const fullText = content != null ? String(content) : '';
+    const { tickles, rest } = extractTicklesFromContent(fullText);
 
-    const fullText = content;
+    let bubbles = rest.split('/').map(p => p.trim()).filter(Boolean);
+    if (bubbles.length === 0 && !tickles.length) {
+      if (mode === 'append') {
+        bubbles.push(rest || (content != null ? content : ''));
+      } else if (isAssistant && id) {
+        bubbles.push('');
+      } else {
+        return;
+      }
+    }
     const date = new Date(timestamp);
 
     // --- 角色判断逻辑 ---
@@ -795,6 +924,8 @@
 
     const group = document.createElement('div');
     group.classList.add('message-group', cssClass);
+    if (tickles.length > 0) group.classList.add('has-tickle');
+    if (tickles.length > 0 && bubbles.length === 0) group.classList.add('tickle-only');
     group.dataset.timestamp = date.toISOString();
     group.dataset.id = id;
 
@@ -825,26 +956,30 @@
 
     // 【新增】添加点击事件
     avatar.style.cursor = 'pointer'; // 鼠标放上去变手型
+    let _navTimer = null;
     avatar.onclick = (e) => {
-      e.stopPropagation(); // 防止冒泡触发其他点击事件
-
-      if (isUser) {
+      e.stopPropagation();
+      if (_navTimer) clearTimeout(_navTimer);
+      _navTimer = setTimeout(() => {
+        _navTimer = null;
+        if (isUser) {
         // 1. 如果是用户头像 -> 跳转到“我的”页面
         window.location.href = '/profile';
+      } else if (isGroupMode) {
+        window.location.href = `/memory/${role}`;
       } else {
-        // 2. 如果是角色头像
-        if (isGroupMode) {
-          // 群聊模式：role 字段存的就是具体的 char_id (如 "isagi")
-          // 直接跳转到该角色的记忆页
-          window.location.href = `/memory/${role}`;
-        } else {
-          // 单聊模式：role 可能是 'assistant'，所以我们要用当前 URL 里的 currentId
-          window.location.href = `/memory/${currentId}`;
-        }
+        window.location.href = `/memory/${currentId}`;
       }
+      }, 350);
+    };
+    avatar.ondblclick = (e) => {
+      e.stopPropagation();
+      if (_navTimer) { clearTimeout(_navTimer); _navTimer = null; }
+      e.preventDefault();
+      if (isUser) sendTickle('[tickle_self]');
+      else sendTickle(isGroupMode ? `[tickle_${role}]` : '[tickle]');
     };
 
-    // 这里的 onerror 保持不变，用来处理图片加载失败的情况
     avatar.onerror = function() {
       this.src = '/static/default_avatar.png';
     };
@@ -869,7 +1004,12 @@
 
       const bubble = document.createElement('div');
       bubble.classList.add('bubble');
-      bubble.innerHTML = text.replace(/\n/g, "<br>");
+      if (!text || text.trim() === '') {
+        bubble.classList.add('bubble-empty');
+        bubble.innerHTML = '<span class="empty-placeholder">（空消息）</span>';
+      } else {
+        bubble.innerHTML = text.replace(/\n/g, "<br>");
+      }
       wrapper.appendChild(bubble);
 
       if (isLast) {
@@ -943,8 +1083,25 @@
       stack.appendChild(wrapper);
     });
 
-    group.appendChild(avatar);
-    group.appendChild(stack);
+    /* 头像+气泡装进横向容器，保证始终并排（气泡在头像内侧），不换行到下侧 */
+    const contentRow = document.createElement('div');
+    contentRow.className = 'message-content-row';
+    contentRow.appendChild(avatar);
+    contentRow.appendChild(stack);
+
+    if (tickles.length > 0) {
+      const tickleRow = document.createElement('div');
+      tickleRow.className = 'tickle-row';
+      const senderRole = isUser ? 'user' : 'assistant';
+      const senderId = isUser ? 'user' : role;
+      const tickleText = tickles.map(t => formatTickleText(t, senderRole, senderId)).filter(Boolean).join(' ');
+      const tickleTextNode = document.createTextNode(tickleText);
+      tickleRow.appendChild(tickleTextNode);
+      group.appendChild(tickleRow);
+      group.appendChild(contentRow);
+    } else {
+      group.appendChild(contentRow);
+    }
 
     if (mode === 'prepend') {
       chatContainer.prepend(group);
@@ -1076,6 +1233,86 @@
     }, 300);
   });
 
+    async function sendTickle(tickleMsg) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      btn.textContent = '拍一拍…';
+      const userMsgTime = new Date();
+      checkAndAppendDateSeparator(userMsgTime);
+      const userMsgObj = { content: tickleMsg, role: 'user', timestamp: userMsgTime };
+      const userBubbleElement = renderMessageGroup(userMsgObj, 'append');
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+      try {
+        const res = await fetch(`${getApiPrefix()}/chat`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({message: tickleMsg})
+        });
+        const data = await res.json();
+        if (data.error === 'consecutive_tickle') {
+          userBubbleElement?.remove();
+          alert(data.message || '不可连续拍一拍同一人，请稍后再试');
+          return;
+        }
+        if (data.error) {
+          userBubbleElement?.remove();
+          alert(data.message || data.error);
+          return;
+        }
+        if (data.user_id && userBubbleElement) {
+          userBubbleElement.dataset.id = data.user_id;
+          const controls = userBubbleElement.querySelector('.controls-container');
+          if (controls) {
+            const editBtn = document.createElement('button');
+            editBtn.className = 'action-btn';
+            editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+            editBtn.onclick = () => openEditModal(data.user_id, tickleMsg, userBubbleElement);
+            const delBtn = document.createElement('button');
+            delBtn.className = 'action-btn';
+            delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+            delBtn.onclick = () => deleteMessage(data.user_id, userBubbleElement);
+            controls.insertBefore(delBtn, controls.lastChild);
+            controls.insertBefore(editBtn, delBtn);
+          }
+        }
+        if (data.replies && data.replies.length > 0) {
+          if (typeof data.replies[0] === 'object') {
+            for (const reply of data.replies) {
+              await sleep(800);
+              const aiTime = reply.timestamp ? new Date(reply.timestamp) : new Date();
+              checkAndAppendDateSeparator(aiTime);
+              renderMessageGroup({
+                id: reply.id || Date.now(),
+                content: reply.content,
+                role: reply.char_id,
+                timestamp: aiTime
+              }, 'append');
+              chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+          } else {
+            const fullReplyText = data.replies.join(' / ');
+            const aiTime = new Date();
+            checkAndAppendDateSeparator(aiTime);
+            await sleep(1000);
+            renderMessageGroup({
+              id: data.id,
+              content: fullReplyText,
+              role: 'assistant',
+              timestamp: aiTime
+            }, 'append');
+          }
+        }
+        if (data.memory_sync_warning) showMemorySyncWarning(data.memory_sync_warning);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      } catch (e) {
+        userBubbleElement?.remove();
+        alert('发送失败');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '发送';
+      }
+    }
+
     async function sendMessage() {
         const originalText = input.value.trim();
         if (!originalText) return;
@@ -1175,6 +1412,7 @@
               renderMessageGroup(aiMsg, 'append');
             }
           }
+          if (data.memory_sync_warning) showMemorySyncWarning(data.memory_sync_warning);
         } catch (e) { console.error(e);
           // 【修正这里】不要用 displayBubbleGroup
           renderMessageGroup({

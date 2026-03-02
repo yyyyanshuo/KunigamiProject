@@ -17,8 +17,8 @@ import tempfile # <--- 记得在最上面加这个 import
 # 定义基础路径
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, "configs", "characters.json")
-# --- 【新增】群聊配置路径 ---
 GROUPS_CONFIG_FILE = os.path.join(BASE_DIR, "configs", "groups.json")
+USER_SETTINGS_FILE = os.path.join(BASE_DIR, "configs", "user_settings.json")
 
 # --- 【新增】安全保存 JSON (防止文件损坏) ---
 def safe_save_json(filepath, data):
@@ -241,6 +241,63 @@ def run_all_weekly_rollovers():
             print(f"     ❌ 处理角色 {char_id} 时崩溃: {e}")
 
     print("✅ 全员周结结束。")
+
+# ================= 每年年龄 +1 =================
+
+def run_yearly_age_increment():
+    """
+    每年 1 月 1 日执行。为配置了 age 的角色年龄 +1。
+    """
+    print("⏰ [定时任务] 开始年度年龄递增...")
+
+    if not os.path.exists(CONFIG_FILE):
+        print("   - 无配置文件，跳过")
+        return
+
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            all_config = json.load(f)
+
+        current_year = datetime.datetime.now().strftime("%Y")
+        updated = []
+
+        for char_id, info in all_config.items():
+            age = info.get("age")
+            if age is None:
+                continue
+            last_inc = info.get("age_last_incremented")
+            if last_inc == current_year:
+                continue  # 今年已递增过
+            try:
+                info["age"] = int(age) + 1
+                info["age_last_incremented"] = current_year
+                updated.append(char_id)
+                print(f"   > {char_id}: {age} → {age + 1} 歳")
+            except (ValueError, TypeError):
+                pass
+
+        if updated:
+            safe_save_json(CONFIG_FILE, all_config)
+
+        # --- 用户年龄 +1 ---
+        if os.path.exists(USER_SETTINGS_FILE):
+            with open(USER_SETTINGS_FILE, "r", encoding="utf-8") as f:
+                user_data = json.load(f)
+            age = user_data.get("user_age")
+            last_inc = user_data.get("user_age_last_incremented")
+            if age is not None and last_inc != current_year:
+                try:
+                    user_data["user_age"] = int(age) + 1
+                    user_data["user_age_last_incremented"] = current_year
+                    safe_save_json(USER_SETTINGS_FILE, user_data)
+                    updated.append("(用户)")
+                    print(f"   > 用户: {age} → {age + 1} 歳")
+                except (ValueError, TypeError):
+                    pass
+
+        print(f"✅ 年度年龄递增结束，共更新 {len(updated)} 人")
+    except Exception as e:
+        print(f"❌ 年龄递增出错: {e}")
 
 # --- 【新增】自动睡眠/唤醒检查 ---
 def check_and_update_sleep_status():

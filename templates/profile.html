@@ -115,6 +115,22 @@
     </svg>
   </div>
 
+  <!-- 【新增】用户年龄（每年1月1日自动+1） -->
+  <div style="margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+    <label style="font-size: 12px; color: #888;">年龄 (每年自动+1):</label>
+    <input type="number" id="user-age-input" placeholder="留空表示未设置" min="1" max="150"
+           style="font-size: 14px; color: #555; text-align: center; border: 1px solid #eee; border-radius: 15px; width: 80px; padding: 5px 10px;"
+           onblur="saveUserAge(this)">
+  </div>
+
+  <!-- 拍一拍后缀（被拍时的描述） -->
+  <div style="margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+    <label style="font-size: 12px; color: #888;">拍一拍后缀:</label>
+    <input type="text" id="user-tickle-input" placeholder="的狐狸脑袋"
+           style="font-size: 14px; color: #555; text-align: center; border: 1px solid #eee; border-radius: 15px; width: 120px; padding: 5px 10px;"
+           onblur="saveUserTickle(this)">
+  </div>
+
   <!-- 【新增】密码修改区域 -->
   <div style="margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 8px;">
     <input type="password" id="new-password-input" placeholder="设置新密码 (留空不改)"
@@ -365,10 +381,51 @@
       const langSelect = document.getElementById('ai-lang-select');
       if (langSelect) langSelect.value = dataUser.ai_language || 'ja';
 
+      // 用户年龄
+      const ageInput = document.getElementById('user-age-input');
+      if (ageInput) ageInput.value = (dataUser.age !== undefined && dataUser.age !== null) ? dataUser.age : '';
+      const tickleInput = document.getElementById('user-tickle-input');
+      if (tickleInput) tickleInput.value = dataUser.tickle_suffix || '的狐狸脑袋';
+
     } catch(e) {
       console.error("配置加载失败", e);
       // alert('配置加载失败'); // 建议注释掉，防止一个接口失败导致一直弹窗
     }
+  }
+
+  async function saveUserTickle(input) {
+    const val = input.value.trim() || '的狐狸脑袋';
+    try {
+      const res = await fetch('/api/user/profile_settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ tickle_suffix: val })
+      });
+      const result = await res.json();
+      if (result.status === 'success') {
+        input.style.border = '1px solid #4cd964';
+        setTimeout(() => { input.style.border = '1px solid #eee'; }, 1000);
+      }
+    } catch(e) { /* silent */ }
+  }
+
+  // 【新增】保存用户年龄 (失去焦点时触发)
+  async function saveUserAge(input) {
+    const val = input.value.trim();
+    const ageToSend = (val === '') ? null : (isNaN(parseInt(val, 10)) ? null : parseInt(val, 10));
+
+    try {
+      const res = await fetch('/api/user/profile_settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ age: ageToSend })
+      });
+      const result = await res.json();
+      if (result.status === 'success') {
+        input.style.border = '1px solid #4cd964';
+        setTimeout(() => { input.style.border = '1px solid #eee'; }, 1000);
+      }
+    } catch(e) { /* silent */ }
   }
 
   // 2. 【新增】保存用户名 (失去焦点时触发)

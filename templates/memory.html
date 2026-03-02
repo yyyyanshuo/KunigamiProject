@@ -508,6 +508,7 @@
                     <span id="view-pinned-icon" style="display:none; position:absolute; top:-5px; right:-5px; background:#fff; border-radius:50%; padding:2px; box-shadow:0 2px 5px rgba(0,0,0,0.2); font-size:16px;">📌</span>
                 </div>
                 <div id="view-remark" style="font-size:18px; font-weight:bold; margin-top:10px; color:#333;">(加载中...)</div>
+                <div id="view-age" style="font-size:13px; color:#888; margin-top:4px;"></div>
                 <div style="font-size:12px; color:#ccc; margin-top:5px;">ID: <span id="view-id"></span></div>
 
                 <div style="margin-top: 15px;">
@@ -532,6 +533,18 @@
                 <div style="margin-bottom:15px; text-align: left; max-width: 300px; margin: 0 auto;">
                     <div style="font-size:12px; font-weight:bold; color:#888; margin-bottom:4px;">备注名 / Remark Name</div>
                     <input type="text" id="edit-remark-input" class="input-full" style="margin:0; text-align:center; font-size:16px; font-weight:bold;">
+                </div>
+
+                <!-- 年龄（单独编辑，每年自动+1） -->
+                <div style="margin-bottom:15px; text-align: left; max-width: 300px; margin: 0 auto;">
+                    <div style="font-size:12px; font-weight:bold; color:#888; margin-bottom:4px;">年龄 / Age（每年1月1日自动+1）</div>
+                    <input type="number" id="edit-age-input" class="input-full" placeholder="留空表示未设置" min="1" max="150" style="margin:0; text-align:center; font-size:16px;">
+                </div>
+
+                <!-- 拍一拍后缀 -->
+                <div style="margin-bottom:15px; text-align: left; max-width: 300px; margin: 0 auto;">
+                    <div style="font-size:12px; font-weight:bold; color:#888; margin-bottom:4px;">拍一拍后缀（如：的狐狸脑袋）</div>
+                    <input type="text" id="edit-tickle-input" class="input-full" placeholder="的狐狸脑袋" style="margin:0; text-align:center;">
                 </div>
 
                 <!-- 【移动到这里】置顶开关 -->
@@ -754,6 +767,7 @@
             // 如果显示的是“(加载中...)”，就不要填进去，填空字符串
             document.getElementById('edit-remark-input').value = (currentRemark === '(加载中...)') ? '' : currentRemark;
             document.getElementById('edit-avatar-preview').src = document.getElementById('view-avatar').src;
+            // 年龄已在 loadCharMeta 中填充
         } else {
             // 退出编辑：显示查看，隐藏编辑
             viewMode.style.display = 'block';
@@ -784,6 +798,12 @@
                 document.getElementById('edit-avatar-preview').src = avatarUrl;
                 document.getElementById('edit-remark-input').value = remarkText;
                 document.getElementById('meta-pinned').checked = isPinned;
+
+                // 年龄
+                const ageVal = data.age;
+                document.getElementById('edit-age-input').value = (ageVal !== undefined && ageVal !== null) ? ageVal : '';
+                document.getElementById('view-age').textContent = (ageVal !== undefined && ageVal !== null) ? `年龄: ${ageVal} 歳` : '';
+                document.getElementById('edit-tickle-input').value = data.tickle_suffix || '的狐狸脑袋';
 
                 // --- 【新增】回显状态 ---
                 // 情绪
@@ -844,13 +864,19 @@
         btn.textContent = '保存中...';
         btn.disabled = true;
 
+        const newAge = document.getElementById('edit-age-input').value.trim();
+        const ageToSend = newAge === '' ? null : parseInt(newAge, 10);
+        const tickleSuffix = document.getElementById('edit-tickle-input').value.trim() || '的狐狸脑袋';
+
         try {
             const res = await fetch(`/api/${charId}/update_meta`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     remark: newRemark,
-                    pinned: isPinned
+                    pinned: isPinned,
+                    age: ageToSend,
+                    tickle_suffix: tickleSuffix
                 })
             });
             const result = await res.json();
@@ -859,6 +885,7 @@
 
                 // 手动更新前端显示
                 document.getElementById('view-remark').textContent = newRemark;
+                document.getElementById('view-age').textContent = (ageToSend !== null && !isNaN(ageToSend)) ? `年龄: ${ageToSend} 歳` : '';
                 // 更新小图钉显示状态
                 document.getElementById('view-pinned-icon').style.display = isPinned ? 'block' : 'none';
 

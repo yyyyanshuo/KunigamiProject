@@ -102,6 +102,111 @@ def get_ai_language():
     except:
         return default_lang
 
+def get_user_age():
+    """获取用户年龄，默认 None 表示未设置"""
+    if not os.path.exists(USER_SETTINGS_FILE):
+        return None
+    try:
+        with open(USER_SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            age = data.get("user_age")
+            return int(age) if age is not None else None
+    except:
+        return None
+
+def get_char_tickle_suffix(char_id):
+    """获取角色的拍一拍后缀（如 '的狐狸脑袋'），默认 '的狐狸脑袋'"""
+    if not os.path.exists(CONFIG_FILE):
+        return "的狐狸脑袋"
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get(char_id, {}).get("tickle_suffix", "的狐狸脑袋")
+    except:
+        return "的狐狸脑袋"
+
+def get_user_tickle_suffix():
+    """获取用户的拍一拍后缀（被拍时的描述），默认 '的狐狸脑袋'"""
+    if not os.path.exists(USER_SETTINGS_FILE):
+        return "的狐狸脑袋"
+    try:
+        with open(USER_SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get("tickle_suffix", "的狐狸脑袋")
+    except:
+        return "的狐狸脑袋"
+
+def _extract_tickle_target(content):
+    """从消息内容解析拍一拍目标，返回 (is_tickle, target)。
+    target: 'self' | 'user' | char_id | None
+    """
+    if not content or not isinstance(content, str):
+        return False, None
+    c = content.strip()
+    if c == "[tickle_self]":
+        return True, "self"
+    if c == "[tickle_user]":
+        return True, "user"
+    if c == "[tickle]":
+        return True, "assistant"  # 单聊时对方是 assistant
+    m = re.match(r'^\[tickle_(\w+)\]$', c)
+    if m:
+        return True, m.group(1)  # 群聊 [tickle_xxx]
+    return False, None
+
+def _check_consecutive_tickle(db_path, new_target, assistant_char_id=None):
+    """检查是否连续拍同一人。new_target: 'self'|'user'|char_id。
+    assistant_char_id: 单聊时 [tickle] 的对象，群聊可 None。返回 (ok, last_content)"""
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT role, content FROM messages ORDER BY id DESC LIMIT 2")
+        rows = cursor.fetchall()
+        conn.close()
+    except:
+        return True, None
+
+    for row in rows:
+        role, content = row[0], (row[1] or "")
+        is_tickle, target = _extract_tickle_target(content)
+        if not is_tickle:
+            continue
+        if role == "user":
+            initiator = "user"
+        else:
+            initiator = role
+        if target == "self":
+            obj = initiator
+        elif target == "user":
+            obj = "user"
+        elif target == "assistant" and assistant_char_id:
+            obj = assistant_char_id
+        else:
+            obj = target
+        if str(obj) == str(new_target):
+            return False, content
+    return True, None
+
+def _strip_consecutive_tickle(text):
+    """从 AI 回复中移除连续重复的 [tickle] 或 [tickle_user]。同目标连续出现则删后者。"""
+    if not text:
+        return text
+    parts = [p.strip() for p in text.split('/')]
+    last_tickle_target = None
+    result = []
+    for p in parts:
+        is_t, tgt = _extract_tickle_target(p)
+        if is_t:
+            # assistant/self 视为同一类（拍自己），user 为另一类
+            norm = "self" if tgt in ("assistant", "self") else tgt
+            if norm == last_tickle_target:
+                continue
+            last_tickle_target = norm
+        else:
+            last_tickle_target = None
+        result.append(p)
+    return '/'.join(result)
+
 # ... (之前的 imports 和 常用语接口 保持不变) ...
 
 # --- 工具：获取路径 ---
@@ -157,6 +262,126 @@ def mark_read_api(char_id):
 
 # ---------------------- 核心：Prompt 构建系统 ----------------------
 
+def get_char_name(char_id):
+    """从 characters.json 获取角色姓名，默认用 char_id"""
+    if not os.path.exists(CONFIG_FILE):
+        return char_id
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get(char_id, {}).get("name", char_id)
+    except:
+        return char_id
+
+def get_char_age(char_id):
+    """从 characters.json 获取角色年龄，默认 None 表示未设置"""
+    if not os.path.exists(CONFIG_FILE):
+        return None
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            age = data.get(char_id, {}).get("age")
+            return int(age) if age is not None else None
+    except:
+        return None
+
+def migrate_persona_extract_age(char_id):
+    """
+    迁移旧版人设：从 1_base_persona.md 中提取年龄，移除姓名和年龄行，写入 characters.json。
+    若已迁移过（config 中已有 age 且 persona 已无姓名行），则跳过。
+    """
+    _, prompts_dir = get_paths(char_id)
+    persona_path = os.path.join(prompts_dir, "1_base_persona.md")
+    if not os.path.exists(persona_path):
+        return
+
+    try:
+        with open(persona_path, "r", encoding="utf-8-sig") as f:
+            content = f.read()
+
+        if not content.strip():
+            return
+
+        # 检查 config 是否已有 age（可能已迁移）
+        existing_age = get_char_age(char_id)
+        if existing_age is not None:
+            # 已有年龄，只做清理：移除姓名、年龄相关行（防止重复写入）
+            cleaned = _strip_name_age_from_persona(content)
+            if cleaned != content and cleaned.strip():
+                with open(persona_path, "w", encoding="utf-8") as f:
+                    f.write(cleaned)
+            return
+
+        # 提取年龄（多种格式）
+        extracted_age = _extract_age_from_text(content)
+        cleaned = _strip_name_age_from_persona(content)
+
+        # 仅当清理后非空时才覆盖，否则保留原文避免数据丢失
+        if cleaned.strip():
+            with open(persona_path, "w", encoding="utf-8") as f:
+                f.write(cleaned)
+
+        # 将年龄写入 characters.json
+        if extracted_age is not None and os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                all_config = json.load(f)
+            if char_id in all_config:
+                all_config[char_id]["age"] = extracted_age
+                all_config[char_id]["age_last_incremented"] = datetime.now().strftime("%Y")
+                safe_save_json(CONFIG_FILE, all_config)
+                print(f"   ✅ [Migration] {char_id} 已迁移：提取年龄 {extracted_age}，已清理人设中的姓名/年龄")
+    except Exception as e:
+        print(f"   ❌ [Migration] {char_id} 迁移失败: {e}")
+
+def _extract_age_from_text(text):
+    """从文本中提取年龄数字，支持 年齢：18、18歳、年龄：18、18岁 等"""
+    import re
+    patterns = [
+        r'年齢[：:\s]*(\d+)',
+        r'年龄[：:\s]*(\d+)',
+        r'(\d+)[歳岁]',
+        r'#\s*役割\s*\([^)]*\)\s*\((\d+)',  # # 役割 (名前) (18/身長...
+        r'#\s*角色\s*\([^)]*\)\s*\((\d+)',
+    ]
+    for pat in patterns:
+        m = re.search(pat, text)
+        if m:
+            return int(m.group(1))
+    return None
+
+def _strip_name_age_from_persona(text):
+    """移除人设中的姓名、年龄相关行，返回清理后的内容"""
+    import re
+    lines = text.split('\n')
+    result = []
+    for line in lines:
+        stripped = line.strip()
+        # 跳过：名前はxxx、名前：xxx、名前がxxx
+        if re.match(r'^名前[はが：:]\s*', stripped) or re.match(r'^姓名[：:]\s*', stripped):
+            continue
+        # 跳过：年齢：18、年龄：18、18歳 等 standalone
+        if re.match(r'^年齢[：:\s]*\d+\s*$', stripped) or re.match(r'^年龄[：:\s]*\d+\s*$', stripped):
+            continue
+        if re.match(r'^(\d+)[歳岁]\s*$', stripped):
+            continue
+        # 跳过 # 役割 下的 (名前) (年齢/身長/誕生日) 整行
+        if re.match(r'^\s*\([^)]+\)\s*\(\d+[/／]', stripped):
+            continue
+        result.append(line)
+    return '\n'.join(result).strip()
+
+def run_persona_migration_all():
+    """对所有角色执行人设迁移"""
+    if not os.path.exists(CONFIG_FILE):
+        return
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            char_ids = list(json.load(f).keys())
+        for cid in char_ids:
+            migrate_persona_extract_age(cid)
+    except Exception as e:
+        print(f"❌ [Migration] 批量迁移失败: {e}")
+
 def build_system_prompt(char_id):  # <--- 增加参数
     """
     根据 prompts/ 文件夹下的文件，动态组装 System Prompt。
@@ -180,7 +405,18 @@ def build_system_prompt(char_id):  # <--- 增加参数
     print(f"--- [Debug] 正在为 [{char_id}] 构建 Prompt，路径: {prompts_dir} ---") # <--- 加这行调试
 
     # --- 1. 静态 Markdown 文件 (人设、用户、格式) ---
-    # 文件名 -> 标题
+    # 姓名、年龄来自 characters.json，人设文件中不包含
+    char_name = get_char_name(char_id)
+    char_age = get_char_age(char_id)
+    name_age_prefix = ""
+    if char_name or char_age is not None:
+        parts = []
+        if char_name:
+            parts.append(f"名前：{char_name}")
+        if char_age is not None:
+            parts.append(f"年齢：{char_age}歳")
+        name_age_prefix = "\n".join(parts) + "\n\n"
+
     static_files = [
         ("1_base_persona.md", "【Role / キャラクター設定】"),
         ("3_user_persona.md", "【User / ユーザー情報】"),
@@ -193,6 +429,9 @@ def build_system_prompt(char_id):  # <--- 增加参数
                 with open(path, "r", encoding="utf-8-sig") as f:
                     content = f.read().strip()
                     if content:
+                        # 仅对人设文件注入姓名和年龄前缀
+                        if filename == "1_base_persona.md" and name_age_prefix:
+                            content = name_age_prefix + content
                         prompt_parts.append(f"{title}\n{content}")
         except Exception: pass
 
@@ -224,12 +463,30 @@ def build_system_prompt(char_id):  # <--- 增加参数
                     prompt_parts.append(f"【Long-term Memory / 長期記憶】\n" + "\n".join(mem_list))
     except Exception: pass
 
-    # 3. 【全局通用】读取用户档案 (从 configs 读)
+    # 3. 【全局通用】读取用户档案 (从 configs 读)，姓名和年龄单独注入
     try:
+        user_name = get_current_username()
+        user_age = get_user_age()
+        user_prefix = ""
+        if user_name or user_age is not None:
+            parts = []
+            if user_name:
+                parts.append(f"名前：{user_name}")
+            if user_age is not None:
+                parts.append(f"年齢：{user_age}歳")
+            user_prefix = "\n".join(parts) + "\n\n"
+
         path = os.path.join(CONFIG_DIR, "global_user_persona.md")
         if os.path.exists(path):
+            content = ""
             with open(path, "r", encoding="utf-8") as f:
-                prompt_parts.append(f"【User / ユーザー情報】\n{f.read().strip()}")
+                content = f.read().strip()
+            if user_prefix:
+                content = user_prefix + content
+            if content:
+                prompt_parts.append(f"【User / ユーザー情報】\n{content}")
+        elif user_prefix.strip():
+            prompt_parts.append(f"【User / ユーザー情報】\n{user_prefix.strip()}")
     except: pass
 
     # 4. 【全局通用】读取格式规则 (从 configs 读)
@@ -683,6 +940,95 @@ def distribute_group_memory(group_id, group_name, members, new_events, date_str)
         except Exception as e:
             print(f"     ❌ 同步给 [{char_id}] 失败: {e}")
 
+
+# --- 【新增】对话前自动记忆同步，保持单聊与群聊记忆连贯 ---
+def _get_groups_for_char(char_id):
+    """获取该角色参与的所有群聊 ID 列表"""
+    if not os.path.exists(GROUPS_CONFIG_FILE):
+        return []
+    try:
+        with open(GROUPS_CONFIG_FILE, "r", encoding="utf-8") as f:
+            groups = json.load(f)
+        return [gid for gid, info in groups.items() if char_id in info.get("members", [])]
+    except Exception:
+        return []
+
+
+def sync_memory_before_single_chat(char_id):
+    """
+    单聊前：先总结该角色参与的所有群聊的短期记忆，并入其 6_memory_short。
+    返回 (success: bool, error_msg: str|None)
+    """
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    dates = [today_str]
+    if now.hour < 4:
+        yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+        dates.insert(0, yesterday_str)
+
+    group_ids = _get_groups_for_char(char_id)
+    if not group_ids:
+        return True, None
+
+    try:
+        for gid in group_ids:
+            for d in dates:
+                try:
+                    update_group_short_memory(gid, d)
+                except Exception as e:
+                    print(f"   [Sync] 群聊 {gid} 日期 {d} 同步失败: {e}")
+                    return False, f"群聊记忆同步失败: {e}"
+        return True, None
+    except Exception as e:
+        print(f"   [Sync] 单聊前记忆同步失败: {e}")
+        return False, str(e)
+
+
+def sync_memory_before_group_chat(group_id):
+    """
+    群聊前：先总结群内所有角色的单聊短期记忆，以及本群的群聊记忆。
+    返回 (success: bool, error_msg: str|None)
+    """
+    if not os.path.exists(GROUPS_CONFIG_FILE):
+        return True, None
+    try:
+        with open(GROUPS_CONFIG_FILE, "r", encoding="utf-8") as f:
+            group_info = json.load(f).get(group_id, {})
+        members = [m for m in group_info.get("members", []) if m != "user"]
+    except Exception:
+        members = []
+
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    dates = [today_str]
+    if now.hour < 4:
+        yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+        dates.insert(0, yesterday_str)
+
+    try:
+        # 1. 各成员单聊记忆
+        for char_id in members:
+            for d in dates:
+                try:
+                    update_short_memory_for_date(char_id, d)
+                except Exception as e:
+                    print(f"   [Sync] 成员 {char_id} 单聊日期 {d} 同步失败: {e}")
+                    return False, f"成员单聊记忆同步失败: {e}"
+
+        # 2. 本群群聊记忆
+        for d in dates:
+            try:
+                update_group_short_memory(group_id, d)
+            except Exception as e:
+                print(f"   [Sync] 群聊 {group_id} 日期 {d} 同步失败: {e}")
+                return False, f"群聊记忆同步失败: {e}"
+
+        return True, None
+    except Exception as e:
+        print(f"   [Sync] 群聊前记忆同步失败: {e}")
+        return False, str(e)
+
+
 # ---------------------- 工具函数 ----------------------
 
 def get_timestamp():
@@ -1063,6 +1409,14 @@ def chat(char_id):
     if not user_msg_raw:
         return jsonify({"error": "empty message"}), 400
 
+    # 拍一拍：检查连续拍同一人
+    is_tickle, tickle_target = _extract_tickle_target(user_msg_raw)
+    if is_tickle:
+        tgt = tickle_target if tickle_target != "assistant" else char_id
+        ok, _ = _check_consecutive_tickle(db_path, tgt, char_id)
+        if not ok:
+            return jsonify({"error": "consecutive_tickle", "message": "不可连续拍一拍同一人，请稍后再试"}), 400
+
     # --- 3. 检查深睡眠状态 ---
     is_deep_sleep = False
     try:
@@ -1104,6 +1458,17 @@ def chat(char_id):
         })
 
     # ================= 醒着：正常调用 AI 逻辑 =================
+
+    # --- 5.5 单聊前自动同步：总结该角色参与的群聊短期记忆 ---
+    memory_sync_warning = None
+    try:
+        ok, err = sync_memory_before_single_chat(char_id)
+        if not ok:
+            memory_sync_warning = f"记忆同步失败：{err}，本次对话可能缺少部分群聊上下文"
+            print(f"   ⚠️ {memory_sync_warning}")
+    except Exception as e:
+        memory_sync_warning = f"记忆同步失败：{e}，本次对话可能缺少部分群聊上下文"
+        print(f"   ⚠️ {memory_sync_warning}")
 
     # 6. 动态构建 System Prompt
     system_prompt = build_system_prompt(char_id)
@@ -1168,6 +1533,8 @@ def chat(char_id):
         # 清理时间戳
         timestamp_pattern = r'\[(?:(?:\d{2}-\d{2}\s+)?\d{1,2}:\d{2})\]\s*'
         cleaned_reply_text = re.sub(timestamp_pattern, '', reply_text_raw).strip()
+        # 移除 AI 连续重复的拍一拍
+        cleaned_reply_text = _strip_consecutive_tickle(cleaned_reply_text)
 
         # 6. 存入数据库 (关键修改在这里！)
         now = datetime.now()
@@ -1188,12 +1555,15 @@ def chat(char_id):
 
         reply_bubbles = list(filter(None, [part.strip() for part in cleaned_reply_text.split('/')]))
 
-        # 【重点】把 ID 返回给前端
-        return jsonify({
+        # 【重点】把 ID 返回给前端；记忆同步失败时附带提示
+        resp = {
             "replies": reply_bubbles,
-            "id": ai_msg_id,  # <--- 这行是能够删除新消息的关键
-            "user_id": user_msg_id # <--- 把这个带回去
-        })
+            "id": ai_msg_id,
+            "user_id": user_msg_id
+        }
+        if memory_sync_warning:
+            resp["memory_sync_warning"] = memory_sync_warning
+        return jsonify(resp)
 
     except Exception as e:
         print(f"Chat Error: {e}")
@@ -1285,6 +1655,7 @@ def regenerate_message(char_id):
         # 8. 清理 & 存入
         timestamp_pattern = r'\[(?:(?:\d{2}-\d{2}\s+)?\d{1,2}:\d{2})\]\s*'
         cleaned_reply_text = re.sub(timestamp_pattern, '', reply_text_raw).strip()
+        cleaned_reply_text = _strip_consecutive_tickle(cleaned_reply_text)
 
         ai_ts = (datetime.now()).strftime('%Y-%m-%d %H:%M:%S')
 
@@ -1318,6 +1689,17 @@ def group_chat(group_id):
     data = request.json
     user_msg = data.get("message", "").strip()
     if not user_msg: return jsonify({"error": "empty"}), 400
+
+    # --- 群聊前自动同步：总结群内各角色单聊 + 本群群聊短期记忆 ---
+    memory_sync_warning = None
+    try:
+        ok, err = sync_memory_before_group_chat(group_id)
+        if not ok:
+            memory_sync_warning = f"记忆同步失败：{err}，本次对话可能缺少部分单聊上下文"
+            print(f"   ⚠️ {memory_sync_warning}")
+    except Exception as e:
+        memory_sync_warning = f"记忆同步失败：{e}，本次对话可能缺少部分单聊上下文"
+        print(f"   ⚠️ {memory_sync_warning}")
 
     group_dir = os.path.join(GROUPS_DIR, group_id)
     db_path = os.path.join(group_dir, "chat.db")
@@ -1367,6 +1749,13 @@ def group_chat(group_id):
                     else:
                         print(f"   [GroupChat] 成员 {name}({cid}) 正在熟睡，跳过。")
 
+    # 拍一拍：群聊中检查连续拍同一人
+    is_tickle, tickle_target = _extract_tickle_target(user_msg)
+    if is_tickle:
+        ok, _ = _check_consecutive_tickle(db_path, tickle_target, None)
+        if not ok:
+            return jsonify({"error": "consecutive_tickle", "message": "不可连续拍一拍同一人，请稍后再试"}), 400
+
     # 如果全员都在睡觉，直接返回空
     if not online_ai_members:
         print("--- [GroupChat] 全员睡眠中，无人回复 ---")
@@ -1378,7 +1767,10 @@ def group_chat(group_id):
         cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", ("user", user_msg, user_ts))
         conn.commit()
         conn.close()
-        return jsonify({"replies": []})
+        resp = {"replies": []}
+        if memory_sync_warning:
+            resp["memory_sync_warning"] = memory_sync_warning
+        return jsonify(resp)
 
     # 3. 存入用户消息
     conn = sqlite3.connect(db_path)
@@ -1516,6 +1908,7 @@ def group_chat(group_id):
 
             timestamp_pattern = r'\[(?:(?:\d{2}-\d{2}\s+)?\d{1,2}:\d{2})\]\s*'
             cleaned_reply = re.sub(timestamp_pattern, '', reply_text).strip()
+            cleaned_reply = _strip_consecutive_tickle(cleaned_reply)
 
             # 去除 AI 自带的名字前缀
             name_pattern = f"^\\[{speaker_name}\\][:：]\\s*"
@@ -1554,11 +1947,11 @@ def group_chat(group_id):
         except Exception as e:
             print(f"Group Chat Error ({speaker_id}): {e}")
 
-    # 7. 最终返回
-    return jsonify({
-        "replies": replies_for_frontend,
-        "user_id": user_msg_id # <--- 把这个带回去
-    })
+    # 7. 最终返回；记忆同步失败时附带提示
+    resp = {"replies": replies_for_frontend, "user_id": user_msg_id}
+    if memory_sync_warning:
+        resp["memory_sync_warning"] = memory_sync_warning
+    return jsonify(resp)
 
 # --- 辅助：写入个人群聊日志 ---
 def update_group_log(char_id, event_content, timestamp_str):
@@ -1957,7 +2350,9 @@ def user_profile_settings():
         # 注意：为了安全，GET请求不返回密码，或者返回空
         return jsonify({
             "name": data.get("current_user_name", "User"),
-            "ai_language": data.get("ai_language", "ja")
+            "ai_language": data.get("ai_language", "ja"),
+            "age": data.get("user_age"),
+            "tickle_suffix": data.get("tickle_suffix", "的狐狸脑袋")
             # 不返回 password
         })
 
@@ -1967,6 +2362,18 @@ def user_profile_settings():
         # 更新字段
         if "name" in data_in: data["current_user_name"] = data_in["name"]
         if "ai_language" in data_in: data["ai_language"] = data_in["ai_language"]
+        if "tickle_suffix" in data_in:
+            data["tickle_suffix"] = str(data_in["tickle_suffix"]).strip() or "的狐狸脑袋"
+        if "age" in data_in:
+            val = data_in["age"]
+            if val is None or val == "":
+                data.pop("user_age", None)
+                data.pop("user_age_last_incremented", None)
+            else:
+                try:
+                    data["user_age"] = int(val)
+                except (ValueError, TypeError):
+                    pass
 
         # 【新增】更新密码
         if "password" in data_in and data_in["password"]:
@@ -2303,6 +2710,9 @@ def memory_view(char_id):
 # --- 【修正版】获取 Prompts 数据 ---
 @app.route("/api/<char_id>/prompts_data")
 def get_prompts_data(char_id):
+    # 每次加载时尝试迁移（若尚未迁移）
+    migrate_persona_extract_age(char_id)
+
     data = {}
     files = {
         "base": "1_base_persona.md",
@@ -2625,7 +3035,9 @@ def get_char_details(char_id):
                 "light_sleep": True,
                 "deep_sleep": False,
                 "ds_start": "23:00",
-                "ds_end": "07:00"
+                "ds_end": "07:00",
+                "age": None,
+                "tickle_suffix": "的狐狸脑袋"
             }
             # 将默认值合并进去 (如果 char_info 里没有该字段，就用默认的)
             # 这里的逻辑是：char_info 覆盖 defaults (已有的配置优先)
@@ -2718,6 +3130,22 @@ def update_char_meta(char_id):
             all_config[char_id]["ds_start"] = data["ds_start"]
         if data.get("ds_end") is not None:
             all_config[char_id]["ds_end"] = data["ds_end"]
+
+        # 拍一拍后缀（如 "的狐狸脑袋"）
+        if data.get("tickle_suffix") is not None:
+            all_config[char_id]["tickle_suffix"] = str(data["tickle_suffix"]).strip() or "的狐狸脑袋"
+
+        # 年龄（单独编辑，来自记忆页面）
+        if data.get("age") is not None:
+            try:
+                age_val = data["age"]
+                if age_val == "" or age_val is None:
+                    all_config[char_id].pop("age", None)
+                    all_config[char_id].pop("age_last_incremented", None)
+                else:
+                    all_config[char_id]["age"] = int(age_val)
+            except (ValueError, TypeError):
+                pass
 
         # 3. 写回文件
         # 【修改】使用安全保存
@@ -3141,7 +3569,7 @@ def generate_persona():
 
     lang = get_ai_language()
 
-    # 日语 Prompt
+    # 日语 Prompt（不含姓名和年龄，由系统另行管理）
     prompt_ja = """
     あなたは熟練したキャラクター設定作家です。
     ユーザーから提供された「キャラクター名」と「作品名(IP)」に基づいて、以下の厳格なフォーマットに従ってキャラクター設定を作成してください。
@@ -3151,10 +3579,11 @@ def generate_persona():
     2. 情報源：原作の公式設定やストーリーに基づき、正確かつ詳細に記述すること。
     3. 創作：もし情報が不足している部分は、キャラクターの性格に矛盾しない範囲で補完すること。
     4. フォーマット：以下の構造を厳守すること。
+    5. 【重要】「名前」と「年齢」は絶対に含めないこと。これらはシステムで別に管理するため、出力から除外すること。
     
-    # 出力フォーマット例
+    # 出力フォーマット例（名前・年齢は含めない）
     # 役割
-    (名前) (年齢/身長/誕生日)
+    (身長/誕生日 など)
     
     # 外見
     - 髪・瞳：(詳細な描写)
@@ -3206,10 +3635,11 @@ def generate_persona():
     1. 语言：中文
     2. 信息源：基于原作官方设定，准确详细。
     3. 格式：严格遵守以下结构。
+    4. 【重要】绝对不要包含「姓名」和「年龄」。这两项由系统单独管理，请从输出中完全排除。
 
-    # 输出格式示例
+    # 输出格式示例（不含姓名、年龄）
     # 角色
-    (姓名) (年龄/身高/生日)
+    (身高/生日 等)
 
     # 外貌
     - 发型瞳色：(详细描写)
@@ -3629,6 +4059,14 @@ def trigger_active_chat(char_id):
     db_path, _ = get_paths(char_id)
     if not os.path.exists(db_path): return False
 
+    # 0. 单聊前同步群聊记忆
+    try:
+        ok, err = sync_memory_before_single_chat(char_id)
+        if not ok:
+            print(f"   ⚠️ [Active] 记忆同步失败: {err}，继续生成")
+    except Exception as e:
+        print(f"   ⚠️ [Active] 记忆同步异常: {e}，继续生成")
+
     # 1. 获取基础 System Prompt (只包含人设、记忆，不包含主动指令)
     base_system_prompt = build_system_prompt(char_id)
     messages = [{"role": "system", "content": base_system_prompt}]
@@ -3746,6 +4184,14 @@ def trigger_active_chat(char_id):
 # --- 【修正版】群聊主动消息 (伪装成 User 指令) ---
 def trigger_group_active_chat(group_id):
     print(f"💓 [GroupActive] 尝试触发群 {group_id} 的主动消息...")
+
+    # 0. 群聊前同步各成员单聊 + 本群群聊记忆
+    try:
+        ok, err = sync_memory_before_group_chat(group_id)
+        if not ok:
+            print(f"   ⚠️ [GroupActive] 记忆同步失败: {err}，继续生成")
+    except Exception as e:
+        print(f"   ⚠️ [GroupActive] 记忆同步异常: {e}，继续生成")
 
     group_dir = os.path.join(GROUPS_DIR, group_id)
     db_path = os.path.join(group_dir, "chat.db")
@@ -3937,10 +4383,14 @@ def trigger_group_active_chat(group_id):
 
 if __name__ == "__main__":
     init_db()
+    # 启动时执行人设迁移（提取年龄、移除姓名）
+    run_persona_migration_all()
     # --- 【新增】启动后台定时任务 ---
     scheduler = BackgroundScheduler()
     # 每天凌晨 4 点 0 分自动运行 (这个时候您肯定睡了，适合整理记忆)
     scheduler.add_job(func=scheduled_maintenance, trigger="cron", hour=4, minute=0)
+    # 每年 1 月 1 日凌晨 0 点：角色年龄自动 +1
+    scheduler.add_job(func=memory_jobs.run_yearly_age_increment, trigger="cron", month=1, day=1, hour=0, minute=5)
     # 2. 【新增】每分钟检查一次睡眠状态
     scheduler.add_job(func=memory_jobs.check_and_update_sleep_status, trigger="cron", minute='*')
     # 在 app.py 的 scheduler 启动部分
