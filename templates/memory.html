@@ -121,6 +121,41 @@
             border: 1px solid #eee; padding: 12px; border-radius: 8px;
             margin-bottom: 12px; background: #fafafa;
         }
+        /* 电脑端：姓名固定宽度，关系占剩余空间 */
+        .rel-edit-card .input-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .rel-edit-card .input-group .input-key {
+            width: 100px;
+            flex: 0 0 100px;
+            min-width: 0;
+        }
+        .rel-edit-card .input-group .input-val {
+            flex: 1;
+            min-width: 0;
+        }
+        .rel-edit-card .input-group .btn-del {
+            flex-shrink: 0;
+        }
+        .rel-score-wrap {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+        .rel-score-label {
+            font-size: 12px;
+            color: #888;
+            white-space: nowrap;
+        }
+        .rel-edit-card .input-group .input-score {
+            width: 52px;
+            padding: 6px 4px;
+            font-size: 12px;
+            text-align: center;
+        }
 
         /* Markdown 文本域 */
         .md-editor { width: 100%; min-height: 300px; padding: 12px; line-height: 1.6; font-family: monospace; }
@@ -603,6 +638,35 @@
                     </div>
                 </div>
 
+                <!-- 1.5 性格指数 (朋友圈主动发送概率) -->
+                <div class="status-row" style="flex-direction: column; align-items: flex-start;">
+                    <div style="width:100%; margin-bottom:10px;">
+                        <div class="status-label">📷 性格指数 (Moments Index)</div>
+                        <div class="status-desc">影响主动发朋友圈的概率（时间概率 × 性格指数），默认为 1</div>
+                    </div>
+                    <div class="range-container" style="width:100%;">
+                        <input type="number" id="moments-index-num" min="0.1" max="10" step="0.1" value="1" class="num-input"
+                               style="width:80px;"
+                               oninput="triggerAutoSave()">
+                    </div>
+                </div>
+
+                <!-- 1.6 亲密度 (用户发朋友圈后该角色点赞/评论概率) -->
+                <div class="status-row" style="flex-direction: column; align-items: flex-start;">
+                    <div style="width:100%; margin-bottom:10px;">
+                        <div class="status-label">💕 亲密度 (Intimacy)</div>
+                        <div class="status-desc">0~100，影响你发朋友圈后该角色是否点赞、评论的概率，默认 60</div>
+                    </div>
+                    <div class="range-container" style="width:100%;">
+                        <input type="range" id="intimacy-range" min="0" max="100" step="1" value="60"
+                               style="flex:1;"
+                               oninput="document.getElementById('intimacy-num').value=this.value; triggerAutoSave()">
+                        <input type="number" id="intimacy-num" min="0" max="100" step="1" value="60" class="num-input"
+                               style="width:60px;"
+                               oninput="document.getElementById('intimacy-range').value=this.value; triggerAutoSave()">
+                    </div>
+                </div>
+
                 <!-- 2. 浅睡眠 (修改了描述) -->
                 <div class="status-row">
                     <div>
@@ -818,6 +882,15 @@
                 updateEmotionUI(emo);
                 document.getElementById('emotion-range').value = emo;
                 document.getElementById('emotion-num').value = emo;
+
+                // 性格指数
+                const momentsIdx = data.moments_index !== undefined ? data.moments_index : 1;
+                document.getElementById('moments-index-num').value = momentsIdx;
+
+                // 亲密度
+                const intimacyVal = data.intimacy !== undefined ? data.intimacy : 60;
+                document.getElementById('intimacy-range').value = intimacyVal;
+                document.getElementById('intimacy-num').value = intimacyVal;
 
                 // 睡眠时间
                 document.getElementById('ds-start').value = data.ds_start || '23:00';
@@ -1085,7 +1158,8 @@
             let html = '';
             Object.keys(data).forEach(name => {
                 const info = data[name];
-                html += `<div class="mem-item"><div class="mem-header">👤 ${name} [${info.role}]</div><div class="mem-text">${info.description}</div></div>`;
+                const score = info.score != null ? info.score : 1;
+                html += `<div class="mem-item"><div class="mem-header">👤 ${name} [${info.role}] 关系指数: ${score}</div><div class="mem-text">${info.description}</div></div>`;
             });
             container.innerHTML = html;
         }
@@ -1317,11 +1391,16 @@
             const listDiv = document.createElement('div');
             names.forEach(name => {
                 const info = data[name];
+                const score = info.score != null ? info.score : 1;
                 listDiv.innerHTML += `
                    <div class="rel-edit-card">
                        <div class="input-group">
                            <input type="text" class="input-key" value="${name}" placeholder="姓名">
                            <input type="text" class="input-val" value="${info.role}" placeholder="关系定位">
+                           <label class="rel-score-wrap" title="该角色认为自己与此人关系的程度">
+                               <span class="rel-score-label">指数</span>
+                               <input type="number" class="input-score" value="${score}" min="0" step="0.1" placeholder="1">
+                           </label>
                            <button class="btn-del" onclick="this.closest('.rel-edit-card').remove()">×</button>
                        </div>
                        <textarea class="input-full" rows="2" placeholder="详细描述">${info.description}</textarea>
@@ -1385,6 +1464,10 @@
            <div class="input-group">
                <input type="text" class="input-key" value="" placeholder="姓名">
                <input type="text" class="input-val" value="" placeholder="关系定位">
+               <label class="rel-score-wrap" title="该角色认为自己与此人关系的程度">
+                   <span class="rel-score-label">指数</span>
+                   <input type="number" class="input-score" value="1" min="0" step="0.1" placeholder="1">
+               </label>
                <button class="btn-del" onclick="this.closest('.rel-edit-card').remove()">×</button>
            </div>
            <textarea class="input-full" rows="2" placeholder="详细描述"></textarea>
@@ -1478,8 +1561,10 @@
                 const name = card.querySelector('.input-key').value.trim();
                 const role = card.querySelector('.input-val').value.trim();
                 const desc = card.querySelector('.input-full').value.trim();
+                const scoreEl = card.querySelector('.input-score');
+                const score = scoreEl ? (parseFloat(scoreEl.value) || 1) : 1;
                 if(name) {
-                    newData[name] = { role: role, description: desc };
+                    newData[name] = { role: role, description: desc, score: score };
                 }
             });
         }
@@ -2179,6 +2264,8 @@
     // B. 直接保存 (用于开关和时间选择)
     async function saveStatusDirect() {
         const emotion = document.getElementById('emotion-num').value;
+        const momentsIndex = document.getElementById('moments-index-num').value;
+        const intimacy = document.getElementById('intimacy-num').value;
         const lightSleep = document.getElementById('light-sleep-chk').checked;
         const deepSleep = document.getElementById('deep-sleep-chk').checked;
         const dsStart = document.getElementById('ds-start').value;
@@ -2198,6 +2285,8 @@
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     emotion: emotion,
+                    moments_index: parseFloat(momentsIndex) || 1,
+                    intimacy: Math.max(0, Math.min(100, parseInt(intimacy, 10) || 60)),
                     light_sleep: lightSleepToSave, // <--- 传这个修正后的值
                     deep_sleep: deepSleep,
                     ds_start: dsStart,

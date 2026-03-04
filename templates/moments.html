@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#fff3f8">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="/static/logo.png">
+    <title>朋友圈</title>
+    <style>
+        body {
+            font-family: "Segoe UI", "PingFang SC", sans-serif;
+            background: #f0f0f0;
+            margin: 0;
+            padding: 0;
+        }
+        .header {
+            background: #fff;
+            padding: 12px 16px;
+            font-weight: bold;
+            font-size: 18px;
+            border-bottom: 1px solid #eee;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header-title {
+            font-size: 18px;
+        }
+        .moment-add-btn {
+            border: none;
+            background: #ffb6b9;
+            color: #fff;
+            width: 28px;
+            height: 28px;
+            border-radius: 999px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            line-height: 1;
+            cursor: pointer;
+        }
+        .moment-add-btn:hover { background: #e57373; }
+        .main {
+            padding: 12px 0;
+            padding-bottom: 80px;
+        }
+        .moment-card {
+            background: #fff;
+            margin-bottom: 10px;
+            padding: 14px 16px;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+        }
+        .moment-avatar-wrap {
+            flex-shrink: 0;
+        }
+        .moment-avatar-wrap a {
+            display: block;
+            text-decoration: none;
+            color: inherit;
+        }
+        .moment-avatar {
+            width: 42px;
+            height: 42px;
+            border-radius: 6px;
+            object-fit: cover;
+        }
+        .moment-body {
+            flex: 1;
+            min-width: 0;
+        }
+        .moment-head {
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        .moment-head-left {
+            min-width: 0;
+        }
+        .moment-regen-btn {
+            flex-shrink: 0;
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            border: none;
+            background: transparent;
+            color: #999;
+            font-size: 16px;
+            line-height: 1;
+            cursor: pointer;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .moment-regen-btn:hover { color: #ffb6b9; background: #f8f8f8; }
+        .moment-regen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .moment-remark {
+            font-weight: bold;
+            font-size: 15px;
+            color: #333;
+            margin-bottom: 4px;
+        }
+        .moment-time {
+            font-size: 11px;
+            color: #999;
+        }
+        .moment-content {
+            font-size: 14px;
+            line-height: 1.5;
+            color: #333;
+            margin-bottom: 10px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .moment-likes {
+            font-size: 12px;
+            color: #ffb6b9;
+            margin-bottom: 8px;
+            padding-left: 0;
+        }
+        .moment-likes::before {
+            content: "♥ ";
+        }
+        .moment-comments {
+            background: #f8f8f8;
+            border-radius: 6px;
+            padding: 8px 10px;
+            margin-top: 8px;
+        }
+        .comment-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .comment-item:last-child { margin-bottom: 0; }
+        .comment-avatar {
+            display: none;
+        }
+        .comment-body {
+            flex: 1;
+            min-width: 0;
+        }
+        .comment-remark {
+            font-size: 12px;
+            color: #666;
+            font-weight: bold;
+            margin-right: 4px;
+        }
+        .comment-reply-label {
+            font-size: 12px;
+            color: #999;
+            margin-right: 2px;
+        }
+        .comment-text {
+            font-size: 13px;
+            color: #333;
+            line-height: 1.4;
+        }
+        .moment-actions {
+            margin-top: 10px;
+            padding-top: 8px;
+            border-top: 1px solid #f0f0f0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .moment-like-btn {
+            background: none;
+            border: none;
+            color: #ffb6b9;
+            font-size: 13px;
+            cursor: pointer;
+            padding: 0;
+        }
+        .moment-like-btn:hover { opacity: 0.85; }
+        .moment-like-btn.is-liked { color: #e57373; font-weight: bold; }
+        .moment-comment-form {
+            display: flex;
+            gap: 8px;
+            flex: 1;
+            min-width: 0;
+        }
+        .moment-comment-input {
+            flex: 1;
+            min-width: 0;
+            padding: 6px 10px;
+            border: 1px solid #eee;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        .moment-comment-btn {
+            padding: 6px 12px;
+            background: #ffb6b9;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .moment-comment-btn:hover { background: #e57373; }
+        .moment-modal-mask {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.35);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+        }
+        .moment-modal {
+            background: #fff;
+            border-radius: 12px;
+            padding: 14px 16px;
+            width: 90%;
+            max-width: 420px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+        }
+        .moment-modal-title {
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+        .moment-modal-body { margin-top: 4px; }
+        .moment-compose-body { flex: 1; min-width: 0; }
+        .moment-compose-text {
+            width: 100%;
+            min-height: 72px;
+            padding: 10px 12px;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            font-size: 14px;
+            resize: vertical;
+            box-sizing: border-box;
+        }
+        .moment-compose-btn {
+            padding: 8px 16px;
+            background: #ffb6b9;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .moment-compose-btn:hover { background: #e57373; }
+        .moment-compose-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .moment-compose-btn.is-loading { pointer-events: none; }
+        .moment-compose-spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            margin-right: 6px;
+            vertical-align: middle;
+            border: 2px solid rgba(255,255,255,0.35);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: moment-compose-spin 0.65s linear infinite;
+        }
+        @keyframes moment-compose-spin {
+            to { transform: rotate(360deg); }
+        }
+        .moment-load-more {
+            padding: 8px 16px 16px;
+            text-align: center;
+        }
+        .moment-load-btn {
+            padding: 6px 16px;
+            border-radius: 999px;
+            border: 1px solid #ddd;
+            background: #fff;
+            font-size: 13px;
+            color: #666;
+            cursor: pointer;
+        }
+        .moment-load-btn:hover { background: #f7f7f7; }
+        .moment-load-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .moment-modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .moment-cancel-btn {
+            padding: 8px 14px;
+            background: #f0f0f0;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            color: #333;
+        }
+        .moment-cancel-btn:hover { background: #e0e0e0; }
+        .empty-state {
+            text-align: center;
+            color: #bbb;
+            font-size: 14px;
+            padding: 60px 20px;
+        }
+        .moment-card {
+            animation: moment-card-in 0.4s ease-out;
+        }
+        .moment-card.moment-card-new {
+            animation: moment-card-highlight 1.2s ease-out;
+        }
+        @keyframes moment-card-in {
+            from {
+                opacity: 0;
+                transform: translateY(-8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        @keyframes moment-card-highlight {
+            0% {
+                opacity: 0;
+                transform: translateY(-12px);
+            }
+            30% {
+                opacity: 1;
+                transform: translateY(2px);
+            }
+            60% {
+                transform: translateY(0);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-title">朋友圈</div>
+        <button class="moment-add-btn" id="openMomentModal" aria-label="发朋友圈">＋</button>
+    </header>
+    <main class="main">
+        <div id="momentsList">
+            <p class="empty-state">加载中…</p>
+        </div>
+        <div class="moment-load-more">
+            <button type="button" class="moment-load-btn" id="loadMoreBtn">加载更多</button>
+        </div>
+        <div class="moment-modal-mask" id="momentModalMask">
+            <div class="moment-modal" id="momentModal">
+                <div class="moment-modal-title">发朋友圈</div>
+                <div class="moment-modal-body">
+                    <textarea class="moment-compose-text" id="momentComposeText" placeholder="写点什么…" maxlength="500"></textarea>
+                    <div class="moment-modal-actions">
+                        <button type="button" class="moment-cancel-btn" id="momentModalCancel">取消</button>
+                        <button type="button" class="moment-compose-btn" id="momentComposeBtn">发布</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+    {% include 'tabbar.html' %}
+    <script>
+        (function() {
+            const listEl = document.getElementById('momentsList');
+            const USER_ID = 'user';
+            const loadMoreBtn = document.getElementById('loadMoreBtn');
+            let currentPage = 0;
+            let allMoments = [];
+            let loading = false;
+            let finished = false;
+
+            function escapeHtml(s) {
+                if (s == null) return '';
+                const div = document.createElement('div');
+                div.textContent = s;
+                return div.innerHTML;
+            }
+            function escapeAttr(s) {
+                if (s == null) return '';
+                return String(s)
+                    .replace(/&/g, '&amp;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;');
+            }
+            function formatTime(ts) {
+                if (!ts) return '';
+                try {
+                    const d = new Date(ts.replace(/-/g, '/'));
+                    const now = new Date();
+                    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                    const yesterday = new Date(today.getTime() - 86400000);
+                    const dDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+                    const h = ('0' + d.getHours()).slice(-2);
+                    const min = ('0' + d.getMinutes()).slice(-2);
+                    if (dDay.getTime() === today.getTime()) return '今天 ' + h + ':' + min;
+                    if (dDay.getTime() === yesterday.getTime()) return '昨天 ' + h + ':' + min;
+                    return (d.getMonth() + 1) + '-' + d.getDate() + ' ' + h + ':' + min;
+                } catch (e) { return ts; }
+            }
+
+            function renderMoments(moments, options) {
+                if (!moments || moments.length === 0) {
+                    listEl.innerHTML = '<p class="empty-state">暂无内容，敬请期待。</p>';
+                    finished = true;
+                    updateLoadMoreBtn();
+                    return;
+                }
+                listEl.innerHTML = moments.map(m => {
+                    const hasMyLike = (m.liker_ids || []).indexOf(USER_ID) >= 0;
+                    const likeBtnClass = hasMyLike ? 'moment-like-btn is-liked' : 'moment-like-btn';
+                    const likeBtnText = hasMyLike ? '♥ 已赞' : '♥ 赞';
+                    const likersHtml = m.liker_remarks && m.liker_remarks.length
+                        ? '<div class="moment-likes">' + m.liker_remarks.join('、') + '</div>'
+                        : '';
+                    const commentsHtml = m.comments && m.comments.length
+                        ? '<div class="moment-comments">' + m.comments.map(c => {
+                            const replyLabel = (c.reply_to_remark != null && c.reply_to_remark !== '')
+                                ? '<span class="comment-reply-label">回复 ' + escapeHtml(c.reply_to_remark) + '：</span>'
+                                : '';
+                            return '<div class="comment-item">' +
+                                '<div class="comment-body">' +
+                                '<span class="comment-remark">' + escapeHtml(c.remark) + '</span>' +
+                                replyLabel +
+                                '<span class="comment-text">' + escapeHtml(c.content) + '</span>' +
+                                '</div></div>';
+                        }).join('') + '</div>'
+                        : '';
+                    const avatarHref = (m.char_id === USER_ID) ? '/profile' : ('/memory/' + escapeAttr(m.char_id));
+                    return '<div class="moment-card" data-char-id="' + escapeAttr(m.char_id) + '" data-timestamp="' + escapeAttr(m.timestamp) + '">' +
+                        '<div class="moment-avatar-wrap">' +
+                        '<a href="' + avatarHref + '">' +
+                        '<img class="moment-avatar" src="' + (m.avatar || '') + '" alt="" onerror="this.src=\'/static/default_avatar.png\'">' +
+                        '</a>' +
+                        '</div>' +
+                        '<div class="moment-body">' +
+                        '<div class="moment-head">' +
+                        '<div class="moment-head-left">' +
+                        '<div class="moment-remark">' + escapeHtml(m.remark) + '</div>' +
+                        '<div class="moment-time">' + formatTime(m.timestamp) + '</div>' +
+                        '</div>' +
+                        '<button type="button" class="moment-regen-btn" aria-label="重新生成" title="重新生成">↻</button>' +
+                        '</div>' +
+                        '<div class="moment-content">' + escapeHtml(m.content) + '</div>' +
+                        likersHtml +
+                        commentsHtml +
+                        '<div class="moment-actions">' +
+                        '<button type="button" class="' + likeBtnClass + '" aria-label="赞">' + likeBtnText + '</button>' +
+                        '<form class="moment-comment-form" onsubmit="return false;">' +
+                        '<input type="text" class="moment-comment-input" placeholder="说点什么…" maxlength="200">' +
+                        '<button type="button" class="moment-comment-btn">发送</button>' +
+                        '</form>' +
+                        '</div>' +
+                        '</div></div>';
+                }).join('');
+                if (options && options.highlightFirst) {
+                    const first = listEl.querySelector('.moment-card');
+                    if (first) {
+                        first.classList.add('moment-card-new');
+                        setTimeout(function() { first.classList.remove('moment-card-new'); }, 1200);
+                    }
+                }
+                if (options && options.scrollTo && options.scrollTo.char_id != null && options.scrollTo.timestamp != null) {
+                    const wantCharId = options.scrollTo.char_id;
+                    const wantTs = options.scrollTo.timestamp;
+                    const card = Array.from(listEl.querySelectorAll('.moment-card')).find(function(el) {
+                        return el.getAttribute('data-char-id') === wantCharId && el.getAttribute('data-timestamp') === wantTs;
+                    });
+                    if (card) {
+                        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                }
+            }
+
+            function updateLoadMoreBtn() {
+                if (!loadMoreBtn) return;
+                if (finished) {
+                    loadMoreBtn.textContent = '没有更多了';
+                    loadMoreBtn.disabled = true;
+                } else {
+                    loadMoreBtn.textContent = loading ? '加载中…' : '加载更多';
+                    loadMoreBtn.disabled = loading;
+                }
+            }
+
+            function loadNextPage(reset = false, options) {
+                if (loading) return;
+                if (finished && !reset) return;
+
+                if (reset) {
+                    currentPage = 0;
+                    allMoments = [];
+                    finished = false;
+                    listEl.innerHTML = '<p class="empty-state">加载中…</p>';
+                }
+
+                const nextPage = currentPage + 1;
+                const opts = options || null;
+                loading = true;
+                updateLoadMoreBtn();
+
+                fetch('/api/moments?page=' + nextPage)
+                    .then(r => r.json())
+                    .then(moments => {
+                        if (!moments || moments.length === 0) {
+                            if (nextPage === 1) {
+                                renderMoments([]);
+                            } else {
+                                finished = true;
+                                updateLoadMoreBtn();
+                            }
+                            return;
+                        }
+                        allMoments = allMoments.concat(moments);
+                        currentPage = nextPage;
+                        renderMoments(allMoments, opts);
+                    })
+                    .catch(() => {
+                        listEl.innerHTML = '<p class="empty-state">加载失败，请稍后重试。</p>';
+                    })
+                    .finally(() => {
+                        loading = false;
+                        updateLoadMoreBtn();
+                    });
+            }
+
+            function attachMomentEvents() {
+                listEl.addEventListener('click', function(e) {
+                    const regenBtn = e.target.closest('.moment-regen-btn');
+                    if (regenBtn && !regenBtn.disabled) {
+                        const card = regenBtn.closest('.moment-card');
+                        if (!card) return;
+                        const charId = card.getAttribute('data-char-id');
+                        const timestamp = card.getAttribute('data-timestamp');
+                        regenBtn.disabled = true;
+                        fetch('/api/moments/regenerate', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ char_id: charId, timestamp: timestamp })
+                        })
+                            .then(r => r.json())
+                            .then(() => loadNextPage(true))
+                            .catch(() => loadNextPage(true))
+                            .finally(() => { regenBtn.disabled = false; });
+                        return;
+                    }
+                    const likeBtn = e.target.closest('.moment-like-btn');
+                    if (likeBtn) {
+                        const card = likeBtn.closest('.moment-card');
+                        if (!card || likeBtn.classList.contains('is-liked')) return;
+                        const charId = card.getAttribute('data-char-id');
+                        const timestamp = card.getAttribute('data-timestamp');
+                        fetch('/api/moments/like', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ char_id: charId, timestamp: timestamp })
+                        })
+                            .then(r => r.json())
+                            .then(() => loadNextPage(true, { scrollTo: { char_id: charId, timestamp: timestamp } }))
+                            .catch(() => {});
+                        return;
+                    }
+                    const commentBtn = e.target.closest('.moment-comment-btn');
+                    if (commentBtn) {
+                        const form = commentBtn.closest('.moment-comment-form');
+                        const card = form && form.closest('.moment-card');
+                        if (!card) return;
+                        const input = form.querySelector('.moment-comment-input');
+                        const content = (input && input.value || '').trim();
+                        if (!content) return;
+                        const charId = card.getAttribute('data-char-id');
+                        const timestamp = card.getAttribute('data-timestamp');
+                        fetch('/api/moments/comment', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ char_id: charId, timestamp: timestamp, content: content })
+                        })
+                            .then(r => r.json())
+                            .then(() => {
+                                if (input) input.value = '';
+                                loadNextPage(true, { scrollTo: { char_id: charId, timestamp: timestamp } });
+                            })
+                            .catch(() => {});
+                    }
+                });
+            }
+
+            function attachComposeEvent() {
+                const composeBtn = document.getElementById('momentComposeBtn');
+                const composeText = document.getElementById('momentComposeText');
+                const openBtn = document.getElementById('openMomentModal');
+                const mask = document.getElementById('momentModalMask');
+                const cancelBtn = document.getElementById('momentModalCancel');
+                if (!composeBtn || !composeText || !openBtn || !mask || !cancelBtn) return;
+
+                function openModal() {
+                    mask.style.display = 'flex';
+                    setTimeout(() => composeText.focus(), 0);
+                }
+                function closeModal() {
+                    mask.style.display = 'none';
+                    composeBtn.disabled = false;
+                    composeBtn.classList.remove('is-loading');
+                    composeBtn.innerHTML = '发布';
+                }
+
+                openBtn.addEventListener('click', openModal);
+                cancelBtn.addEventListener('click', function() {
+                    composeText.value = '';
+                    closeModal();
+                });
+                // 点击遮罩空白处关闭
+                mask.addEventListener('click', function(e) {
+                    if (e.target === mask) {
+                        closeModal();
+                    }
+                });
+
+                composeBtn.addEventListener('click', function() {
+                    const content = (composeText.value || '').trim();
+                    if (!content) return;
+                    composeBtn.disabled = true;
+                    composeBtn.classList.add('is-loading');
+                    composeBtn.innerHTML = '<span class="moment-compose-spinner"></span>发布中…';
+                    fetch('/api/moments/post', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ content: content })
+                    })
+                        .then(r => r.json())
+                        .then(() => {
+                            composeText.value = '';
+                            closeModal();
+                            loadNextPage(true, { highlightFirst: true });
+                        })
+                        .catch(() => {})
+                        .finally(() => {
+                            composeBtn.disabled = false;
+                            composeBtn.classList.remove('is-loading');
+                            composeBtn.innerHTML = '发布';
+                        });
+                });
+            }
+
+            if (loadMoreBtn) {
+                loadMoreBtn.addEventListener('click', function() {
+                    loadNextPage(false);
+                });
+            }
+
+            loadNextPage(true);
+            attachMomentEvents();
+            attachComposeEvent();
+        })();
+    </script>
+</body>
+</html>

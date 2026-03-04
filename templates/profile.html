@@ -222,6 +222,10 @@
           <div id="view-chat-model" style="font-family:monospace; background:#f0f0f0; padding:2px 6px; border-radius:4px; display:inline-block;">-</div>
         </div>
         <div>
+          <div style="font-size:12px; color:#999;">朋友圈模型</div>
+          <div id="view-moments-model" style="font-family:monospace; background:#f0f0f0; padding:2px 6px; border-radius:4px; display:inline-block;">-</div>
+        </div>
+        <div>
           <div style="font-size:12px; color:#999;">记忆总结模型</div>
           <div id="view-summary-model" style="font-family:monospace; background:#f0f0f0; padding:2px 6px; border-radius:4px; display:inline-block;">-</div>
         </div>
@@ -257,6 +261,10 @@
           <div>
             <div class="input-label">聊天 (Chat)</div>
             <select id="model-chat" class="model-select"></select>
+          </div>
+          <div>
+            <div class="input-label">朋友圈 (Moments)</div>
+            <select id="model-moments" class="model-select"></select>
           </div>
           <div>
             <div class="input-label">记忆总结 (Summary)</div>
@@ -652,6 +660,7 @@
 
     document.getElementById('view-route-name').textContent = routeName;
     document.getElementById('view-chat-model').textContent = models.chat;
+    document.getElementById('view-moments-model').textContent = models.moments != null ? models.moments : models.chat;
     document.getElementById('view-summary-model').textContent = models.summary;
     document.getElementById('view-gen-model').textContent = models.gen_persona;
   }
@@ -691,6 +700,7 @@
             : '<option value="">(暂无模型，请在下方添加)</option>';
 
     document.getElementById('model-chat').innerHTML = optionsHtml;
+    document.getElementById('model-moments').innerHTML = optionsHtml;
     document.getElementById('model-summary').innerHTML = optionsHtml;
     document.getElementById('model-gen').innerHTML = optionsHtml;
 
@@ -699,6 +709,7 @@
     const savedModels = apiConfig.routes[route].models;
 
     setSelectValue('model-chat', savedModels.chat);
+    setSelectValue('model-moments', savedModels.moments != null ? savedModels.moments : savedModels.chat);
     setSelectValue('model-summary', savedModels.summary);
     setSelectValue('model-gen', savedModels.gen_persona);
 
@@ -772,6 +783,7 @@
     // 更新内存中的配置对象
     apiConfig.active_route = activeRoute;
     apiConfig.routes[activeRoute].models.chat = document.getElementById('model-chat').value;
+    apiConfig.routes[activeRoute].models.moments = document.getElementById('model-moments').value;
     apiConfig.routes[activeRoute].models.summary = document.getElementById('model-summary').value;
     apiConfig.routes[activeRoute].models.gen_persona = document.getElementById('model-gen').value;
 

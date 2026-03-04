@@ -257,6 +257,30 @@
       display: none !important;
     }
 
+    /* 撤回占位行：整页居中，不占气泡 */
+    .recall-placeholder-row {
+      width: 100%;
+      text-align: center;
+      font-size: 12px;
+      color: #999;
+      margin: 4px 0;
+      padding: 2px 0;
+    }
+    .message-group.has-recall {
+      width: 100%;
+      margin-left: 0 !important;
+      margin-right: 0 !important;
+    }
+    .message-group.assistant.has-recall .message-content-row { align-self: flex-start; }
+    .message-group.user.has-recall .message-content-row { align-self: flex-end; }
+    /* 有撤回时，非首行的 content-row 用 spacer 顶替头像以对齐 */
+    .message-content-row .avatar-spacer {
+      width: 40px;
+      flex-shrink: 0;
+    }
+    .message-group.user .message-content-row .avatar-spacer { margin-left: 10px; }
+    .message-group.assistant .message-content-row .avatar-spacer { margin-right: 10px; }
+
     /* 3. 外部控制容器 (修改版：一直显示 + 水平对齐) */
     .controls-container {
       display: flex;
@@ -905,16 +929,47 @@
     const fullText = content != null ? String(content) : '';
     const { tickles, rest } = extractTicklesFromContent(fullText);
 
-    let bubbles = rest.split('/').map(p => p.trim()).filter(Boolean);
-    if (bubbles.length === 0 && !tickles.length) {
+    // 分段：保留 [recall] 用于解析
+    const segments = rest.split('/').map(p => p.trim()).filter(s => s !== '');
+    const displayItems = []; // { type: 'bubble', text } | { type: 'recall' }
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      if (seg === '[recall]') {
+        if (displayItems.length > 0 && displayItems[displayItems.length - 1].type === 'bubble') {
+          displayItems.pop();
+        }
+        displayItems.push({ type: 'recall' });
+      } else {
+        displayItems.push({ type: 'bubble', text: seg });
+      }
+    }
+
+    if (displayItems.length === 0 && !tickles.length) {
       if (mode === 'append') {
-        bubbles.push(rest || (content != null ? content : ''));
+        displayItems.push({ type: 'bubble', text: rest || (content != null ? content : '') });
       } else if (isAssistant && id) {
-        bubbles.push('');
+        displayItems.push({ type: 'bubble', text: '' });
       } else {
         return;
       }
     }
+
+    const hasRecall = displayItems.some(it => it.type === 'recall');
+    const rows = []; // { type: 'content', bubbles: string[] } | { type: 'recall' }
+    let currentBubbles = [];
+    for (const it of displayItems) {
+      if (it.type === 'bubble') {
+        currentBubbles.push(it.text);
+      } else {
+        if (currentBubbles.length) {
+          rows.push({ type: 'content', bubbles: currentBubbles });
+          currentBubbles = [];
+        }
+        rows.push({ type: 'recall' });
+      }
+    }
+    if (currentBubbles.length) rows.push({ type: 'content', bubbles: currentBubbles });
+
     const date = new Date(timestamp);
 
     // --- 角色判断逻辑 ---
@@ -925,7 +980,9 @@
     const group = document.createElement('div');
     group.classList.add('message-group', cssClass);
     if (tickles.length > 0) group.classList.add('has-tickle');
-    if (tickles.length > 0 && bubbles.length === 0) group.classList.add('tickle-only');
+    if (hasRecall) group.classList.add('has-recall');
+    const hasContentBubbles = rows.some(r => r.type === 'content' && r.bubbles.length > 0);
+    if (tickles.length > 0 && !hasContentBubbles) group.classList.add('tickle-only');
     group.dataset.timestamp = date.toISOString();
     group.dataset.id = id;
 
@@ -988,7 +1045,6 @@
     const stack = document.createElement('div');
     stack.classList.add('bubble-stack');
 
-    // 如果是群聊且不是用户，在第一条气泡上面显示名字
     if (isGroupMode && !isUser && displayName) {
       const nameDiv = document.createElement('div');
       nameDiv.className = 'bubble-name';
@@ -997,11 +1053,10 @@
       stack.appendChild(nameDiv);
     }
 
-    bubbles.forEach((text, index) => {
-      const isLast = (index === bubbles.length - 1);
+    function addBubbleToStack(st, text, opts) {
+      const { isLastInGroup = false, attachControls = false } = opts || {};
       const wrapper = document.createElement('div');
       wrapper.classList.add('message-wrapper', cssClass);
-
       const bubble = document.createElement('div');
       bubble.classList.add('bubble');
       if (!text || text.trim() === '') {
@@ -1011,96 +1066,119 @@
         bubble.innerHTML = text.replace(/\n/g, "<br>");
       }
       wrapper.appendChild(bubble);
-
-      if (isLast) {
-        // ... (控制栏代码保持不变，复制/编辑/删除逻辑通用) ...
+      if (attachControls && isLastInGroup) {
         wrapper.dataset.fulltext = fullText;
         const controls = document.createElement('div');
         controls.classList.add('controls-container');
-
-        // 【新增】重新生成按钮 (只给助手加，是不是最后一条由 CSS 控制显示)
-        // 只有单聊模式才加，群聊不加 (因为群聊逻辑复杂)
         if (role === 'assistant' && !isGroupMode) {
           const regenBtn = document.createElement('button');
           regenBtn.classList.add('regen-btn');
           regenBtn.title = "重新生成 (删除此条并重试)";
-          // 刷新图标 SVG
           regenBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>';
-
-          regenBtn.onclick = () => doRegenerate(wrapper); // 传入 wrapper 方便删除
-
-          // 把它插在最前面，或者时间戳后面
+          regenBtn.onclick = () => doRegenerate(wrapper);
           controls.appendChild(regenBtn);
         }
-
         const timestampEl = document.createElement('div');
         timestampEl.classList.add('timestamp');
         timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-        // 2. 编辑按钮 (SVG 图标: 笔)
         const editBtn = document.createElement('button');
         editBtn.className = 'action-btn';
         editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
         editBtn.onclick = () => openEditModal(id, fullText, group);
-
-        // 3. 删除按钮 (SVG 图标: 垃圾桶)
         const delBtn = document.createElement('button');
         delBtn.className = 'action-btn';
         delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
         delBtn.onclick = () => deleteMessage(id, group);
-
-        // 4. 复制按钮 (保持原逻辑，加上 class)
         const copyBtn = document.createElement('button');
         copyBtn.className = 'action-btn';
         copyBtn.innerHTML = `<img src="${copyIconPath}" style="width:14px;height:14px;opacity:0.6;">`;
         copyBtn.onclick = () => {
-          // --- 【核心修改】全环境兼容复制逻辑 ---
-
-          // 情况 A: 现代浏览器 + HTTPS 安全环境
           if (navigator.clipboard && window.isSecureContext) {
-            navigator.clipboard.writeText(fullText).then(() => {
-              showCopySuccess(copyBtn, icon);
-            }).catch(err => {
-              // 如果 HTTPS 居然也报错（比如某些安卓 webview 抽风），就自动降级
-              console.warn('HTTPS复制出错，尝试降级:', err);
-              fallbackCopyTextToClipboard(fullText, copyBtn, icon);
-            });
+            navigator.clipboard.writeText(fullText).then(() => showCopySuccess(copyBtn, copyIconPath)).catch(() => fallbackCopyTextToClipboard(fullText, copyBtn, copyIconPath));
+          } else {
+            fallbackCopyTextToClipboard(fullText, copyBtn, copyIconPath);
           }
-          // 情况 B: HTTP 环境 (比如直接用 IP 访问)
-          else {
-            fallbackCopyTextToClipboard(fullText, copyBtn, icon);
-          }
-        }
-
+        };
         controls.appendChild(timestampEl);
-        if(id) { // 只有有 ID 的消息才能编辑/删除
-          controls.appendChild(editBtn);
-          controls.appendChild(delBtn);
-        }
+        if (id) { controls.appendChild(editBtn); controls.appendChild(delBtn); }
         controls.appendChild(copyBtn);
         wrapper.appendChild(controls);
       }
-      stack.appendChild(wrapper);
-    });
+      st.appendChild(wrapper);
+    }
 
-    /* 头像+气泡装进横向容器，保证始终并排（气泡在头像内侧），不换行到下侧 */
-    const contentRow = document.createElement('div');
-    contentRow.className = 'message-content-row';
-    contentRow.appendChild(avatar);
-    contentRow.appendChild(stack);
+    const recallLabel = isUser ? '我撤回了一条消息' : '撤回了一条消息';
 
-    if (tickles.length > 0) {
-      const tickleRow = document.createElement('div');
-      tickleRow.className = 'tickle-row';
-      const senderRole = isUser ? 'user' : 'assistant';
-      const senderId = isUser ? 'user' : role;
-      const tickleText = tickles.map(t => formatTickleText(t, senderRole, senderId)).filter(Boolean).join(' ');
-      const tickleTextNode = document.createTextNode(tickleText);
-      tickleRow.appendChild(tickleTextNode);
-      group.appendChild(tickleRow);
-      group.appendChild(contentRow);
+    if (!hasRecall) {
+      const bubbles = rows[0] && rows[0].type === 'content' ? rows[0].bubbles : [];
+      bubbles.forEach((text, index) => {
+        addBubbleToStack(stack, text, { isLastInGroup: index === bubbles.length - 1, attachControls: true });
+      });
+      const contentRow = document.createElement('div');
+      contentRow.className = 'message-content-row';
+      contentRow.appendChild(avatar);
+      contentRow.appendChild(stack);
+      if (tickles.length > 0) {
+        const tickleRow = document.createElement('div');
+        tickleRow.className = 'tickle-row';
+        const senderRole = isUser ? 'user' : 'assistant';
+        const senderId = isUser ? 'user' : role;
+        const tickleText = tickles.map(t => formatTickleText(t, senderRole, senderId)).filter(Boolean).join(' ');
+        tickleRow.appendChild(document.createTextNode(tickleText));
+        group.appendChild(tickleRow);
+        group.appendChild(contentRow);
+      } else {
+        group.appendChild(contentRow);
+      }
     } else {
-      group.appendChild(contentRow);
+      const contentRows = rows.filter(r => r.type === 'content');
+      let contentRowIdx = 0;
+      for (const row of rows) {
+        if (row.type === 'recall') {
+          const recallRow = document.createElement('div');
+          recallRow.className = 'recall-placeholder-row';
+          recallRow.textContent = recallLabel;
+          group.appendChild(recallRow);
+        } else {
+          const st = document.createElement('div');
+          st.classList.add('bubble-stack');
+          if (contentRowIdx === 0 && isGroupMode && !isUser && displayName) {
+            const nameDiv = document.createElement('div');
+            nameDiv.className = 'bubble-name';
+            nameDiv.textContent = displayName;
+            nameDiv.style.display = 'block';
+            st.appendChild(nameDiv);
+          }
+          const isLastContentRow = contentRowIdx === contentRows.length - 1;
+          row.bubbles.forEach((text, idx) => {
+            addBubbleToStack(st, text, {
+              isLastInGroup: isLastContentRow && idx === row.bubbles.length - 1,
+              attachControls: isLastContentRow && idx === row.bubbles.length - 1
+            });
+          });
+          const contentRow = document.createElement('div');
+          contentRow.className = 'message-content-row';
+          if (contentRowIdx === 0) {
+            contentRow.appendChild(avatar);
+          } else {
+            const spacer = document.createElement('div');
+            spacer.className = 'avatar-spacer';
+            contentRow.appendChild(spacer);
+          }
+          contentRow.appendChild(st);
+          group.appendChild(contentRow);
+          contentRowIdx++;
+        }
+      }
+      if (tickles.length > 0) {
+        const tickleRow = document.createElement('div');
+        tickleRow.className = 'tickle-row';
+        const senderRole = isUser ? 'user' : 'assistant';
+        const senderId = isUser ? 'user' : role;
+        const tickleText = tickles.map(t => formatTickleText(t, senderRole, senderId)).filter(Boolean).join(' ');
+        tickleRow.appendChild(document.createTextNode(tickleText));
+        group.insertBefore(tickleRow, group.firstChild);
+      }
     }
 
     if (mode === 'prepend') {

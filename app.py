@@ -48,6 +48,8 @@ GROUPS_CONFIG_FILE = os.path.join(BASE_DIR, "configs", "groups.json")
 GROUPS_DIR = os.path.join(BASE_DIR, "groups")
 
 USER_SETTINGS_FILE = os.path.join(BASE_DIR, "configs", "user_settings.json")
+MOMENTS_DATA_FILE = os.path.join(BASE_DIR, "configs", "moments_data.json")
+MOMENTS_LAST_POST_FILE = os.path.join(BASE_DIR, "configs", "moments_last_post.json")
 
 # --- 【新增】已读状态管理 ---
 READ_STATUS_FILE = os.path.join(BASE_DIR, "configs", "read_status.json")
@@ -382,10 +384,11 @@ def run_persona_migration_all():
     except Exception as e:
         print(f"❌ [Migration] 批量迁移失败: {e}")
 
-def build_system_prompt(char_id):  # <--- 增加参数
+def build_system_prompt(char_id, include_global_format=True):  # <--- 增加参数
     """
     根据 prompts/ 文件夹下的文件，动态组装 System Prompt。
     包含：人设、关系、用户档案、格式要求、长/中/短期记忆、日程表、当前时间。
+    include_global_format=False 时不拼接全局 system 规则（如朋友圈生成时使用）。
     """
     prompt_parts = []
 
@@ -446,6 +449,7 @@ def build_system_prompt(char_id):  # <--- 增加参数
                     # 【修改】拼装文本改成日语
                     rel_str = (f"対話相手：{current_user_name}\n"
                            f"関係性：{user_rel.get('role', '不明')}\n"
+                           f"関係度：{user_rel.get('score', 1)}\n"
                            f"詳細：{user_rel.get('description', '')}")
                 prompt_parts.append(f"【Relationship / 関係設定】\n{rel_str}")
     except Exception: pass
@@ -489,13 +493,14 @@ def build_system_prompt(char_id):  # <--- 增加参数
             prompt_parts.append(f"【User / ユーザー情報】\n{user_prefix.strip()}")
     except: pass
 
-    # 4. 【全局通用】读取格式规则 (从 configs 读)
-    try:
-        path = os.path.join(CONFIG_DIR, "global_format.md")
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                prompt_parts.append(f"【System Rules / 出力ルール】\n{f.read().strip()}")
-    except: pass
+    # 4. 【全局通用】读取格式规则 (从 configs 读)，仅当 include_global_format 为 True 时加入
+    if include_global_format:
+        try:
+            path = os.path.join(CONFIG_DIR, "global_format.md")
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    prompt_parts.append(f"【System Rules / 出力ルール】\n{f.read().strip()}")
+        except: pass
 
     # --- 5. 中期记忆 (JSON - 按天，最近7天) ---
     try:
@@ -642,7 +647,8 @@ def build_group_relationship_prompt(current_char_id, other_member_ids):
             if rel_info:
                 role = rel_info.get('role', '未知')
                 desc = rel_info.get('description', '特になし')
-                prompt_text += f"- 対 {target_name}: {role} ({desc})\n"
+                score = rel_info.get('score', 1)
+                prompt_text += f"- 対 {target_name}: {role} (関係度:{score}) {desc}\n"
                 found_any = True
             else:
                 # 如果没找到特定关系，也可以不写，或者写个默认
@@ -694,6 +700,10 @@ def call_ai_to_summarize(text_content, prompt_type="short", char_id="kunigami"):
                 "あなたはグループチャットの書記係（第三者）です。"
                 "以下の会話ログから、重要なトピックや出来事を**客観的に**抽出してください。"
                 "出力フォーマット：\n- [HH:MM] 出来事の内容"
+            ),
+            "moment": (
+                f"あなたは{char_name}本人です。以下の朋友圈（Moments）に関するやり取りを、"
+                "**一行だけ**で自分の記憶として要約してください。一人称で、事実を簡潔に。時間表記・箇条書き・引用符は不要。出力はその一文のみ。"
             )
         },
         "zh": {
@@ -715,6 +725,10 @@ def call_ai_to_summarize(text_content, prompt_type="short", char_id="kunigami"):
                 "请从以下的对话记录中，**客观地**提取重要的话题或事件。"
                 "要求：\n1. 不要使用第一人称。\n2. 明确主语（如“[名字]说了...”、“大家决定...”）。\n"
                 "输出格式：\n- [HH:MM] 事件内容"
+            ),
+            "moment": (
+                f"你现在是{char_name}本人。请将以下朋友圈相关的一件互动，"
+                "用**一句话**总结为自己的记忆。第一人称，只写事实、简洁。不要时间前缀、不要列表、不要引号。只输出这一句话。"
             )
         }
     }
@@ -941,6 +955,54 @@ def distribute_group_memory(group_id, group_name, members, new_events, date_str)
             print(f"     ❌ 同步给 [{char_id}] 失败: {e}")
 
 
+def append_moment_event_to_short_memory(char_id, context_text):
+    """
+    将朋友圈互动用 AI 总结为一句话，追加到角色的当日短期记忆中。
+    使用与记忆总结相同的模型（summary），context_text 为互动描述。
+    """
+    if not char_id or char_id == "user" or not (context_text or "").strip():
+        return
+    import re
+    try:
+        summary = call_ai_to_summarize((context_text or "").strip(), "moment", char_id)
+        if not summary:
+            return
+        line = summary.strip().split("\n")[0].strip()
+        line = re.sub(r"^-\s*\[\d{2}:\d{2}\]\s*", "", line).strip()
+        if not line:
+            return
+        _, prompts_dir = get_paths(char_id)
+        short_file = os.path.join(prompts_dir, "6_memory_short.json")
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        time_str = datetime.now().strftime("%H:%M")
+
+        current_data = {}
+        if os.path.exists(short_file):
+            with open(short_file, "r", encoding="utf-8") as f:
+                try:
+                    current_data = json.load(f)
+                except Exception:
+                    pass
+
+        day_data = current_data.get(date_str, {})
+        if isinstance(day_data, list):
+            existing_events = list(day_data)
+            last_id = 0
+        else:
+            existing_events = list(day_data.get("events", []))
+            last_id = day_data.get("last_id", 0)
+
+        existing_events.append({"time": time_str, "event": line})
+        existing_events.sort(key=lambda x: x["time"])
+
+        current_data[date_str] = {"events": existing_events, "last_id": last_id}
+        os.makedirs(os.path.dirname(short_file), exist_ok=True)
+        with open(short_file, "w", encoding="utf-8") as f:
+            json.dump(current_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"   [Moments] 写入短期记忆失败 [{char_id}]: {e}")
+
+
 # --- 【新增】对话前自动记忆同步，保持单聊与群聊记忆连贯 ---
 def _get_groups_for_char(char_id):
     """获取该角色参与的所有群聊 ID 列表"""
@@ -1026,6 +1088,33 @@ def sync_memory_before_group_chat(group_id):
         return True, None
     except Exception as e:
         print(f"   [Sync] 群聊前记忆同步失败: {e}")
+        return False, str(e)
+
+
+def sync_memory_before_moments(char_id):
+    """
+    发朋友圈前：先总结该角色的单聊短期记忆，以及其参与的所有群聊短期记忆，
+    确保 6_memory_short 已包含最新单聊与群聊内容，再生成朋友圈时 AI 能结合最近经历。
+    返回 (success: bool, error_msg: str|None)
+    """
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    dates = [today_str]
+    if now.hour < 4:
+        yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+        dates.insert(0, yesterday_str)
+    try:
+        ok, err = sync_memory_before_single_chat(char_id)
+        if not ok:
+            return ok, err
+        for d in dates:
+            try:
+                update_short_memory_for_date(char_id, d)
+            except Exception as e:
+                print(f"   [Sync] 发朋友圈前单聊记忆 {char_id} 日期 {d} 同步失败: {e}")
+        return True, None
+    except Exception as e:
+        print(f"   [Sync] 发朋友圈前记忆同步失败: {e}")
         return False, str(e)
 
 
@@ -1123,6 +1212,348 @@ def service_worker():
 def contact_list_view():
     # 改用 render_template，这样 html 里的 {% include %} 才会生效
     return render_template("contacts.html")
+
+@app.route("/moments")
+def moments_view():
+    return render_template("moments.html")
+
+def _get_moments_id_display():
+    """返回 (id -> avatar, id -> remark) 用于朋友圈展示。含 user 与所有角色。"""
+    avatars, remarks = {}, {}
+    if os.path.exists(USER_SETTINGS_FILE):
+        try:
+            with open(USER_SETTINGS_FILE, "r", encoding="utf-8") as f:
+                ud = json.load(f)
+                avatars["user"] = ud.get("avatar") or "/static/avatar_user.png"
+                remarks["user"] = ud.get("current_user_name") or "我"
+        except: pass
+    if not avatars.get("user"): avatars["user"] = "/static/avatar_user.png"
+    if not remarks.get("user"): remarks["user"] = "我"
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                for cid, info in json.load(f).items():
+                    avatars[cid] = info.get("avatar") or "/static/default_avatar.png"
+                    remarks[cid] = info.get("remark") or info.get("name") or cid
+        except: pass
+    return avatars, remarks
+
+@app.route("/api/moments", methods=["GET"])
+def get_moments():
+    """朋友圈列表。数据格式：char_id, content, timestamp, liker_ids, comments (commenter_id, content, timestamp)。评论时间大于当前时间的不返回。"""
+    now = datetime.now()
+    # 分页参数：默认第 1 页，每页 10 条
+    try:
+        page = int(request.args.get("page", 1))
+    except (TypeError, ValueError):
+        page = 1
+    if page < 1: page = 1
+    page_size = 10
+
+    avatars, remarks = _get_moments_id_display()
+    moments = []
+    if not os.path.exists(MOMENTS_DATA_FILE):
+        return jsonify(moments)
+    try:
+        with open(MOMENTS_DATA_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as e:
+        print(f"moments_data.json load error: {e}")
+        return jsonify(moments)
+    for post in raw:
+        char_id = post.get("char_id", "")
+        comments_ok = []
+        for c in post.get("comments", []):
+            try:
+                ts = datetime.strptime(c["timestamp"], "%Y-%m-%d %H:%M:%S")
+                if ts <= now:
+                    reply_to_id = c.get("reply_to")
+                    reply_to_remark = remarks.get(reply_to_id, reply_to_id or "") if reply_to_id else ""
+                    comments_ok.append({
+                        "commenter_id": c.get("commenter_id", ""),
+                        "content": c.get("content", ""),
+                        "timestamp": c.get("timestamp", ""),
+                        "avatar": avatars.get(c.get("commenter_id"), "/static/default_avatar.png"),
+                        "remark": remarks.get(c.get("commenter_id"), c.get("commenter_id", "")),
+                        "reply_to": reply_to_id,
+                        "reply_to_remark": reply_to_remark
+                    })
+            except: pass
+        # 支持新格式 likers: [{liker_id, timestamp}] 与旧格式 liker_ids: []
+        liker_ids_raw = post.get("liker_ids", [])
+        likers_with_ts = post.get("likers", [])
+        if likers_with_ts:
+            liker_ids_ok = []
+            for like in likers_with_ts:
+                try:
+                    ts = datetime.strptime(like.get("timestamp", ""), "%Y-%m-%d %H:%M:%S")
+                    if ts <= now:
+                        liker_ids_ok.append(like.get("liker_id", ""))
+                except: pass
+            liker_remarks = [remarks.get(lid, lid) for lid in liker_ids_ok]
+        else:
+            liker_ids_ok = liker_ids_raw
+            liker_remarks = [remarks.get(lid, lid) for lid in liker_ids_ok]
+        moments.append({
+            "char_id": char_id,
+            "content": post.get("content", ""),
+            "timestamp": post.get("timestamp", ""),
+            "avatar": avatars.get(char_id, "/static/default_avatar.png"),
+            "remark": remarks.get(char_id, char_id),
+            "liker_ids": liker_ids_ok,
+            "liker_remarks": liker_remarks,
+            "comments": comments_ok
+        })
+    moments.sort(key=lambda x: x["timestamp"], reverse=True)
+
+    # 分页截取
+    start = (page - 1) * page_size
+    end = start + page_size
+    paged = moments[start:end]
+    return jsonify(paged)
+
+
+def _find_moment_post(raw, char_id, timestamp_str):
+    """在 raw 列表中找到 char_id + timestamp 匹配的一条，返回 (index, post) 或 (None, None)。"""
+    for i, post in enumerate(raw):
+        if post.get("char_id") == char_id and post.get("timestamp") == timestamp_str:
+            return i, post
+    return None, None
+
+
+@app.route("/api/moments/like", methods=["POST"])
+def moments_like():
+    """用户点赞一条朋友圈。body: { char_id, timestamp }。"""
+    data = request.get_json() or {}
+    char_id = data.get("char_id")
+    timestamp_str = data.get("timestamp")
+    if not char_id or not timestamp_str:
+        return jsonify({"error": "缺少 char_id 或 timestamp"}), 400
+
+    if not os.path.exists(MOMENTS_DATA_FILE):
+        return jsonify({"error": "暂无朋友圈数据"}), 404
+    try:
+        with open(MOMENTS_DATA_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    idx, post = _find_moment_post(raw, char_id, timestamp_str)
+    if idx is None:
+        return jsonify({"error": "未找到该条朋友圈"}), 404
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    likers = post.get("likers", [])
+    if not likers and post.get("liker_ids"):
+        for lid in post["liker_ids"]:
+            likers.append({"liker_id": lid, "timestamp": post.get("timestamp", now)})
+    already = any(l.get("liker_id") == "user" for l in likers)
+    if not already:
+        likers.append({"liker_id": "user", "timestamp": now})
+        post["likers"] = likers
+        raw[idx] = post
+        safe_save_json(MOMENTS_DATA_FILE, raw)
+    return jsonify({"status": "success", "liked": True})
+
+
+@app.route("/api/moments/comment", methods=["POST"])
+def moments_comment():
+    """用户评论一条朋友圈。body: { char_id, timestamp, content }。"""
+    data = request.get_json() or {}
+    char_id = data.get("char_id")
+    timestamp_str = data.get("timestamp")
+    content = (data.get("content") or "").strip()
+    if not char_id or not timestamp_str:
+        return jsonify({"error": "缺少 char_id 或 timestamp"}), 400
+    if not content:
+        return jsonify({"error": "评论内容不能为空"}), 400
+
+    if not os.path.exists(MOMENTS_DATA_FILE):
+        return jsonify({"error": "暂无朋友圈数据"}), 404
+    try:
+        with open(MOMENTS_DATA_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    idx, post = _find_moment_post(raw, char_id, timestamp_str)
+    if idx is None:
+        return jsonify({"error": "未找到该条朋友圈"}), 404
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    comments = post.get("comments", [])
+    comments.append({"commenter_id": "user", "content": content, "timestamp": now})
+    post["comments"] = comments
+    raw[idx] = post
+    safe_save_json(MOMENTS_DATA_FILE, raw)
+
+    # 用户评论后，由该条朋友圈的作者（角色）生成一条回复
+    author_char_id = char_id
+    post_content = post.get("content", "")
+    reply_text = _generate_moment_reply_to_user(author_char_id, post_content, content)
+    if reply_text:
+        comments = post.get("comments", [])
+        comments.append({"commenter_id": author_char_id, "content": reply_text, "timestamp": now, "reply_to": "user"})
+        post["comments"] = comments
+        raw[idx] = post
+        safe_save_json(MOMENTS_DATA_FILE, raw)
+        ctx = f"用户评论了你的朋友圈：「{content}」。你的回复：「{reply_text}」。"
+        append_moment_event_to_short_memory(author_char_id, ctx)
+
+    return jsonify({"status": "success", "comment": {"commenter_id": "user", "content": content, "timestamp": now}})
+
+
+def _generate_likes_comments_for_user_moment(post_ts_str, post_content):
+    """用户发朋友圈后，根据各角色亲密度随机生成点赞和评论。返回 (likers, comments)。"""
+    now = datetime.now()
+    try:
+        post_dt = datetime.strptime(post_ts_str, "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        post_dt = now
+    end_dt = post_dt + timedelta(hours=24)
+
+    def random_ts_in_24h():
+        delta_sec = random.randint(0, 24 * 3600)
+        t = post_dt + timedelta(seconds=delta_sec)
+        return t.strftime("%Y-%m-%d %H:%M:%S")
+
+    likers = []
+    comments = []
+    if not os.path.exists(CONFIG_FILE):
+        return likers, comments
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            chars_config = json.load(f)
+    except Exception:
+        return likers, comments
+
+    for char_id, info in chars_config.items():
+        if info.get("deep_sleep", False):
+            continue
+        intimacy = max(0, min(100, int(info.get("intimacy", 60))))
+        p_like = intimacy / 100.0
+        p_comment = (intimacy / 100.0) * 0.6
+        if random.random() < p_like:
+            likers.append({"liker_id": char_id, "timestamp": random_ts_in_24h()})
+        if random.random() < p_comment:
+            comment_text = _generate_moment_comment(char_id, "user", post_content)
+            if comment_text:
+                comments.append({
+                    "commenter_id": char_id,
+                    "content": comment_text,
+                    "timestamp": random_ts_in_24h()
+                })
+    return likers, comments
+
+
+@app.route("/api/moments/post", methods=["POST"])
+def moments_user_post():
+    """用户发一条朋友圈。body: { content }。发完后按各角色亲密度随机生成点赞和评论。"""
+    data = request.get_json() or {}
+    content = (data.get("content") or "").strip()
+    if not content:
+        return jsonify({"error": "内容不能为空"}), 400
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    likers, comments = _generate_likes_comments_for_user_moment(now, content)
+    new_post = {
+        "char_id": "user",
+        "content": content,
+        "timestamp": now,
+        "likers": likers,
+        "comments": comments
+    }
+
+    raw = []
+    if os.path.exists(MOMENTS_DATA_FILE):
+        try:
+            with open(MOMENTS_DATA_FILE, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except Exception:
+            raw = []
+    raw.append(new_post)
+    safe_save_json(MOMENTS_DATA_FILE, raw)
+    for c in new_post.get("comments", []):
+        cid = c.get("commenter_id")
+        if cid and cid != "user":
+            ctx = f"用户发了一条朋友圈：「{(content or '')[:200]}」。你的评论：「{c.get('content', '')}」。"
+            append_moment_event_to_short_memory(cid, ctx)
+    return jsonify({"status": "success", "timestamp": now})
+
+
+@app.route("/api/moments/regenerate", methods=["POST"])
+def moments_regenerate():
+    """重新生成一条朋友圈：角色帖重生成正文，用户帖重生成点赞/评论。body: { char_id, timestamp }。"""
+    data = request.get_json() or {}
+    char_id = data.get("char_id")
+    timestamp_str = data.get("timestamp")
+    if not char_id or not timestamp_str:
+        return jsonify({"error": "缺少 char_id 或 timestamp"}), 400
+
+    if not os.path.exists(MOMENTS_DATA_FILE):
+        return jsonify({"error": "暂无朋友圈数据"}), 404
+    try:
+        with open(MOMENTS_DATA_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    idx, post = _find_moment_post(raw, char_id, timestamp_str)
+    if idx is None:
+        return jsonify({"error": "未找到该条朋友圈"}), 404
+
+    if char_id == "user":
+        post_content = post.get("content", "")
+        likers, comments = _generate_likes_comments_for_user_moment(timestamp_str, post_content)
+        post["likers"] = likers
+        post["comments"] = comments
+    else:
+        # 重新生成角色帖前先同步该角色的单聊与群聊短期记忆
+        try:
+            ok, err = sync_memory_before_moments(char_id)
+            if not ok:
+                print(f"   ⚠️ [Moments] 重新生成前记忆同步失败: {err}")
+        except Exception as e:
+            print(f"   ⚠️ [Moments] 重新生成前记忆同步异常: {e}")
+
+        base_system_prompt = build_system_prompt(char_id, include_global_format=False)
+        lang = get_ai_language()
+        if lang == "zh":
+            trigger_msg = (
+                "请结合你最近的经历（如短期记忆里的事）发一条朋友圈，内容简短自然。可以包含：\n"
+                "- 纯文字；或\n"
+                "- 照片：用 [写真（说明）] 表示，可多条（0-9枚）；\n"
+                "- 视频：用 [动画] 表示。\n"
+                "只输出这一条朋友圈的内容，不要加引号、不要加「朋友圈：」等前缀。"
+            )
+        else:
+            trigger_msg = (
+                "最近の出来事（短期記憶など）を踏まえて、朋友圈を1本投稿してください。短く自然な内容にし、"
+                "写真[写真（説明）]・動画[動画]等形式を使えます。"
+                "引用符や接頭辞は付けず、本文だけを出力してください。"
+            )
+        messages = [
+            {"role": "system", "content": base_system_prompt},
+            {"role": "user", "content": trigger_msg}
+        ]
+        try:
+            route, current_model = get_model_config("moments")
+            if route == "relay":
+                content = call_openrouter(messages, char_id=char_id, model_name=current_model)
+            else:
+                content = call_gemini(messages, char_id=char_id, model_name=current_model)
+            if content:
+                content = content.strip().strip('"\'')
+                if content:
+                    post["content"] = content
+        except Exception as e:
+            print(f"📷 [Moments] 重新生成内容失败: {e}")
+            return jsonify({"error": "生成失败"}), 500
+
+    raw[idx] = post
+    safe_save_json(MOMENTS_DATA_FILE, raw)
+    return jsonify({"status": "success"})
+
 
 # 2. 【新增】个人主页
 @app.route("/profile")
@@ -2114,11 +2545,11 @@ def handle_system_config():
         "routes": {
             "gemini": {
                 "name": "线路一：Gemini 直连",
-                "models": {"chat": "gemini-2.5-pro", "gen_persona": "gemini-3-pro-preview", "summary": "gemini-2.5-pro"}
+                "models": {"chat": "gemini-2.5-pro", "moments": "gemini-2.5-pro", "gen_persona": "gemini-3-pro-preview", "summary": "gemini-2.5-pro"}
             },
             "relay": {
                 "name": "线路二：国内中转",
-                "models": {"chat": "gpt-3.5-turbo", "gen_persona": "gpt-3.5-turbo", "summary": "gpt-3.5-turbo"}
+                "models": {"chat": "gpt-3.5-turbo", "moments": "gpt-3.5-turbo", "gen_persona": "gpt-3.5-turbo", "summary": "gpt-3.5-turbo"}
             }
         },
         # 【新增】可用的模型列表 (把以前前端写死的搬到这里)
@@ -2144,7 +2575,13 @@ def handle_system_config():
             return jsonify(default_config)
         try:
             with open(API_CONFIG_FILE, "r", encoding="utf-8") as f:
-                return jsonify(json.load(f))
+                config = json.load(f)
+            # 兼容旧配置：若某线路未配置 moments，则与 chat 相同
+            for route_key, route_data in config.get("routes", {}).items():
+                models = route_data.get("models", {})
+                if "moments" not in models:
+                    models["moments"] = models.get("chat", "gemini-2.5-pro")
+            return jsonify(config)
         except:
             return jsonify(default_config)
 
@@ -2319,7 +2756,8 @@ def call_gemini(messages, char_id="unknown", model_name="gemini-2.5-pro"):
 def get_model_config(task_type="chat"):
     """
     根据配置文件，获取当前应该用的 路由方式 和 模型名称
-    task_type: 'chat' | 'gen_persona' | 'summary'
+    task_type: 'chat' | 'moments' | 'gen_persona' | 'summary'
+    朋友圈(moments) 默认与 chat 使用相同线路与模型。
     """
     if not os.path.exists(API_CONFIG_FILE):
         # 默认兜底
@@ -2331,7 +2769,11 @@ def get_model_config(task_type="chat"):
 
         route = config.get("active_route", "gemini")
         models = config.get("routes", {}).get(route, {}).get("models", {})
-        model_name = models.get(task_type, "gemini-2.5-pro")
+        # 朋友圈未配置时与 chat 相同
+        if task_type == "moments" and "moments" not in models:
+            model_name = models.get("chat", "gemini-2.5-pro")
+        else:
+            model_name = models.get(task_type, "gemini-2.5-pro")
 
         return route, model_name
     except:
@@ -3032,6 +3474,8 @@ def get_char_details(char_id):
             # 【新增】定义默认配置字典
             defaults = {
                 "emotion": 1,
+                "moments_index": 1,
+                "intimacy": 60,
                 "light_sleep": True,
                 "deep_sleep": False,
                 "ds_start": "23:00",
@@ -3116,6 +3560,15 @@ def update_char_meta(char_id):
         # 情绪 (0-100)
         if data.get("emotion") is not None:
             all_config[char_id]["emotion"] = float(data["emotion"])
+
+        # 性格指数 (影响主动发朋友圈概率，默认 1)
+        if data.get("moments_index") is not None:
+            all_config[char_id]["moments_index"] = float(data["moments_index"])
+
+        # 亲密度 (0-100，影响用户发朋友圈后该角色的点赞/评论概率)
+        if data.get("intimacy") is not None:
+            v = int(data["intimacy"])
+            all_config[char_id]["intimacy"] = max(0, min(100, v))
 
         # 浅睡眠 (Bool)
         if data.get("light_sleep") is not None:
@@ -4052,6 +4505,262 @@ def get_usage_logs():
     except:
         return jsonify([])
 
+# --- 【朋友圈】关系图谱候选（除用户外，用于点赞/评论抽样）---
+def _get_moments_relationship_candidates(char_id):
+    """从角色的 2_relationship.json 中取出除用户外的 (char_id, score) 列表。关系 key 为名字，需映射到 char_id。"""
+    rel_path = os.path.join(CHARACTERS_DIR, char_id, "prompts", "2_relationship.json")
+    if not os.path.exists(rel_path):
+        return []
+    try:
+        with open(rel_path, "r", encoding="utf-8") as f:
+            rel_data = json.load(f)
+    except Exception:
+        return []
+    current_user_name = get_current_username()
+    # 名字 -> char_id 映射（characters.json）
+    name_to_cid = {}
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                for cid, info in json.load(f).items():
+                    name = (info.get("name") or "").strip()
+                    remark = (info.get("remark") or "").strip()
+                    if name:
+                        name_to_cid[name] = cid
+                    if remark and remark != name:
+                        name_to_cid[remark] = cid
+        except Exception:
+            pass
+    candidates = []
+    for name, obj in rel_data.items():
+        if not isinstance(obj, dict):
+            continue
+        if name.strip() == current_user_name:
+            continue
+        score = float(obj.get("score", 0))
+        if score <= 0:
+            continue
+        cid = name_to_cid.get(name.strip())
+        if cid:
+            candidates.append((cid, score))
+    # 同一角色可能因 name/remark 出现多次，按 char_id 合并分数
+    merged = {}
+    for cid, score in candidates:
+        merged[cid] = merged.get(cid, 0) + score
+    return [(cid, s) for cid, s in merged.items()]
+
+
+def _weighted_sample_no_replacement(candidates, k):
+    """从 [(char_id, score), ...] 中按权重无放回抽取最多 k 个 char_id。"""
+    if not candidates or k <= 0:
+        return []
+    k = min(k, len(candidates))
+    result = []
+    remaining = list(candidates)
+    total = sum(s for _, s in remaining)
+    if total <= 0:
+        return []
+    for _ in range(k):
+        r = random.uniform(0, total)
+        for i, (cid, s) in enumerate(remaining):
+            r -= s
+            if r <= 0:
+                result.append(cid)
+                total -= s
+                remaining.pop(i)
+                break
+        else:
+            if remaining:
+                cid, s = remaining.pop()
+                result.append(cid)
+                total -= s
+    return result
+
+
+def _generate_moment_comment(commenter_id, post_author_id, post_content):
+    """让 commenter_id 角色对 post_content 生成一条简短评论。"""
+    sys_prompt = build_system_prompt(commenter_id)
+    lang = get_ai_language()
+    if lang == "zh":
+        user_msg = f"以下是一条朋友圈内容，请以你的身份写一条简短评论（一句话）。只输出评论内容，不要引号或前缀。\n朋友圈内容：{post_content}"
+    else:
+        user_msg = f"以下の朋友圈の内容に対して、あなたの立場で一言コメントを書いてください。コメントの内容だけを出力し、引用符や接頭辞は不要です。\n内容：{post_content}"
+    messages = [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": user_msg}
+    ]
+    try:
+        route, current_model = get_model_config("moments")
+        if route == "relay":
+            text = call_openrouter(messages, char_id=commenter_id, model_name=current_model)
+        else:
+            text = call_gemini(messages, char_id=commenter_id, model_name=current_model)
+        if text:
+            text = text.strip().strip('"\'')
+            if len(text) > 100:
+                text = text[:100]
+            return text
+    except Exception as e:
+        print(f"   [Moments] 评论生成失败 {commenter_id}: {e}")
+    return None
+
+
+def _generate_moment_reply_to_user(author_char_id, post_content, user_comment):
+    """让朋友圈作者（角色）对用户的评论生成一条简短回复。"""
+    sys_prompt = build_system_prompt(author_char_id, include_global_format=False)
+    lang = get_ai_language()
+    if lang == "zh":
+        user_msg = (
+            f"你在朋友圈发了这条内容：\n{post_content}\n\n"
+            f"用户评论说：「{user_comment}」\n\n"
+            f"请以你的身份回复一条简短评论（一句话）。只输出回复内容，不要引号或前缀。"
+        )
+    else:
+        user_msg = (
+            f"あなたの朋友圈投稿：\n{post_content}\n\n"
+            f"ユーザーのコメント：「{user_comment}」\n\n"
+            f"あなたの立場で短い返信を一言で書いてください。返信の内容だけを出力し、引用符や接頭辞は不要です。"
+        )
+    messages = [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": user_msg}
+    ]
+    try:
+        route, current_model = get_model_config("moments")
+        if route == "relay":
+            text = call_openrouter(messages, char_id=author_char_id, model_name=current_model)
+        else:
+            text = call_gemini(messages, char_id=author_char_id, model_name=current_model)
+        if text:
+            text = text.strip().strip('"\'')
+            if len(text) > 100:
+                text = text[:100]
+            return text
+    except Exception as e:
+        print(f"   [Moments] 角色回复评论失败 {author_char_id}: {e}")
+    return None
+
+
+# --- 【朋友圈】角色主动发朋友圈（含点赞、评论）---
+def trigger_active_moments(char_id):
+    """生成一条该角色的朋友圈内容，并按关系图谱生成点赞与评论（排除用户）。"""
+    print(f"📷 [Moments] 尝试触发 {char_id} 的主动朋友圈...")
+
+    # 发朋友圈前先同步该角色的单聊与所有群聊短期记忆，便于 AI 结合最近经历
+    try:
+        ok, err = sync_memory_before_moments(char_id)
+        if not ok:
+            print(f"   ⚠️ [Moments] 记忆同步失败: {err}，继续生成")
+    except Exception as e:
+        print(f"   ⚠️ [Moments] 记忆同步异常: {e}，继续生成")
+
+    base_system_prompt = build_system_prompt(char_id, include_global_format=False)
+    now = datetime.now()
+    post_ts_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    lang = get_ai_language()
+
+    if lang == "zh":
+        trigger_msg = (
+            "请结合你最近的经历（如短期记忆里的事）发一条朋友圈，内容简短自然。可以包含：\n"
+            "- 纯文字；或\n"
+            "- 照片：用 [写真（说明）] 表示，可多条（0-9枚），如 [写真（训练后的夕阳）][写真（更衣室）]；\n"
+            "- 视频：用 [动画] 表示，可带说明如 [动画] 或 [动画（比赛集锦）]。\n"
+            "只输出这一条朋友圈的内容，不要加引号、不要加「朋友圈：」等前缀。"
+        )
+    else:
+        trigger_msg = (
+            "最近の出来事（短期記憶など）を踏まえて、朋友圈を1本投稿してください。短く自然な内容にし、次の形式を使えます：\n"
+            "- テキストのみ；または\n"
+            "- 写真：[写真（説明）]…（0-9枚）、例 [写真（練習後の夕焼け）][写真（ロッカー室）]；\n"
+            "- 動画：[動画] または [動画（説明）]。\n"
+            "引用符や「朋友圈：」などの接頭辞は付けず、本文だけを出力してください。"
+        )
+
+    messages = [
+        {"role": "system", "content": base_system_prompt},
+        {"role": "user", "content": trigger_msg}
+    ]
+
+    try:
+        route, current_model = get_model_config("moments")
+        if route == "relay":
+            content = call_openrouter(messages, char_id=char_id, model_name=current_model)
+        else:
+            content = call_gemini(messages, char_id=char_id, model_name=current_model)
+        if not content:
+            return False
+        content = content.strip().strip('"\'')
+        if not content:
+            return False
+    except Exception as e:
+        print(f"📷 [Moments] 生成内容失败: {e}")
+        return False
+
+    candidates = _get_moments_relationship_candidates(char_id)
+    post_dt = now
+    end_dt = post_dt + timedelta(hours=24)
+
+    def random_ts_in_24h():
+        delta_sec = random.randint(0, 24 * 3600)
+        t = post_dt + timedelta(seconds=delta_sec)
+        return t.strftime("%Y-%m-%d %H:%M:%S")
+
+    likers_data = []
+    if candidates:
+        n_like = random.randint(0, min(5, len(candidates)))
+        like_cids = _weighted_sample_no_replacement(candidates, n_like)
+        for cid in like_cids:
+            likers_data.append({"liker_id": cid, "timestamp": random_ts_in_24h()})
+
+    comments_data = []
+    if candidates:
+        n_comment = random.randint(0, min(3, len(candidates)))
+        comment_cids = _weighted_sample_no_replacement(candidates, n_comment)
+        for cid in comment_cids:
+            comment_text = _generate_moment_comment(cid, char_id, content)
+            if comment_text:
+                comments_data.append({
+                    "commenter_id": cid,
+                    "content": comment_text,
+                    "timestamp": random_ts_in_24h()
+                })
+
+    new_post = {
+        "char_id": char_id,
+        "content": content,
+        "timestamp": post_ts_str,
+        "likers": likers_data,
+        "comments": comments_data
+    }
+
+    # 追加到 moments_data.json
+    raw = []
+    if os.path.exists(MOMENTS_DATA_FILE):
+        try:
+            with open(MOMENTS_DATA_FILE, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except Exception:
+            raw = []
+    raw.append(new_post)
+    safe_save_json(MOMENTS_DATA_FILE, raw)
+    ctx = f"你发了一条朋友圈，内容：「{(content or '')[:300]}」。"
+    append_moment_event_to_short_memory(char_id, ctx)
+
+    # 更新上次发朋友圈时间
+    last_post = {}
+    if os.path.exists(MOMENTS_LAST_POST_FILE):
+        try:
+            with open(MOMENTS_LAST_POST_FILE, "r", encoding="utf-8") as f:
+                last_post = json.load(f)
+        except Exception:
+            pass
+    last_post[char_id] = post_ts_str
+    safe_save_json(MOMENTS_LAST_POST_FILE, last_post)
+
+    print(f"📷 [Moments] 发送成功: {content[:50]}...")
+    return True
+
+
 # --- 【修正版】单人主动消息 (伪装成 User 消息触发) ---
 def trigger_active_chat(char_id):
     print(f"💓 [Active] 尝试触发 {char_id} 的主动消息...")
@@ -4396,6 +5105,7 @@ if __name__ == "__main__":
     # 在 app.py 的 scheduler 启动部分
     # 3. 【新增】主动消息心跳 (每 10 分钟)
     scheduler.add_job(func=memory_jobs.run_active_messaging_check, trigger="cron", minute='*/10')
+    scheduler.add_job(func=memory_jobs.run_active_moments_check, trigger="cron", minute='*/30')
     scheduler.start()
     print("--- [Scheduler] 后台记忆整理服务已启动 (每天 04:00) ---")
 

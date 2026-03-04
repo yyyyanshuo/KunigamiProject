@@ -19,6 +19,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, "configs", "characters.json")
 GROUPS_CONFIG_FILE = os.path.join(BASE_DIR, "configs", "groups.json")
 USER_SETTINGS_FILE = os.path.join(BASE_DIR, "configs", "user_settings.json")
+MOMENTS_LAST_POST_FILE = os.path.join(BASE_DIR, "configs", "moments_last_post.json")
 
 # --- 【新增】安全保存 JSON (防止文件损坏) ---
 def safe_save_json(filepath, data):
@@ -462,3 +463,54 @@ def run_active_messaging_check():
 
     except Exception as e:
         print(f"❌ 心跳检测出错: {e}")
+
+
+def run_active_moments_check():
+    """每 30 分钟执行：对每个角色判定是否主动发朋友圈。概率 = 时间概率 × 性格指数，时间概率：1h 为 1%，100h 达 100%。"""
+    from app import trigger_active_moments
+
+    print("\n📷 [Moments] 开始检测主动发朋友圈机会...")
+
+    if not os.path.exists(CONFIG_FILE):
+        return
+
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            chars_config = json.load(f)
+
+        last_post = {}
+        if os.path.exists(MOMENTS_LAST_POST_FILE):
+            try:
+                with open(MOMENTS_LAST_POST_FILE, "r", encoding="utf-8") as f:
+                    last_post = json.load(f)
+            except Exception:
+                pass
+
+        now = datetime.datetime.now()
+
+        for char_id, info in chars_config.items():
+            if info.get("deep_sleep", False):
+                continue
+
+            last_ts_str = last_post.get(char_id)
+            if last_ts_str:
+                try:
+                    last_dt = datetime.datetime.strptime(last_ts_str, "%Y-%m-%d %H:%M:%S")
+                    hours_since = (now - last_dt).total_seconds() / 3600
+                except Exception:
+                    hours_since = 100.0
+            else:
+                hours_since = 100.0
+
+            time_prob = min(1.0, hours_since / 100.0)
+            moments_index = float(info.get("moments_index", 1))
+            p_final = min(1.0, time_prob * moments_index)
+            dice = random.random()
+
+            print(f"   > [{char_id}] 距上次发圈 {hours_since:.1f}h, 性格指数 {moments_index}, 概率 {p_final:.2f}, 骰子 {dice:.2f}")
+
+            if dice < p_final:
+                trigger_active_moments(char_id)
+
+    except Exception as e:
+        print(f"❌ 朋友圈检测出错: {e}")
