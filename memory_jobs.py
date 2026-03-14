@@ -3,6 +3,7 @@ import json
 import datetime
 from datetime import timedelta
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 # 这里的引用非常关键
 # 我们从 app 导入 AI 总结功能 和 增量更新功能
@@ -13,13 +14,6 @@ import random
 import sqlite3
 
 import tempfile # <--- 记得在最上面加这个 import
-
-# 定义基础路径
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE = os.path.join(BASE_DIR, "configs", "characters.json")
-GROUPS_CONFIG_FILE = os.path.join(BASE_DIR, "configs", "groups.json")
-USER_SETTINGS_FILE = os.path.join(BASE_DIR, "configs", "user_settings.json")
-MOMENTS_LAST_POST_FILE = os.path.join(BASE_DIR, "configs", "moments_last_post.json")
 
 # --- 【新增】安全保存 JSON (防止文件损坏) ---
 def safe_save_json(filepath, data):
@@ -40,31 +34,17 @@ def safe_save_json(filepath, data):
         print(f"❌ Save JSON Error: {e}")
         os.remove(temp_path) # 出错则删掉临时文件
 
-# --- 辅助函数：获取指定角色的 Prompt 路径 ---
-def get_char_prompts_dir(char_id):
-    return os.path.join(BASE_DIR, "characters", char_id, "prompts")
-
-# --- 辅助函数：获取所有角色 ID ---
-def get_all_char_ids():
-    if not os.path.exists(CONFIG_FILE):
-        print(f"❌ 找不到配置文件: {CONFIG_FILE}")
-        return []
-    try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return list(data.keys())
-    except:
-        return []
+# --- 辅助函数：角色 Prompt 路径改为从 app.get_paths 获取（支持 per-user） ---
+# get_all_char_ids 等由 app 的 get_all_char_ids_for_current_user 替代，此处不再定义
 
 # ================= 日结逻辑 (Daily) =================
 
 def _process_single_char_daily(char_id, target_date_str):
-    """处理单个角色的日结"""
-    # 【修复】在这里局部导入，避开启动时的循环依赖
-    from app import call_ai_to_summarize, update_short_memory_for_date
+    """处理单个角色的日结（调用时需已 set_background_user）"""
+    from app import call_ai_to_summarize, update_short_memory_for_date, get_paths
     print(f"   > 正在处理角色: [{char_id}]")
 
-    prompts_dir = get_char_prompts_dir(char_id)
+    _, prompts_dir = get_paths(char_id)
     short_file = os.path.join(prompts_dir, "6_memory_short.json")
     medium_file = os.path.join(prompts_dir, "5_memory_medium.json")
 
@@ -113,75 +93,105 @@ def _process_single_char_daily(char_id, target_date_str):
 
     print("     📝 日记写入完成")
 
-# --- 【新增】全员群聊日结 (Group Daily) ---
+def _process_single_user_group_daily_rollovers(user_id, target_date_str):
+    """处理单个用户的所有群聊日结（供线程池调用）"""
+    from app import update_group_short_memory, set_background_user, clear_background_user, get_all_group_ids_for_current_user
+
+    try:
+        set_background_user(user_id)
+        group_ids = get_all_group_ids_for_current_user()
+        for group_id in group_ids:
+            print(f"   > 用户 {user_id} 群聊: [{group_id}]")
+            try:
+                count, _ = update_group_short_memory(group_id, target_date_str)
+                if count > 0:
+                    print(f"     ✅ 总结并分发了 {count} 条群消息")
+                else:
+                    print(f"     - 无新消息")
+                time.sleep(1)
+            except Exception as e:
+                print(f"     ❌ 群聊 {group_id} 处理失败: {e}")
+    except Exception as e:
+        print(f"   ❌ 用户 {user_id} 群聊日结失败: {e}")
+    finally:
+        clear_background_user()
+
+
+# --- 【新增】全员群聊日结 (Group Daily)，按 user_id 拆分（并行） ---
 def run_all_group_daily_rollovers(target_date_str=None):
-    """
-    遍历所有群聊，执行总结并分发给成员
-    """
-    # 【修复】局部导入群聊记忆更新函数
-    from app import update_group_short_memory
+    """遍历所有用户及其群聊，执行总结并分发给成员（多用户并行）"""
+    from app import list_all_user_ids
 
     if not target_date_str:
         target_date_str = (datetime.datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
 
     print(f"⏰ [定时任务] 开始群聊日结: {target_date_str}")
 
-    if not os.path.exists(GROUPS_CONFIG_FILE):
-        print("   - 暂无群聊配置，跳过")
+    user_ids = list_all_user_ids()
+    if not user_ids:
+        print("   - 无用户，跳过")
         return
 
-    try:
-        with open(GROUPS_CONFIG_FILE, "r", encoding="utf-8") as f:
-            groups_config = json.load(f)
+    def _worker(uid):
+        _process_single_user_group_daily_rollovers(uid, target_date_str)
 
-        for group_id in groups_config.keys():
-            print(f"   > 处理群聊: [{group_id}]")
-            try:
-                # 调用 app.py 里的函数：总结 -> 存群记忆 -> 分发给个人
-                count, _ = update_group_short_memory(group_id, target_date_str)
-                if count > 0:
-                    print(f"     ✅ 总结并分发了 {count} 条群消息")
-                else:
-                    print(f"     - 无新消息")
-
-                # 休息一下防止 API 过载
-                time.sleep(1)
-            except Exception as e:
-                print(f"     ❌ 群聊 {group_id} 处理失败: {e}")
-
-    except Exception as e:
-        print(f"   ❌ 读取群配置失败: {e}")
+    max_workers = min(8, len(user_ids), 4)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        list(executor.map(_worker, user_ids))
 
     print("✅ 群聊日结结束 (已同步至个人)。")
 
+def _process_single_user_daily_rollovers(user_id, target_date_str):
+    """处理单个用户的所有角色日结（供线程池调用）"""
+    from app import set_background_user, clear_background_user, get_all_char_ids_for_current_user
+
+    try:
+        set_background_user(user_id)
+        char_ids = get_all_char_ids_for_current_user()
+        for char_id in char_ids:
+            try:
+                _process_single_char_daily(char_id, target_date_str)
+                time.sleep(2)
+            except Exception as e:
+                print(f"     ❌ 处理角色 {char_id} 时崩溃: {e}")
+    except Exception as e:
+        print(f"   ❌ 用户 {user_id} 日结失败: {e}")
+    finally:
+        clear_background_user()
+
+
 def run_all_daily_rollovers(target_date_str=None):
-    """【入口】遍历所有角色执行日结"""
+    """【入口】按 user_id 遍历，为每个用户的每个角色执行日结（多用户并行）"""
+    from app import list_all_user_ids
+
     if not target_date_str:
         target_date_str = (datetime.datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
 
     print(f"⏰ [定时任务] 开始全员日结: {target_date_str}")
 
-    char_ids = get_all_char_ids()
-    for char_id in char_ids:
-        try:
-            _process_single_char_daily(char_id, target_date_str)
-            # 休息一下，防止并发请求太多被封号
-            time.sleep(2)
-        except Exception as e:
-            print(f"     ❌ 处理角色 {char_id} 时崩溃: {e}")
+    user_ids = list_all_user_ids()
+    if not user_ids:
+        print("   - 无用户，跳过")
+        return
+
+    def _worker(uid):
+        _process_single_user_daily_rollovers(uid, target_date_str)
+
+    max_workers = min(8, len(user_ids), 4)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        list(executor.map(_worker, user_ids))
 
     print("✅ 全员日结结束。")
 
 # ================= 周结逻辑 (Weekly) =================
 
 def _process_single_char_weekly(char_id):
-    """处理单个角色的周结"""
-    # 【修复】局部导入 AI 总结函数
-    from app import call_ai_to_summarize
+    """处理单个角色的周结（调用时需已 set_background_user）"""
+    from app import call_ai_to_summarize, get_paths
 
     print(f"   > 正在处理角色: [{char_id}] (周结)")
 
-    prompts_dir = get_char_prompts_dir(char_id)
+    _, prompts_dir = get_paths(char_id)
     medium_file = os.path.join(prompts_dir, "5_memory_medium.json")
     long_file = os.path.join(prompts_dir, "4_memory_long.json")
 
@@ -229,60 +239,78 @@ def _process_single_char_weekly(char_id):
     print(f"     📜 周报写入完成: {week_key}")
 
 
+def _process_single_user_weekly_rollovers(user_id):
+    """处理单个用户的所有角色周结（供线程池调用）"""
+    from app import set_background_user, clear_background_user, get_all_char_ids_for_current_user
+
+    try:
+        set_background_user(user_id)
+        char_ids = get_all_char_ids_for_current_user()
+        for char_id in char_ids:
+            try:
+                _process_single_char_weekly(char_id)
+                time.sleep(2)
+            except Exception as e:
+                print(f"     ❌ 处理角色 {char_id} 时崩溃: {e}")
+    except Exception as e:
+        print(f"   ❌ 用户 {user_id} 周结失败: {e}")
+    finally:
+        clear_background_user()
+
+
 def run_all_weekly_rollovers():
-    """【入口】遍历所有角色执行周结"""
+    """【入口】按 user_id 遍历，为每个用户的每个角色执行周结（多用户并行）"""
+    from app import list_all_user_ids
+
     print("⏰ [定时任务] 开始全员周结...")
 
-    char_ids = get_all_char_ids()
-    for char_id in char_ids:
-        try:
-            _process_single_char_weekly(char_id)
-            time.sleep(2)
-        except Exception as e:
-            print(f"     ❌ 处理角色 {char_id} 时崩溃: {e}")
+    user_ids = list_all_user_ids()
+    if not user_ids:
+        print("   - 无用户，跳过")
+        return
+
+    max_workers = min(8, len(user_ids), 4)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        list(executor.map(_process_single_user_weekly_rollovers, user_ids))
 
     print("✅ 全员周结结束。")
 
 # ================= 每年年龄 +1 =================
 
-def run_yearly_age_increment():
-    """
-    每年 1 月 1 日执行。为配置了 age 的角色年龄 +1。
-    """
-    print("⏰ [定时任务] 开始年度年龄递增...")
+def _process_single_user_yearly_age_increment(user_id, current_year: str) -> int:
+    """处理单个用户的年度年龄递增，返回更新数量（供线程池调用）"""
+    from app import set_background_user, clear_background_user, _get_characters_config_file, _get_user_settings_file
 
-    if not os.path.exists(CONFIG_FILE):
-        print("   - 无配置文件，跳过")
-        return
-
+    updated_count = 0
     try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            all_config = json.load(f)
+        set_background_user(user_id)
+        cfg_file = _get_characters_config_file()
+        user_settings_file = _get_user_settings_file()
 
-        current_year = datetime.datetime.now().strftime("%Y")
-        updated = []
+        updated_chars = []
+        if os.path.exists(cfg_file):
+            with open(cfg_file, "r", encoding="utf-8") as f:
+                all_config = json.load(f)
+            for char_id, info in all_config.items():
+                age = info.get("age")
+                if age is None:
+                    continue
+                last_inc = info.get("age_last_incremented")
+                if last_inc == current_year:
+                    continue
+                try:
+                    info["age"] = int(age) + 1
+                    info["age_last_incremented"] = current_year
+                    updated_chars.append(char_id)
+                    print(f"   > 用户 {user_id} {char_id}: {age} → {age + 1} 歳")
+                except (ValueError, TypeError):
+                    pass
+            if updated_chars:
+                safe_save_json(cfg_file, all_config)
+                updated_count += len(updated_chars)
 
-        for char_id, info in all_config.items():
-            age = info.get("age")
-            if age is None:
-                continue
-            last_inc = info.get("age_last_incremented")
-            if last_inc == current_year:
-                continue  # 今年已递增过
-            try:
-                info["age"] = int(age) + 1
-                info["age_last_incremented"] = current_year
-                updated.append(char_id)
-                print(f"   > {char_id}: {age} → {age + 1} 歳")
-            except (ValueError, TypeError):
-                pass
-
-        if updated:
-            safe_save_json(CONFIG_FILE, all_config)
-
-        # --- 用户年龄 +1 ---
-        if os.path.exists(USER_SETTINGS_FILE):
-            with open(USER_SETTINGS_FILE, "r", encoding="utf-8") as f:
+        if os.path.exists(user_settings_file):
+            with open(user_settings_file, "r", encoding="utf-8") as f:
                 user_data = json.load(f)
             age = user_data.get("user_age")
             last_inc = user_data.get("user_age_last_incremented")
@@ -290,89 +318,164 @@ def run_yearly_age_increment():
                 try:
                     user_data["user_age"] = int(age) + 1
                     user_data["user_age_last_incremented"] = current_year
-                    safe_save_json(USER_SETTINGS_FILE, user_data)
-                    updated.append("(用户)")
-                    print(f"   > 用户: {age} → {age + 1} 歳")
+                    safe_save_json(user_settings_file, user_data)
+                    updated_count += 1
+                    print(f"   > 用户 {user_id}: {age} → {age + 1} 歳")
                 except (ValueError, TypeError):
                     pass
-
-        print(f"✅ 年度年龄递增结束，共更新 {len(updated)} 人")
     except Exception as e:
-        print(f"❌ 年龄递增出错: {e}")
+        print(f"   ❌ 用户 {user_id} 年龄递增出错: {e}")
+    finally:
+        clear_background_user()
 
-# --- 【新增】自动睡眠/唤醒检查 ---
-def check_and_update_sleep_status():
-    """
-    每分钟运行一次。
-    如果当前时间 == 设定入睡时间 -> 开启深睡眠
-    如果当前时间 == 设定起床时间 -> 关闭深睡眠
-    """
-    # 1. 获取当前时间 HH:MM
-    now_time = datetime.datetime.now().strftime("%H:%M")
+    return updated_count
 
-    if not os.path.exists(CONFIG_FILE): return
+
+def run_yearly_age_increment():
+    """每年 1 月 1 日执行。按 user_id 为每个用户的角色和用户年龄 +1（多用户并行）。"""
+    from app import list_all_user_ids
+
+    print("⏰ [定时任务] 开始年度年龄递增...")
+
+    user_ids = list_all_user_ids()
+    if not user_ids:
+        print("   - 无用户，跳过")
+        return
+
+    current_year = datetime.datetime.now().strftime("%Y")
+
+    def _worker(uid):
+        return _process_single_user_yearly_age_increment(uid, current_year)
+
+    max_workers = min(8, len(user_ids), 4)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        counts = list(executor.map(_worker, user_ids))
+
+    total_updated = sum(counts)
+    print(f"✅ 年度年龄递增结束，共更新 {total_updated} 人")
+
+# --- 【新增】自动睡眠/唤醒检查，按 user_id 拆分 ---
+# 容错策略：
+# - 将原来的“精确等于 HH:MM”改为“在目标时间点附近的容错窗口内触发”
+# - 每个角色每天最多自动入睡一次、自动起床一次（用 *_last_applied_date 记录）
+DEEP_SLEEP_TIME_TOLERANCE_MINUTES = 2
+
+
+def _parse_hhmm_to_seconds(hhmm: str) -> int | None:
+    """将 'HH:MM' 转成从当天 00:00 起算的秒数，格式错误返回 None。"""
+    try:
+        parts = hhmm.split(":")
+        if len(parts) != 2:
+            return None
+        hour = int(parts[0])
+        minute = int(parts[1])
+        if not (0 <= hour < 24 and 0 <= minute < 60):
+            return None
+        return hour * 3600 + minute * 60
+    except Exception:
+        return None
+
+
+def _within_tolerance(now_seconds: int, target_seconds: int, tolerance_seconds: int) -> bool:
+    """判断当前时间（秒）是否在目标时间点的容错范围内。"""
+    return abs(now_seconds - target_seconds) <= tolerance_seconds
+
+
+def _process_single_user_sleep_status(user_id, now_time: str):
+    """处理单个用户的自动睡眠/唤醒检查（供线程池调用）
+
+    设计要点：
+    - 不按“区间内就强制睡/醒”，只在时间点附近的一小段时间内尝试一次
+    - 每个角色每天对 start/end 各自动触发一次，避免多次覆盖用户手动设置
+    """
+    from app import set_background_user, clear_background_user, _get_characters_config_file
 
     try:
-        # 2. 读取配置
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+        set_background_user(user_id)
+        cfg_file = _get_characters_config_file()
+        if not os.path.exists(cfg_file):
+            return
+        with open(cfg_file, "r", encoding="utf-8") as f:
             all_config = json.load(f)
 
         updated = False
+        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        now_dt = datetime.datetime.now()
+        now_seconds = now_dt.hour * 3600 + now_dt.minute * 60 + now_dt.second
+        tolerance_seconds = DEEP_SLEEP_TIME_TOLERANCE_MINUTES * 60
 
         for char_id, info in all_config.items():
             start_time = info.get("ds_start")
             end_time = info.get("ds_end")
             current_status = info.get("deep_sleep", False)
 
-            # 触发入睡
-            if start_time and start_time == now_time:
-                if not current_status: # 只有当前没睡时才操作，防止重复写入
+            # 记录每天是否已经自动处理过 start/end
+            start_last_date = info.get("ds_start_last_applied_date")
+            end_last_date = info.get("ds_end_last_applied_date")
+
+            # --- 自动入睡 ---
+            if start_time and start_last_date != today_str and not current_status:
+                start_seconds = _parse_hhmm_to_seconds(start_time)
+                if start_seconds is not None and _within_tolerance(now_seconds, start_seconds, tolerance_seconds):
                     info["deep_sleep"] = True
-                    # 联动：深睡眠开 -> 浅睡眠必开
-                    # info["light_sleep"] = True  <--- 【删除这行！】不要改数据库里的浅睡眠
-                    print(f"💤 [自动睡眠] {char_id} 到点睡觉了 ({now_time})")
+                    info["ds_start_last_applied_date"] = today_str
+                    print(f"💤 [自动睡眠] 用户 {user_id} {char_id} 到点睡觉了 (配置:{start_time}, 当前:{now_time})")
                     updated = True
 
-            # 触发起床
-            elif end_time and end_time == now_time:
-                if current_status:
+            # --- 自动唤醒 ---
+            if end_time and end_last_date != today_str and current_status:
+                end_seconds = _parse_hhmm_to_seconds(end_time)
+                if end_seconds is not None and _within_tolerance(now_seconds, end_seconds, tolerance_seconds):
                     info["deep_sleep"] = False
-                    print(f"☀️ [自动唤醒] {char_id} 到点起床了 ({now_time})")
+                    info["ds_end_last_applied_date"] = today_str
+                    print(f"☀️ [自动唤醒] 用户 {user_id} {char_id} 到点起床了 (配置:{end_time}, 当前:{now_time})")
                     updated = True
 
-        # 3. 如果有变化，保存文件
         if updated:
-            # 使用安全保存
-            safe_save_json(CONFIG_FILE, all_config)
-
+            safe_save_json(cfg_file, all_config)
     except Exception as e:
-        print(f"❌ 睡眠检查出错: {e}")
+        print(f"❌ 用户 {user_id} 睡眠检查出错: {e}")
+    finally:
+        clear_background_user()
 
-def run_active_messaging_check():
-    """
-    心跳任务：每10分钟运行一次。
-    计算概率，决定是否发起主动消息。
-    """
-    # 【修复】局部导入触发主动消息的函数
-    from app import trigger_active_chat
 
-    print("\n💓 [Heartbeat] 开始检测主动消息机会...")
+def check_and_update_sleep_status():
+    """每分钟运行一次。按 user 并行检查每个用户角色的入睡/起床时间。"""
+    from app import list_all_user_ids
 
-    if not os.path.exists(CONFIG_FILE): return
+    now_time = datetime.datetime.now().strftime("%H:%M")
+    user_ids = list_all_user_ids()
+
+    if not user_ids:
+        return
+
+    def _worker(uid):
+        _process_single_user_sleep_status(uid, now_time)
+
+    max_workers = min(8, len(user_ids), 4)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        list(executor.map(_worker, user_ids))
+
+def _process_single_user_active_messaging(user_id):
+    """处理单个用户的主动消息检测（供线程池调用）"""
+    from app import (
+        trigger_active_chat, trigger_group_active_chat,
+        set_background_user, clear_background_user,
+        get_characters_config_for_current_user, get_groups_config_for_current_user,
+        get_paths, get_group_dir,
+    )
 
     try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            chars_config = json.load(f)
+        set_background_user(user_id)
+        chars_config = get_characters_config_for_current_user()
 
         for char_id, info in chars_config.items():
-            # 1. 检查浅睡眠 (Light Sleep)
             if info.get("light_sleep", False) or info.get("deep_sleep", False):
-                # print(f"   - {char_id}: 睡眠中，跳过")
                 continue
 
-            # 2. 获取最后一条消息时间
-            db_path = os.path.join(BASE_DIR, "characters", char_id, "chat.db")
-            if not os.path.exists(db_path): continue
+            db_path, _ = get_paths(char_id)
+            if not os.path.exists(db_path):
+                continue
 
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
@@ -380,108 +483,102 @@ def run_active_messaging_check():
             row = cursor.fetchone()
             conn.close()
 
-            # 【关键修复】↓↓↓ 加上这一行！↓↓↓
             if not row:
-                # print(f"   - {char_id}: 没有聊天记录，跳过")
                 continue
-                # ----------------------------------
 
             last_ts_str, last_role = row
-
-            # 3. 计算时间差 (分钟)
             last_dt = datetime.datetime.strptime(last_ts_str, '%Y-%m-%d %H:%M:%S')
             minutes_diff = (datetime.datetime.now() - last_dt).total_seconds() / 60
 
-            if minutes_diff < 10: continue # 没到10分钟CD
+            if minutes_diff < 10:
+                continue
 
-            # 4. 计算概率 P
-            # 算法：P_time = 0.005 * t (t >= 10)
             p_time = 0.005 * minutes_diff
-
-            # 情绪指数 (0.0 ~ 20.0)
             emotion = info.get("emotion", 0.5)
-
-            # 最终概率
             p_final = p_time * emotion
+            dice = random.random()
 
-            # 随机判定
-            dice = random.random() # 0.0 ~ 1.0
-
-            print(f"   > [{char_id}] 距上次 {int(minutes_diff)}分, 情绪 {emotion}, 概率 {p_final:.2f}, 骰子 {dice:.2f}")
+            print(f"   > 用户 {user_id} [{char_id}] 距上次 {int(minutes_diff)}分, 情绪 {emotion}, 概率 {p_final:.2f}, 骰子 {dice:.2f}")
 
             if dice < p_final:
-                # 中奖了！触发发送！
                 trigger_active_chat(char_id)
 
-        # ... 在 run_active_messaging_check 函数内，角色遍历结束后 ...
+        groups_config = get_groups_config_for_current_user()
+        for group_id, info in groups_config.items():
+            if not info.get("active_mode", False):
+                continue
 
-        # --- 群聊主动消息检测 ---
-        if os.path.exists(GROUPS_CONFIG_FILE):
-            with open(GROUPS_CONFIG_FILE, "r", encoding="utf-8") as f:
-                groups_config = json.load(f)
+            group_dir_path = get_group_dir(group_id)
+            db_path = os.path.join(group_dir_path, "chat.db")
+            if not os.path.exists(db_path):
+                continue
 
-            # 导入群聊触发函数
-            from app import trigger_group_active_chat
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT timestamp FROM messages ORDER BY id DESC LIMIT 1")
+            row = cursor.fetchone()
+            conn.close()
 
-            for group_id, info in groups_config.items():
-                # 1. 检查开关
-                if not info.get("active_mode", False):
-                    continue
+            if not row: continue  # 没聊过的群不主动
 
-                # 2. 获取最后一条消息时间
-                group_dir = os.path.join(BASE_DIR, "groups", group_id)
-                db_path = os.path.join(group_dir, "chat.db")
+            last_ts_str = row[0]
+            last_dt = datetime.datetime.strptime(last_ts_str, '%Y-%m-%d %H:%M:%S')
+            minutes_diff = (datetime.datetime.now() - last_dt).total_seconds() / 60
 
-                if not os.path.exists(db_path): continue
+            if minutes_diff < 10: continue
 
-                conn = sqlite3.connect(db_path)
-                cursor = conn.cursor()
-                cursor.execute("SELECT timestamp FROM messages ORDER BY id DESC LIMIT 1")
-                row = cursor.fetchone()
-                conn.close()
+            p_final = 0.005 * minutes_diff
+            if p_final > 1.0: p_final = 1.0
+            dice = random.random()
+            print(f"   > [群:{group_id}] 距上次 {int(minutes_diff)}分, 概率 {p_final:.2f}, 骰子 {dice:.2f}")
 
-                if not row: continue # 没聊过的群不主动
-
-                last_ts_str = row[0]
-                last_dt = datetime.datetime.strptime(last_ts_str, '%Y-%m-%d %H:%M:%S')
-                minutes_diff = (datetime.datetime.now() - last_dt).total_seconds() / 60
-
-                if minutes_diff < 10: continue
-
-                # 3. 计算概率 (不乘情绪指数，只看时间)
-                # 逻辑：10min -> 5%, 60min -> 30%, 200min -> 100%
-                # 公式: p = 0.005 * t
-                p_final = 0.005 * minutes_diff
-                if p_final > 1.0: p_final = 1.0 # 封顶 100%
-
-                dice = random.random()
-                print(f"   > [群:{group_id}] 距上次 {int(minutes_diff)}分, 概率 {p_final:.2f}, 骰子 {dice:.2f}")
-
-                if dice < p_final:
-                    # 触发！
-                    trigger_group_active_chat(group_id)
+            if dice < p_final:
+                trigger_group_active_chat(group_id)
 
     except Exception as e:
-        print(f"❌ 心跳检测出错: {e}")
+        print(f"❌ 用户 {user_id} 心跳检测出错: {e}")
+    finally:
+        clear_background_user()
 
 
-def run_active_moments_check():
-    """每 30 分钟执行：对每个角色判定是否主动发朋友圈。概率 = 时间概率 × 性格指数，时间概率：1h 为 1%，100h 达 100%。"""
-    from app import trigger_active_moments
+def run_active_messaging_check():
+    """心跳任务：每10分钟运行一次。按 user_id 并行检测每个用户的单聊与群聊主动消息机会。"""
+    from app import list_all_user_ids
 
-    print("\n📷 [Moments] 开始检测主动发朋友圈机会...")
+    print("\n💓 [Heartbeat] 开始检测主动消息机会（并行）...")
 
-    if not os.path.exists(CONFIG_FILE):
+    user_ids = list_all_user_ids()
+    if not user_ids:
         return
 
-    try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            chars_config = json.load(f)
+    max_workers = min(8, len(user_ids), 4)  # 最多 4 个用户并行，避免 API 限流
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        list(executor.map(_process_single_user_active_messaging, user_ids))
 
+
+def _process_single_user_active_moments(user_id):
+    """处理单个用户的主动发朋友圈检测（供线程池调用）"""
+    from app import (
+        trigger_active_moments, set_background_user, clear_background_user,
+        get_characters_config_for_current_user, get_moments_paths, _get_active_moments_enabled,
+    )
+
+    try:
+        set_background_user(user_id)
+
+        if not _get_active_moments_enabled():
+            print(f"   - 用户 {user_id} 主动朋友圈已关闭，跳过")
+            return
+
+        chars_config = get_characters_config_for_current_user()
+        if not chars_config:
+            return
+
+        moments_path, last_post_path = get_moments_paths()
         last_post = {}
-        if os.path.exists(MOMENTS_LAST_POST_FILE):
+        if os.path.exists(last_post_path):
             try:
-                with open(MOMENTS_LAST_POST_FILE, "r", encoding="utf-8") as f:
+                with open(last_post_path, "r", encoding="utf-8-sig") as f:
                     last_post = json.load(f)
             except Exception:
                 pass
@@ -507,10 +604,27 @@ def run_active_moments_check():
             p_final = min(1.0, time_prob * moments_index)
             dice = random.random()
 
-            print(f"   > [{char_id}] 距上次发圈 {hours_since:.1f}h, 性格指数 {moments_index}, 概率 {p_final:.2f}, 骰子 {dice:.2f}")
+            print(f"   > 用户 {user_id} [{char_id}] 距上次发圈 {hours_since:.1f}h, 性格指数 {moments_index}, 概率 {p_final:.2f}, 骰子 {dice:.2f}")
 
             if dice < p_final:
                 trigger_active_moments(char_id)
 
     except Exception as e:
-        print(f"❌ 朋友圈检测出错: {e}")
+        print(f"❌ 用户 {user_id} 朋友圈检测出错: {e}")
+    finally:
+        clear_background_user()
+
+
+def run_active_moments_check():
+    """每 30 分钟执行：按 user_id 并行对每个用户的每个角色判定是否主动发朋友圈。"""
+    from app import list_all_user_ids
+
+    print("\n📷 [Moments] 开始检测主动发朋友圈机会（并行）...")
+
+    user_ids = list_all_user_ids()
+    if not user_ids:
+        return
+
+    max_workers = min(8, len(user_ids), 4)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        list(executor.map(_process_single_user_active_moments, user_ids))

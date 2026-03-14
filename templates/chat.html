@@ -11,7 +11,7 @@
 
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
-  <title>桐奈 ✿ Chat</title>
+  <title>Sakura ✿ 樱语</title>
   <!-- 这是在 chat.html 的 <head> 标签内 -->
   <style>
     /* --- 1. 锁死根元素高度 --- */
@@ -552,7 +552,7 @@
 
   <!-- 中间：人名 + 状态 -->
   <div class="header-title-box">
-    <div class="header-name">私のヒーロー</div>
+    <div class="header-name">加载中…</div>
     <div class="header-status">
       <span class="status-dot"></span> <!-- 绿色小圆点 -->
       <span>手机在线</span>
@@ -585,7 +585,7 @@
 
 <div class="chat-container" id="chatContainer">
   <div class="bubble assistant">
-    ✿ こんにちは～ 我是桐奈の小聊天助手 💌
+    ✿ こんにちは～ 我是小聊天助手 💌
   </div>
 </div>
 
@@ -686,8 +686,11 @@
   // 缓存配置
   let currentConfig = {}; // 存群信息 或 角色信息
   let groupMembers = {};  // 存群成员详细信息 (ID -> Avatar/Name)
-  let userTickleSuffix = '的狐狸脑袋'; // 用户拍一拍后缀
+  // 用户拍一拍后缀，默认空；具体取值由后端配置 / 用户配置决定
+  let userTickleSuffix = ''; 
   let aiLanguage = 'ja';  // 拍一拍展示语言：ja=日语 zh=中文
+  // 当前用户姓名（从 /api/user/profile_settings 获取）
+  let currentUserName = 'User';
 
   // API 路径前缀生成器
   function getApiPrefix() {
@@ -822,21 +825,23 @@
           statusText.textContent = '手机在线';
           statusText.style.color = '#999';
         }
-        // 加载用户拍一拍配置及 AI 语言（拍一拍展示用）
+        // 加载用户拍一拍配置、AI 语言及用户姓名
         try {
           const ur = await fetch('/api/user/profile_settings');
           const ud = await ur.json();
           if (ud.tickle_suffix) userTickleSuffix = ud.tickle_suffix;
           if (ud.ai_language) aiLanguage = ud.ai_language;
+          if (ud.name) currentUserName = ud.name;
         } catch(e) {}
       }
-      // 群聊也加载用户拍一拍配置及 AI 语言
+      // 群聊也加载用户拍一拍配置、AI 语言及用户姓名
       if (isGroupMode) {
         try {
           const ur = await fetch('/api/user/profile_settings');
           const ud = await ur.json();
           if (ud.tickle_suffix) userTickleSuffix = ud.tickle_suffix;
           if (ud.ai_language) aiLanguage = ud.ai_language;
+          if (ud.name) currentUserName = ud.name;
         } catch(e) {}
       }
       // 进入页面时，标记为已读
@@ -848,7 +853,7 @@
 
   // 拍一拍展示文案。tag: tickle_self|tickle_user|tickle|tickle_xxx
   // 日语模式下显示日语版，中文模式下显示中文版
-  const DEF_SUFFIX_ZH = '的狐狸脑袋';
+  const DEF_SUFFIX_ZH = '';       // 默认后缀为空，由用户/角色配置决定
   const DEF_SUFFIX_JA = '狐の頭';
   function formatTickleText(tag, senderRole, senderId) {
     const isJa = aiLanguage === 'ja';
@@ -994,7 +999,8 @@
     let displayName = '';
 
     if (isUser) {
-      avatarUrl = '/static/avatar_user.png';
+      // 用户自己的头像，走后端 /user_avatar（内部按 user_id 找 users/<user_id>/avatar.*）
+      avatarUrl = '/user_avatar';
     } else {
       // 如果是群聊，role 其实是 char_id (比如 'kunigami')
       if (isGroupMode && groupMembers[role]) {
@@ -1286,7 +1292,7 @@
         loadMoreContainer.style.display = 'none';
         if (chatContainer.children.length === 0) {
           // 只有真的一条都没有时才显示欢迎语，避免滚动到头时弹出欢迎语
-          renderMessageGroup({ content: '✿ こんにちは～ 我是桐奈の小聊天助手 💌', role: 'assistant', timestamp: new Date() });
+          renderMessageGroup({ content: '✿ こんにちは～ 我是小聊天助手 💌', role: 'assistant', timestamp: new Date() });
         }
         loadMoreContainer.style.display = 'none';
       }
@@ -1311,6 +1317,20 @@
     }, 300);
   });
 
+    // --- 通用 fetch 超时封装（默认 120 秒） ---
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 120000) {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const resp = await fetch(url, { ...options, signal: controller.signal });
+        clearTimeout(id);
+        return resp;
+      } catch (err) {
+        clearTimeout(id);
+        throw err;
+      }
+    }
+
     async function sendTickle(tickleMsg) {
       if (btn.disabled) return;
       btn.disabled = true;
@@ -1321,7 +1341,7 @@
       const userBubbleElement = renderMessageGroup(userMsgObj, 'append');
       chatContainer.scrollTop = chatContainer.scrollHeight;
       try {
-        const res = await fetch(`${getApiPrefix()}/chat`, {
+        const res = await fetchWithTimeout(`${getApiPrefix()}/chat`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({message: tickleMsg})
@@ -1409,8 +1429,8 @@
       chatContainer.scrollTop = chatContainer.scrollHeight;
 
       try {
-          // 【修改】使用 getApiPrefix()
-          const res = await fetch(`${getApiPrefix()}/chat`, {
+          // 【修改】使用 getApiPrefix() + 120 秒超时
+          const res = await fetchWithTimeout(`${getApiPrefix()}/chat`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({message: originalText})
@@ -1765,10 +1785,10 @@
         return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
       });
 
-      // --- 【修改】使用动态名字 ---
+      // --- 【修改】使用从后端传入的用户姓名 ---
       const roleMap = {
-        'user': '篠原桐奈', // 用户的名字暂时写死，或者您也可以从后端传过来
-        'assistant': charConfig.name // <--- 关键！使用当前角色的名字
+        'user': currentUserName,
+        'assistant': charConfig.name
       };
       const weekDays = ['日', '月', '火', '水', '木', '金', '土'];
 
@@ -1782,8 +1802,7 @@
 
         // 2. 判断名字
         if (senderId === 'user') {
-          // 这里写死或者从页面获取您的名字
-          name = '篠原桐奈';
+          name = currentUserName;
         } else {
           if (isGroupMode) {
             // --- 群聊模式：去 groupMembers 里查 ---
@@ -1853,7 +1872,7 @@
     });
 
     async function snapshotMemory() {
-      if(!confirm("要让錬介整理一下今天的记忆吗？\n(这会消耗一些 Token 并更新后台记忆文件)")) return;
+      if(!confirm("要整理一下今天的记忆吗？\n(这会消耗一些 Token 并更新后台记忆文件)")) return;
 
       try {
         // 原来：fetch(`/api/${charId}/memory/snapshot...`)
@@ -1919,7 +1938,7 @@
         // 高亮关键词
         const highlightContent = msg.content.replace(new RegExp(kw, 'gi'), match => `<span style="color:#e91e63; font-weight:bold;">${match}</span>`);
         const dateStr = new Date(msg.timestamp).toLocaleString();
-        const name = msg.role === 'user' ? '桐奈' : '錬介';
+        const name = msg.role === 'user' ? currentUserName : (isGroupMode ? (groupMembers[msg.role]?.remark || groupMembers[msg.role]?.name) : (currentConfig?.remark || currentConfig?.name)) || msg.role;
 
         html += `
             <div onclick="jumpToMessage(${msg.id})" style="padding:12px; border-bottom:1px solid #f0f0f0; cursor:pointer;">
