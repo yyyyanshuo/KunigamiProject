@@ -1395,21 +1395,31 @@
       const bubble = document.createElement('div');
       bubble.classList.add('bubble');
       const stickerMatch = text && text.match(/^\[表情\](.+)$/);
-      if (stickerMatch) {
-        const pathOrName = stickerMatch[1].trim();
-        const url = '/api/stickers/file?path=' + encodeURIComponent(pathOrName);
+      const imageMatch = text && text.match(/^\[图片\](.+)$/);
+      
+      if (stickerMatch || imageMatch) {
+        let isSticker = !!stickerMatch;
+        const pathOrName = isSticker ? stickerMatch[1].trim() : imageMatch[1].trim();
+        const url = isSticker ? ('/api/stickers/file?path=' + encodeURIComponent(pathOrName)) : ('/api/user/image/' + encodeURIComponent(pathOrName));
+        
         bubble.classList.add('bubble-sticker');
         const img = document.createElement('img');
         img.className = 'sticker-msg-img';
+        
+        if (!isSticker) {
+            img.style.maxWidth = '200px';
+            img.style.maxHeight = '200px';
+        }
+        
         img.src = url;
-        img.alt = pathOrName.indexOf(':') >= 0 ? '表情' : pathOrName;
+        img.alt = isSticker ? (pathOrName.indexOf(':') >= 0 ? '表情' : pathOrName) : '用户图片';
         img.loading = 'lazy';
         img.onerror = function() {
           this.style.display = 'none';
           const fallback = document.createElement('span');
           fallback.className = 'sticker-msg-fallback';
           fallback.style.cssText = 'font-size:13px;color:#888;';
-          fallback.textContent = pathOrName.indexOf(':') >= 0 ? '[表情]' : '[表情]' + pathOrName;
+          fallback.textContent = isSticker ? (pathOrName.indexOf(':') >= 0 ? '[表情]' : '[表情]' + pathOrName) : '[图片加载失败]';
           this.parentNode.appendChild(fallback);
         };
         bubble.appendChild(img);
@@ -1418,6 +1428,16 @@
           var detailImg = document.getElementById('stickerDetailImg');
           var modal = document.getElementById('stickerDetailModal');
           var packLink = document.getElementById('stickerDetailPackLink');
+          
+          if (!isSticker) {
+              detailImg.src = url;
+              packLink.style.display = 'none';
+              modal.dataset.currentStickerPath = '';
+              modal.classList.add('show');
+              modal.style.display = 'flex';
+              return;
+          }
+          
           var resolvedPath = pathOrName;
           var detailUrl = url;
           if (pathOrName.indexOf('official:') !== 0 && pathOrName.indexOf('user:') !== 0) {
@@ -1439,12 +1459,16 @@
           modal.classList.add('show');
           modal.style.display = 'flex';
         };
-        wrapper.dataset.stickerPath = pathOrName;
-        if (pathOrName.indexOf('official:') !== 0 && pathOrName.indexOf('user:') !== 0) {
-          fetch('/api/stickers/resolve?name=' + encodeURIComponent(pathOrName), { credentials: 'include' }).then(function(r){ return r.json(); }).then(function(data){ if (data && data.path) { wrapper.dataset.resolvedStickerPath = data.path; buildResolvedFulltextFromGroup(group); } }).catch(function(){});
-        } else {
-          wrapper.dataset.resolvedStickerPath = pathOrName;
+        
+        if (isSticker) {
+            wrapper.dataset.stickerPath = pathOrName;
+            if (pathOrName.indexOf('official:') !== 0 && pathOrName.indexOf('user:') !== 0) {
+              fetch('/api/stickers/resolve?name=' + encodeURIComponent(pathOrName), { credentials: 'include' }).then(function(r){ return r.json(); }).then(function(data){ if (data && data.path) { wrapper.dataset.resolvedStickerPath = data.path; buildResolvedFulltextFromGroup(group); } }).catch(function(){});
+            } else {
+              wrapper.dataset.resolvedStickerPath = pathOrName;
+            }
         }
+        
         wrapper.appendChild(bubble);
         if (attachControls && isLastInGroup) {
           wrapper.dataset.fulltext = fullText;
@@ -1462,10 +1486,12 @@
           timestampEl.classList.add('timestamp');
           timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
           const likeBtn = document.createElement('button');
-          likeBtn.className = 'action-btn';
-          likeBtn.title = '喜欢';
-          likeBtn.innerHTML = '❤';
-          likeBtn.onclick = () => addStickerToFavorites(pathOrName);
+          if (isSticker) {
+              likeBtn.className = 'action-btn';
+              likeBtn.title = '喜欢';
+              likeBtn.innerHTML = '❤';
+              likeBtn.onclick = () => addStickerToFavorites(pathOrName);
+          }
           const editBtn = document.createElement('button');
           editBtn.className = 'action-btn';
           editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
@@ -1486,7 +1512,7 @@
             }
           };
           controls.appendChild(timestampEl);
-          controls.appendChild(likeBtn);
+          if (isSticker) controls.appendChild(likeBtn);
           if (id) { controls.appendChild(editBtn); controls.appendChild(delBtn); }
           controls.appendChild(copyBtn);
           wrapper.appendChild(controls);
@@ -2615,8 +2641,98 @@
 
     window.morePanelAction = function(action) {
       if (action === 'image') {
-        if (typeof showToast === 'function') showToast('该功能暂未实现');
-        else alert('该功能暂未实现');
+        // 创建一个隐藏的 input=file
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/*';
+        fileInput.style.display = 'none';
+        document.body.appendChild(fileInput);
+
+        fileInput.onchange = async (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+
+          // 确认对话框提示扣费
+          if (!confirm('识别并发送图片将消耗较多 Token，是否继续？')) {
+            document.body.removeChild(fileInput);
+            return;
+          }
+
+          closeAllPanels(); // 关闭更多面板
+          
+          // 可以在这里加个 loading 提示
+          const btn = document.getElementById('sendBtn');
+          const originalBtnText = btn.innerText;
+          btn.innerText = '发送中';
+          btn.disabled = true;
+
+          try {
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            // 1. 上传图片并获取识图结果
+            const uploadRes = await fetch('/api/vision/upload', {
+              method: 'POST',
+              body: formData
+            });
+            const uploadData = await uploadRes.json();
+            
+            if (uploadData.error || uploadData.status !== 'success') {
+              alert('图片上传失败：' + (uploadData.error || '未知错误'));
+              btn.innerText = originalBtnText;
+              btn.disabled = false;
+              document.body.removeChild(fileInput);
+              return;
+            }
+
+            // 2. 构造消息发给后端
+            const filename = uploadData.url.split('/').pop();
+            const picTag = `[图片]${filename}`;
+            const messageContent = picTag + " / 我发了一张图片，这是图片的客观描述：" + (uploadData.description || '无') + "。请你根据这张图片的内容做出真实的反应。";
+
+            const endpoint = isGroupMode ? `/api/group/${encodeURIComponent(chatGroupId)}/chat` : `/api/${encodeURIComponent(charId)}/chat`;
+            
+            // 手动在前端追加用户发的图片气泡
+            const now = new Date();
+            appendMessage(null, messageContent, now.toISOString(), 'user', 'append');
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            // 3. 复用发送消息逻辑，发给当前聊天对象
+            const r = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ message: messageContent })
+            });
+
+            if (!r.ok) throw new Error('Network error');
+            const data = await r.json();
+            
+            if (data.error) {
+              if (data.error === 'consecutive_tickle') {
+                alert(data.message || '操作频繁');
+              } else {
+                alert('发送失败: ' + data.error);
+              }
+            } else {
+              // 刷新视图 (可稍微优化只 append 新的)
+              if (isGroupMode) {
+                await loadGroupChatHistory(chatGroupId);
+              } else {
+                await loadChatHistory(charId);
+              }
+              chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+          } catch (err) {
+            console.error('发送图片异常', err);
+            alert('图片发送失败！');
+          } finally {
+            btn.innerText = originalBtnText;
+            btn.disabled = false;
+            document.body.removeChild(fileInput);
+          }
+        };
+
+        fileInput.click();
         return;
       }
       if (action === 'phrases') {

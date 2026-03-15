@@ -4027,11 +4027,11 @@ def handle_system_config():
         "routes": {
             "gemini": {
                 "name": "线路一：Gemini 直连",
-                "models": {"chat": "gemini-2.5-pro", "moments": "gemini-2.5-pro", "gen_persona": "gemini-3-pro-preview", "summary": "gemini-2.5-pro"}
+                "models": {"chat": "gemini-2.5-pro", "moments": "gemini-2.5-pro", "gen_persona": "gemini-3-pro-preview", "summary": "gemini-2.5-pro", "vision": "gemini-2.5-pro"}
             },
             "relay": {
                 "name": "线路二：国内中转",
-                "models": {"chat": "gpt-3.5-turbo", "moments": "gpt-3.5-turbo", "gen_persona": "gpt-3.5-turbo", "summary": "gpt-3.5-turbo"}
+                "models": {"chat": "gpt-3.5-turbo", "moments": "gpt-3.5-turbo", "gen_persona": "gpt-3.5-turbo", "summary": "gpt-3.5-turbo", "vision": "gpt-4o"}
             }
         },
         # 【新增】可用的模型列表 (把以前前端写死的搬到这里)
@@ -7208,6 +7208,92 @@ def trigger_group_active_chat(group_id):
             break
 
     return True
+
+# ========================================================
+# 识图与上传接口 (Vision & Upload)
+# ========================================================
+@app.route("/api/vision/upload", methods=["POST"])
+def vision_upload():
+    """接收用户发送的图片，保存并调用配置的识图模型获取描述，返回给前端"""
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"error": "Empty filename"}), 400
+
+    # 创建用户图片目录
+    img_dir = os.path.join(USERS_ROOT, str(user_id), "chat_images")
+    os.makedirs(img_dir, exist_ok=True)
+
+    # 随机文件名
+    ext = os.path.splitext(file.filename)[1]
+    if not ext:
+        ext = ".jpg"
+    filename = f"{uuid.uuid4().hex}{ext}"
+    filepath = os.path.join(img_dir, filename)
+    file.save(filepath)
+
+    # 调用识图模型
+    route, current_model = get_model_config("vision")
+    print(f"--- [Vision] Route: {route}, Model: {current_model} ---")
+    
+    prompt = "请用中文简要描述这张图片的内容，直接描述你看到了什么，不用过多主观判断。"
+    description = ""
+    try:
+        if route == "relay":
+            # OpenRouter 格式 (OpenAI compatible vision)
+            import base64
+            with open(filepath, "rb") as f:
+                b64_data = base64.b64encode(f.read()).decode('utf-8')
+                
+            mime_type = "image/jpeg"
+            if ext.lower() == ".png": mime_type = "image/png"
+            elif ext.lower() == ".webp": mime_type = "image/webp"
+
+            messages = [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64_data}"}}
+                ]
+            }]
+            description = call_openrouter(messages, char_id=None, model_name=current_model)
+        else:
+            # Gemini 原生 SDK 识图
+            import google.generativeai as genai
+            import PIL.Image
+            genai.configure(api_key=GEMINI_KEY)
+            model = genai.GenerativeModel(current_model)
+            img = PIL.Image.open(filepath)
+            response = model.generate_content([prompt, img])
+            description = response.text
+
+    except Exception as e:
+        print(f"   [Vision] Error: {e}")
+        description = "图片解析失败"
+
+    # 生成访问 URL
+    url = f"/api/user/image/{filename}"
+    
+    return jsonify({
+        "status": "success",
+        "url": url,
+        "description": description.strip()
+    })
+
+@app.route("/api/user/image/<filename>", methods=["GET"])
+def get_user_chat_image(filename):
+    """访问用户上传在聊天中的图片"""
+    user_id = get_current_user_id()
+    if not user_id:
+        return "Unauthorized", 401
+    img_dir = os.path.join(USERS_ROOT, str(user_id), "chat_images")
+    return send_from_directory(img_dir, filename)
 
 # ---------------------- 启动 ----------------------
 
