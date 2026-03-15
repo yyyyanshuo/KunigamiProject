@@ -2694,7 +2694,7 @@
             
             // 手动在前端追加用户发的图片气泡
             const now = new Date();
-            appendMessage(null, messageContent, now.toISOString(), 'user', 'append');
+            renderMessageGroup({id: null, content: messageContent, role: 'user', timestamp: now.toISOString()}, 'append');
             chatContainer.scrollTop = chatContainer.scrollHeight;
 
             // 3. 复用发送消息逻辑，发给当前聊天对象
