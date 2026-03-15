@@ -576,9 +576,9 @@
                     <input type="number" id="edit-age-input" class="input-full" placeholder="留空表示未设置" min="1" max="150" style="margin:0; text-align:center; font-size:16px;">
                 </div>
 
-                <!-- 拍一拍后缀 -->
+                <!-- 拍一拍后缀（placeholder 用“的狐狸脑袋”提示，默认值为空） -->
                 <div style="margin-bottom:15px; text-align: left; max-width: 300px; margin: 0 auto;">
-                    <div style="font-size:12px; font-weight:bold; color:#888; margin-bottom:4px;">拍一拍后缀（如：的狐狸脑袋）</div>
+                    <div style="font-size:12px; font-weight:bold; color:#888; margin-bottom:4px;">拍一拍后缀（示例：的狐狸脑袋，可留空）</div>
                     <input type="text" id="edit-tickle-input" class="input-full" placeholder="的狐狸脑袋" style="margin:0; text-align:center;">
                 </div>
 
@@ -867,7 +867,8 @@
                 const ageVal = data.age;
                 document.getElementById('edit-age-input').value = (ageVal !== undefined && ageVal !== null) ? ageVal : '';
                 document.getElementById('view-age').textContent = (ageVal !== undefined && ageVal !== null) ? `年龄: ${ageVal} 歳` : '';
-                document.getElementById('edit-tickle-input').value = data.tickle_suffix || '的狐狸脑袋';
+                // 回显拍一拍后缀：没有配置时展示为空，由 placeholder 做提示
+                document.getElementById('edit-tickle-input').value = data.tickle_suffix || '';
 
                 // --- 【新增】回显状态 ---
                 // 情绪
@@ -939,7 +940,7 @@
 
         const newAge = document.getElementById('edit-age-input').value.trim();
         const ageToSend = newAge === '' ? null : parseInt(newAge, 10);
-        const tickleSuffix = document.getElementById('edit-tickle-input').value.trim() || '的狐狸脑袋';
+        const tickleSuffix = document.getElementById('edit-tickle-input').value.trim(); // 允许为空
 
         try {
             const res = await fetch(`/api/${charId}/update_meta`, {

@@ -428,6 +428,215 @@
       height: 280px; /* 您可以根据需要调整这个高度 */
     }
 
+    /* --- 更多面板 (图片/表情/常用语) --- */
+    .more-panel {
+      height: 0;
+      overflow: hidden;
+      background: #fff;
+      border-top: 1px solid #eee;
+      flex-shrink: 0;
+      transition: height 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    }
+    .more-panel.open {
+      height: 100px;
+    }
+    .more-panel-inner {
+      display: flex;
+      justify-content: flex-start;
+      align-items: center;
+      gap: 24px;
+      padding: 16px 15px;
+    }
+    .more-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    .more-item:active { transform: scale(0.95); }
+    .more-btn {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: #f5f5f5;
+      border: 1px solid #eee;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+    }
+    .more-item:hover .more-btn { background: #fff0f1; border-color: #ffcdd2; }
+    .more-label {
+      font-size: 12px;
+      color: #666;
+      margin-top: 6px;
+    }
+
+    /* --- 表情面板 --- */
+    #stickerPanel {
+      height: 0;
+      overflow: hidden;
+      background: #fff;
+      border-top: 1px solid #eee;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      transition: height 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    }
+    #stickerPanel.open {
+      height: 66vh;
+    }
+    .sticker-main {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .sticker-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-top: 1px solid #eee;
+      background: #fafafa;
+      flex-shrink: 0;
+      overflow-x: auto;
+    }
+    .sticker-toolbar::-webkit-scrollbar { height: 4px; }
+    .sticker-tab {
+      flex-shrink: 0;
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      border-radius: 50%;
+      border: none;
+      background: #f0f0f0;
+      color: #666;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .sticker-tab svg { width: 18px; height: 18px; }
+    .sticker-tab:hover { background: #e0e0e0; }
+    .sticker-tab.active { background: #ffb6b9; color: #fff; }
+    .sticker-tab.sticker-tab-pack { width: auto; padding: 0 12px; border-radius: 18px; font-size: 12px; }
+    .sticker-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+      grid-auto-rows: minmax(88px, auto);
+      row-gap: 16px;
+      column-gap: 12px;
+      align-content: start;
+    }
+    .sticker-hint-inline {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: nowrap;
+      white-space: nowrap;
+      color: #999;
+      font-size: 13px;
+      padding: 12px 20px;
+      gap: 8px;
+    }
+    /* 搜索板块内容区提示：横跨整行并水平居中，避免被 grid 挤到一角 */
+    .sticker-content .sticker-hint-inline {
+      grid-column: 1 / -1;
+      justify-content: center;
+    }
+    .sticker-item {
+      aspect-ratio: 1;
+      min-height: 64px;
+      flex-shrink: 0;
+      border-radius: 8px;
+      overflow: hidden;
+      cursor: pointer;
+      background: #f5f5f5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .sticker-item img { width: 100%; height: 100%; min-width: 0; min-height: 64px; object-fit: contain; }
+    /* 带底部名称的表情格子（表情包/喜欢/搜索结果）：固定高度，数量多时不压缩 */
+    .sticker-item-with-name {
+      aspect-ratio: auto;
+      min-height: 88px;
+      flex-shrink: 0;
+      flex-direction: column;
+      padding: 6px;
+    }
+    .sticker-item-with-name img {
+      width: 64px;
+      height: 64px;
+      min-width: 64px;
+      min-height: 64px;
+      object-fit: contain;
+    }
+    .sticker-item-label {
+      margin-top: 4px; font-size: 11px; color: #666; text-align: center;
+      max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .sticker-pack-search-row {
+      grid-column: 1 / -1;
+      padding: 8px 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .sticker-pack-search-row input {
+      flex: 1; min-width: 0;
+      padding: 8px 12px; border: 1px solid #ddd; border-radius: 20px;
+      font-size: 13px; box-sizing: border-box;
+    }
+    .sticker-search-area {
+      padding: 10px 12px;
+      border-bottom: 1px solid #eee;
+      background: #fff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .sticker-search-area input {
+      flex: 1;
+      min-width: 0;
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 20px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    .sticker-search-area .sticker-hint-inline {
+      padding: 0;
+      flex-shrink: 0;
+      align-items: center;
+      line-height: 1.4;
+    }
+    .sticker-detail-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 2500;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    .sticker-detail-modal.show { display: flex; flex-direction: column; }
+    .sticker-detail-modal .modal-body { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
+    .sticker-detail-modal .modal-body img { max-width: 100%; max-height: 70vh; object-fit: contain; }
+    .sticker-detail-modal .modal-footer { flex-shrink: 0; padding: 12px; text-align: center; }
+    .sticker-detail-modal .modal-footer a { color: #ffb6b9; font-size: 13px; }
+    .bubble-sticker { cursor: pointer; padding: 4px; }
+    .bubble-sticker .sticker-msg-img { max-width: 120px; max-height: 120px; display: block; border-radius: 8px; }
+
     /* 其它内部样式保持不变 */
     .qp-header {
       padding: 8px 15px; background: #fafafa; border-bottom: 1px solid #eee;
@@ -600,6 +809,24 @@
   <button id="plusBtn" onclick="toggleQuickPanel()">+</button>
 </div>
 
+<!-- 【新增】更多面板：图片 / 表情 / 常用语 -->
+<div id="morePanel" class="more-panel">
+  <div class="more-panel-inner">
+    <div class="more-item" data-action="image" onclick="morePanelAction('image')">
+      <div class="more-btn"><span>🖼</span></div>
+      <span class="more-label">图片</span>
+    </div>
+    <div class="more-item" data-action="sticker" onclick="morePanelAction('sticker')">
+      <div class="more-btn"><span>😀</span></div>
+      <span class="more-label">表情</span>
+    </div>
+    <div class="more-item" data-action="phrases" onclick="morePanelAction('phrases')">
+      <div class="more-btn"><span>💬</span></div>
+      <span class="more-label">常用语</span>
+    </div>
+  </div>
+</div>
+
 <!-- 【新增】常用语面板 (默认隐藏) -->
 <div id="quickPhrasesPanel">
   <div class="qp-header">
@@ -616,6 +843,46 @@
   <div id="qpAddContainer" style="display:none; padding:10px; border-top:1px solid #eee;">
     <button class="qp-add-btn" onclick="addNewPhraseRow()">+ 新增一条</button>
     <button class="qp-save-btn" onclick="saveQuickPhrases()">保存全部</button>
+  </div>
+</div>
+
+<!-- 表情面板：内容在上，底部小图标栏 -->
+<div id="stickerPanel">
+  <div class="sticker-main">
+    <div id="stickerSearchView" class="sticker-search-area" style="display:none;">
+      <input type="text" id="stickerSearchInput" placeholder="按名称搜索…" />
+    </div>
+    <div id="stickerContentView" class="sticker-content">
+      <!-- 搜索结果 / 表情包列表 / 喜欢列表 / 某包内表情 由 JS 填充 -->
+    </div>
+  </div>
+  <div class="sticker-toolbar" id="stickerToolbar">
+    <button type="button" class="sticker-tab" data-tab="search" onclick="switchStickerTab('search')" title="搜索"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg></button>
+    <button type="button" class="sticker-tab" data-tab="add" onclick="switchStickerTab('add')" title="添加"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></button>
+    <button type="button" class="sticker-tab" data-tab="favorites" onclick="switchStickerTab('favorites')" title="喜欢"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg></button>
+    <!-- 表情包 tab 由 JS 动态追加 -->
+  </div>
+</div>
+
+<!-- 表情详情弹窗（大图 + 所属表情包） -->
+<div id="stickerDetailModal" class="sticker-detail-modal" data-current-sticker-path="">
+  <div class="modal-body"><img id="stickerDetailImg" src="" alt="" /></div>
+  <div class="modal-footer">
+    <a href="#" id="stickerDetailPackLink">查看表情包</a>
+    <span style="margin:0 8px;">|</span>
+    <a href="#" onclick="document.getElementById('stickerDetailModal').style.display='none';document.getElementById('stickerDetailModal').classList.remove('show');return false;">关闭</a>
+  </div>
+</div>
+
+<!-- 上传表情：填写描述/名称 -->
+<div id="stickerUploadModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:2600; align-items:center; justify-content:center;">
+  <div style="background:#fff; padding:20px; border-radius:12px; width:90%; max-width:360px; box-shadow:0 4px 12px rgba(0,0,0,0.2);">
+    <h3 style="margin:0 0 12px 0; color:#444; font-size:16px;">添加描述（用于重命名）</h3>
+    <input type="text" id="stickerUploadNameInput" placeholder="输入表情名称或描述…" style="width:100%; box-sizing:border-box; padding:10px 12px; border:1px solid #ddd; border-radius:8px; font-size:14px;" />
+    <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:14px;">
+      <button type="button" id="stickerUploadCancelBtn" style="padding:8px 16px; border:none; background:#f0f0f0; border-radius:6px; cursor:pointer;">取消</button>
+      <button type="button" id="stickerUploadConfirmBtn" style="padding:8px 16px; border:none; background:#ffb6b9; color:#fff; border-radius:6px; cursor:pointer;">确定</button>
+    </div>
   </div>
 </div>
 
@@ -736,6 +1003,49 @@
     let totalMessages = 0;
     let isLoading = false;
     const messagesPerPage = 20;
+
+    // --- 【新增】发送前随机分配表情函数 ---
+  async function randomizeStickersInText(text) {
+    if (!text || text.indexOf('[表情]') === -1) return text;
+
+    // 使用刚才修复过的正则，保护斜杠后面的文字
+    const regex = /\[表情\](.*?)(?=\s*\/\s*|$)/g;
+    let out = '';
+    let lastIndex = 0;
+    let m;
+
+    while ((m = regex.exec(text)) !== null) {
+      out += text.slice(lastIndex, m.index);
+      const nameOrPath = m[1].trim();
+      
+      // 判断是否已经是精确路径（面板点击发送的会有 official: 或 user:）
+      const isPath = nameOrPath.startsWith('official:') || nameOrPath.startsWith('user:');
+
+      if (isPath) {
+        out += m[0]; // 已经是精确路径，保持原样
+      } else {
+        // 用户手动输入的纯名称（如：开心），去搜索并随机抽一个
+        try {
+          const r = await fetch('/api/stickers/search?q=' + encodeURIComponent(nameOrPath));
+          const list = await r.json();
+          if (list && list.length > 0) {
+            // 【核心逻辑】在搜索结果中随机抽取一个
+            const randomIndex = Math.floor(Math.random() * list.length);
+            const randomSticker = list[randomIndex];
+            // 替换成精确路径
+            out += '[表情]' + randomSticker.path;
+          } else {
+            out += m[0]; // 没搜到这个表情，保持原样
+          }
+        } catch (e) {
+          out += m[0]; // 报错了，保持原样
+        }
+      }
+      lastIndex = regex.lastIndex;
+    }
+    out += text.slice(lastIndex);
+    return out;
+  }
 
   async function initUI() {
     try {
@@ -990,6 +1300,7 @@
     if (tickles.length > 0 && !hasContentBubbles) group.classList.add('tickle-only');
     group.dataset.timestamp = date.toISOString();
     group.dataset.id = id;
+    group.dataset.originalContent = fullText;
 
     // 【新增】把说话人的 ID 存进去 (如果是用户则是 'user'，如果是群聊则是 'isagi' 等)
     group.dataset.sender = role;
@@ -1059,12 +1370,130 @@
       stack.appendChild(nameDiv);
     }
 
+    function buildResolvedFulltextFromGroup(groupEl) {
+      if (!groupEl) return;
+      var parts = [];
+      groupEl.querySelectorAll('.message-wrapper').forEach(function(wrap) {
+        var sticker = wrap.querySelector('.bubble-sticker');
+        if (sticker) {
+          var path = wrap.dataset.resolvedStickerPath || wrap.dataset.stickerPath || '';
+          parts.push(path ? '[表情]' + path : '');
+        } else {
+          var b = wrap.querySelector('.bubble');
+          // 【修正】使用 innerText 替代 textContent，保留文本的换行符
+          if (b) parts.push(b.innerText.trim());
+        }
+      });
+      var s = parts.filter(Boolean).join(' / ');
+      if (s) groupEl.dataset.resolvedFulltext = s;
+    }
+
     function addBubbleToStack(st, text, opts) {
       const { isLastInGroup = false, attachControls = false } = opts || {};
       const wrapper = document.createElement('div');
       wrapper.classList.add('message-wrapper', cssClass);
       const bubble = document.createElement('div');
       bubble.classList.add('bubble');
+      const stickerMatch = text && text.match(/^\[表情\](.+)$/);
+      if (stickerMatch) {
+        const pathOrName = stickerMatch[1].trim();
+        const url = '/api/stickers/file?path=' + encodeURIComponent(pathOrName);
+        bubble.classList.add('bubble-sticker');
+        const img = document.createElement('img');
+        img.className = 'sticker-msg-img';
+        img.src = url;
+        img.alt = pathOrName.indexOf(':') >= 0 ? '表情' : pathOrName;
+        img.loading = 'lazy';
+        img.onerror = function() {
+          this.style.display = 'none';
+          const fallback = document.createElement('span');
+          fallback.className = 'sticker-msg-fallback';
+          fallback.style.cssText = 'font-size:13px;color:#888;';
+          fallback.textContent = pathOrName.indexOf(':') >= 0 ? '[表情]' : '[表情]' + pathOrName;
+          this.parentNode.appendChild(fallback);
+        };
+        bubble.appendChild(img);
+        bubble.onclick = async (e) => {
+          if (e.target.closest('.action-btn')) return;
+          var detailImg = document.getElementById('stickerDetailImg');
+          var modal = document.getElementById('stickerDetailModal');
+          var packLink = document.getElementById('stickerDetailPackLink');
+          var resolvedPath = pathOrName;
+          var detailUrl = url;
+          if (pathOrName.indexOf('official:') !== 0 && pathOrName.indexOf('user:') !== 0) {
+            try {
+              var r = await fetch('/api/stickers/resolve?name=' + encodeURIComponent(pathOrName));
+              var data = await r.json();
+              if (data && data.path) {
+                resolvedPath = data.path;
+                detailUrl = data.url || ('/api/stickers/file?path=' + encodeURIComponent(resolvedPath));
+              }
+            } catch (err) {}
+          }
+          detailImg.src = detailUrl;
+          modal.dataset.currentStickerPath = resolvedPath;
+          var packId = resolvedPath.indexOf('official:') === 0 ? resolvedPath.split(':')[1] : '';
+          packLink.dataset.packId = packId;
+          packLink.style.display = packId ? 'inline' : 'none';
+          packLink.href = '#';
+          modal.classList.add('show');
+          modal.style.display = 'flex';
+        };
+        wrapper.dataset.stickerPath = pathOrName;
+        if (pathOrName.indexOf('official:') !== 0 && pathOrName.indexOf('user:') !== 0) {
+          fetch('/api/stickers/resolve?name=' + encodeURIComponent(pathOrName), { credentials: 'include' }).then(function(r){ return r.json(); }).then(function(data){ if (data && data.path) { wrapper.dataset.resolvedStickerPath = data.path; buildResolvedFulltextFromGroup(group); } }).catch(function(){});
+        } else {
+          wrapper.dataset.resolvedStickerPath = pathOrName;
+        }
+        wrapper.appendChild(bubble);
+        if (attachControls && isLastInGroup) {
+          wrapper.dataset.fulltext = fullText;
+          const controls = document.createElement('div');
+          controls.classList.add('controls-container');
+          if (role === 'assistant' && !isGroupMode) {
+            const regenBtn = document.createElement('button');
+            regenBtn.classList.add('regen-btn');
+            regenBtn.title = "重新生成 (删除此条并重试)";
+            regenBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>';
+            regenBtn.onclick = () => doRegenerate(wrapper);
+            controls.appendChild(regenBtn);
+          }
+          const timestampEl = document.createElement('div');
+          timestampEl.classList.add('timestamp');
+          timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const likeBtn = document.createElement('button');
+          likeBtn.className = 'action-btn';
+          likeBtn.title = '喜欢';
+          likeBtn.innerHTML = '❤';
+          likeBtn.onclick = () => addStickerToFavorites(pathOrName);
+          const editBtn = document.createElement('button');
+          editBtn.className = 'action-btn';
+          editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+          editBtn.onclick = () => openEditModal(id, fullText, group);
+          const delBtn = document.createElement('button');
+          delBtn.className = 'action-btn';
+          delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+          delBtn.onclick = () => deleteMessage(id, group);
+          const copyBtn = document.createElement('button');
+          copyBtn.className = 'action-btn';
+          copyBtn.innerHTML = `<img src="${copyIconPath}" style="width:14px;height:14px;opacity:0.6;">`;
+          copyBtn.onclick = () => {
+            var textToCopy = group.dataset.resolvedFulltext || fullText;
+            if (navigator.clipboard && window.isSecureContext) {
+              navigator.clipboard.writeText(textToCopy).then(() => showCopySuccess(copyBtn, copyIconPath)).catch(() => fallbackCopyTextToClipboard(textToCopy, copyBtn, copyIconPath));
+            } else {
+              fallbackCopyTextToClipboard(textToCopy, copyBtn, copyIconPath);
+            }
+          };
+          controls.appendChild(timestampEl);
+          controls.appendChild(likeBtn);
+          if (id) { controls.appendChild(editBtn); controls.appendChild(delBtn); }
+          controls.appendChild(copyBtn);
+          wrapper.appendChild(controls);
+        }
+        st.appendChild(wrapper);
+        return;
+      }
       if (!text || text.trim() === '') {
         bubble.classList.add('bubble-empty');
         bubble.innerHTML = '<span class="empty-placeholder">（空消息）</span>';
@@ -1099,13 +1528,23 @@
         copyBtn.className = 'action-btn';
         copyBtn.innerHTML = `<img src="${copyIconPath}" style="width:14px;height:14px;opacity:0.6;">`;
         copyBtn.onclick = () => {
+          var textToCopy = group.dataset.resolvedFulltext || fullText;
           if (navigator.clipboard && window.isSecureContext) {
-            navigator.clipboard.writeText(fullText).then(() => showCopySuccess(copyBtn, copyIconPath)).catch(() => fallbackCopyTextToClipboard(fullText, copyBtn, copyIconPath));
+            navigator.clipboard.writeText(textToCopy).then(() => showCopySuccess(copyBtn, copyIconPath)).catch(() => fallbackCopyTextToClipboard(textToCopy, copyBtn, copyIconPath));
           } else {
-            fallbackCopyTextToClipboard(fullText, copyBtn, copyIconPath);
+            fallbackCopyTextToClipboard(textToCopy, copyBtn, copyIconPath);
           }
         };
         controls.appendChild(timestampEl);
+        const firstStickerPath = (fullText && fullText.match(/\[表情\]([^\]]+)/)) ? fullText.match(/\[表情\]([^\]]+)/)[1].trim() : '';
+        if (firstStickerPath) {
+          const likeBtn = document.createElement('button');
+          likeBtn.className = 'action-btn';
+          likeBtn.title = '喜欢';
+          likeBtn.innerHTML = '❤';
+          likeBtn.onclick = () => addStickerToFavorites(firstStickerPath);
+          controls.appendChild(likeBtn);
+        }
         if (id) { controls.appendChild(editBtn); controls.appendChild(delBtn); }
         controls.appendChild(copyBtn);
         wrapper.appendChild(controls);
@@ -1186,6 +1625,8 @@
         group.insertBefore(tickleRow, group.firstChild);
       }
     }
+
+    buildResolvedFulltextFromGroup(group);
 
     if (mode === 'prepend') {
       chatContainer.prepend(group);
@@ -1274,8 +1715,7 @@
           // 或者使用 scrollTop 计算：
           // chatContainer.scrollTop = chatContainer.scrollHeight - oldScrollHeight;
         } else {
-          // 初始加载，滚到底部
-          chatContainer.scrollTop = chatContainer.scrollHeight;
+          // 初始加载，滚到底部（在下方 mode === 'initial' 统一处理）
         }
 
         totalMessages = data.total;
@@ -1295,6 +1735,14 @@
           renderMessageGroup({ content: '✿ こんにちは～ 我是小聊天助手 💌', role: 'assistant', timestamp: new Date() });
         }
         loadMoreContainer.style.display = 'none';
+      }
+      if (mode === 'initial') {
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+        requestAnimationFrame(() => {
+          chatContainer.scrollTop = chatContainer.scrollHeight;
+          setTimeout(() => { chatContainer.scrollTop = chatContainer.scrollHeight; }, 150);
+          setTimeout(() => { chatContainer.scrollTop = chatContainer.scrollHeight; }, 400);
+        });
       }
     } catch (e) { console.error("Failed to load history:", e); }
     finally { isLoading = false; loadMoreBtn.textContent = '加載更早的記錄'; }
@@ -1412,10 +1860,17 @@
     }
 
     async function sendMessage() {
-        const originalText = input.value.trim();
+        let originalText = input.value.trim();
         if (!originalText) return;
+        
+        // 按钮变灰，提示正在抽取表情
+        btn.disabled = true; btn.textContent = "处理中…";
+
+        // 【新增】拦截并随机替换输入框里的 [表情]开心
+        originalText = await randomizeStickersInText(originalText);
+
         input.value = ''; input.style.height = 'auto';
-        btn.disabled = true; btn.textContent = "发送中…";
+        btn.textContent = "发送中…";
 
       // --- 1. 处理用户消息 ---
       const userMsgTime = new Date();
@@ -1565,6 +2020,20 @@
         // === 普通模式 ===
         await loadHistory('initial');
       }
+
+      // 从表情包详情页跳回并带 sticker 参数时，自动发送该表情
+      const urlParams = new URLSearchParams(window.location.search);
+      const stickerContent = urlParams.get('sticker');
+      if (stickerContent && input) {
+        try {
+          const content = decodeURIComponent(stickerContent);
+          if (content && content.startsWith('[表情]')) {
+            history.replaceState({}, '', window.location.pathname + (window.location.hash || ''));
+            input.value = content;
+            setTimeout(() => { if (typeof sendMessage === 'function') sendMessage(); }, 200);
+          }
+        } catch (e) { /* ignore */ }
+      }
     });
     loadMoreBtn.addEventListener('click', () => loadHistory(currentPage + 1));
     chatContainer.addEventListener('scroll', () => {
@@ -1584,13 +2053,110 @@
     let currentEditId = null;
     let currentEditGroup = null;
 
-    function openEditModal(id, content, groupElement) {
+    async function resolveStickerNamesToPaths(text, groupElement) {
+      if (!text || text.indexOf('[表情]') === -1) return text;
+      // 【修正】使用非贪婪匹配，遇到 " / " 或行尾就停止
+      const regex = /\[表情\](.*?)(?=\s*\/\s*|$)/g;
+      let out = '';
+      let lastIndex = 0;
+      let m;
+      const matches = [];
+      while ((m = regex.exec(text)) !== null) {
+        matches.push({ index: m.index, lastIndex: regex.lastIndex, nameOrPath: m[1].trim() });
+      }
+      for (let i = 0; i < matches.length; i++) {
+        const { index, lastIndex: nextStart, nameOrPath } = matches[i];
+        const isPath = nameOrPath.indexOf('official:') === 0 || nameOrPath.indexOf('user:') === 0;
+        out += text.slice(lastIndex, index) + '[表情]';
+        if (isPath) {
+          out += nameOrPath;
+        } else {
+          try {
+            const r = await fetch('/api/stickers/resolve?name=' + encodeURIComponent(nameOrPath), { credentials: 'include' });
+            const data = await r.json();
+            if (data && data.path) {
+              out += data.path;
+            } else {
+              var pathFromImg = tryGetPathFromGroupStickerImg(groupElement, i);
+              out += pathFromImg || nameOrPath;
+            }
+          } catch (e) {
+            var pathFromImg = tryGetPathFromGroupStickerImg(groupElement, i);
+            out += pathFromImg || nameOrPath;
+          }
+        }
+        lastIndex = nextStart;
+      }
+      out += text.slice(lastIndex);
+      return out;
+    }
+
+    function tryGetPathFromGroupStickerImg(groupEl, stickerIndex) {
+      if (!groupEl) return null;
+      var imgs = groupEl.querySelectorAll('.bubble-sticker .sticker-msg-img');
+      var img = imgs[stickerIndex];
+      if (!img || !img.src) return null;
+      try {
+        var url = new URL(img.src);
+        var path = url.searchParams.get('path');
+        return path ? decodeURIComponent(path) : null;
+      } catch (e) { return null; }
+    }
+
+    function buildResolvedFulltextFromGroup(groupEl) {
+      if (!groupEl) return '';
+      var parts = [];
+      groupEl.querySelectorAll('.message-wrapper').forEach(function(wrap) {
+        var sticker = wrap.querySelector('.bubble-sticker');
+        if (sticker) {
+          var path = wrap.dataset.resolvedStickerPath || wrap.dataset.stickerPath || '';
+          parts.push(path ? '[表情]' + path : '');
+        } else {
+          var b = wrap.querySelector('.bubble');
+          // 【修正】使用 innerText 替代 textContent，保留文本的换行符
+          if (b) parts.push(b.innerText.trim());
+        }
+      });
+      return parts.filter(Boolean).join(' / ');
+    }
+
+    async function openEditModal(id, content, groupElement) {
       currentEditId = id;
       currentEditGroup = groupElement;
       const input = document.getElementById('editInput');
-      input.value = content; // 这里会显示包含 '/' 的原始内容
       document.getElementById('editModal').style.display = 'flex';
+      input.value = '加载中…';
       input.focus();
+
+      var fullContent = (content != null ? String(content) : '').trim();
+      var contentToShow = fullContent;
+      try {
+        var groupEl = groupElement;
+        if (!groupEl && id) groupEl = document.querySelector('.message-group[data-id="' + id + '"]');
+        if (groupEl) {
+          fullContent = (groupEl.dataset.resolvedFulltext || groupEl.dataset.originalContent || fullContent).trim();
+          contentToShow = fullContent;
+        }
+        if (fullContent.indexOf('[表情]') >= 0) {
+          var paths = [];
+          if (groupEl) {
+            groupEl.querySelectorAll('.message-wrapper').forEach(function(wrap) {
+              if (wrap.querySelector('.bubble-sticker') && (wrap.dataset.resolvedStickerPath || wrap.dataset.stickerPath))
+                paths.push(wrap.dataset.resolvedStickerPath || wrap.dataset.stickerPath);
+            });
+          }
+          if (paths.length > 0) {
+            var idx = 0;
+            // 【修正】使用非贪婪匹配，遇到 " / " 或行尾就停止匹配，保护后续文字
+            contentToShow = fullContent.replace(/\[表情\](.*?)(?=\s*\/\s*|$)/g, function(match) {
+              return idx < paths.length ? '[表情]' + paths[idx++] : match;
+            });
+          } else {
+            contentToShow = await resolveStickerNamesToPaths(fullContent, groupEl);
+          }
+        }
+      } catch (e) { console.error('openEditModal', e); }
+      input.value = contentToShow;
     }
 
     function closeEditModal() {
@@ -2019,30 +2585,341 @@
     let isQPEditMode = false;
     let quickPhrases = []; // 本地缓存
 
-    async function toggleQuickPanel() {
-      // 切换 class 来控制高度动画
-      if (qpPanel.classList.contains('open')) {
-        // 关闭
-        qpPanel.classList.remove('open');
-        plusBtn.classList.remove('active');
+    const morePanel = document.getElementById('morePanel');
+    const stickerPanel = document.getElementById('stickerPanel');
 
-        // 关闭时延迟一点重置编辑模式，体验更好
-        setTimeout(() => {
-          isQPEditMode = false;
-          renderQPList();
-        }, 300);
-      } else {
-        // 打开
-        await loadQuickPhrases(); // 先加载数据
+    function isAnyPanelOpen() {
+      return morePanel.classList.contains('open') || qpPanel.classList.contains('open') || stickerPanel.classList.contains('open');
+    }
+    function closeAllPanels() {
+      morePanel.classList.remove('open');
+      qpPanel.classList.remove('open');
+      stickerPanel.classList.remove('open');
+      plusBtn.classList.remove('active');
+      document.getElementById('stickerSearchView').style.display = 'none';
+      setTimeout(() => {
+        isQPEditMode = false;
         renderQPList();
-        qpPanel.classList.add('open');
-        plusBtn.classList.add('active');
+      }, 300);
+    }
 
-        // 【关键体验优化】面板长出来后，聊天记录自动滚到底
-        setTimeout(() => {
-          chatContainer.scrollTop = chatContainer.scrollHeight;
-        }, 300);
+    async function toggleQuickPanel() {
+      if (isAnyPanelOpen()) {
+        closeAllPanels();
+        return;
       }
+      morePanel.classList.add('open');
+      plusBtn.classList.add('active');
+      setTimeout(() => { chatContainer.scrollTop = chatContainer.scrollHeight; }, 300);
+    }
+
+    window.morePanelAction = function(action) {
+      if (action === 'image') {
+        if (typeof showToast === 'function') showToast('该功能暂未实现');
+        else alert('该功能暂未实现');
+        return;
+      }
+      if (action === 'phrases') {
+        morePanel.classList.remove('open');
+        loadQuickPhrases().then(() => {
+          renderQPList();
+          qpPanel.classList.add('open');
+          setTimeout(() => { chatContainer.scrollTop = chatContainer.scrollHeight; }, 300);
+        });
+        return;
+      }
+      if (action === 'sticker') {
+        morePanel.classList.remove('open');
+        openStickerPanel();
+      }
+    };
+
+    let stickerCurrentTab = 'search';
+    let stickerPacks = [];
+
+    function openStickerPanel() {
+      stickerPanel.classList.add('open');
+      plusBtn.classList.add('active');
+      initStickerTabs();
+      switchStickerTab(stickerCurrentTab || 'search');
+      setTimeout(() => { chatContainer.scrollTop = chatContainer.scrollHeight; }, 300);
+    }
+
+    async function initStickerTabs() {
+      const toolbar = document.getElementById('stickerToolbar');
+      const existingTabs = toolbar.querySelectorAll('.sticker-tab[data-tab^="pack-"]');
+      existingTabs.forEach(el => el.remove());
+      try {
+        const r = await fetch('/api/stickers/my_packs');
+        stickerPacks = await r.json();
+      } catch (e) { stickerPacks = []; }
+      stickerPacks.forEach(p => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'sticker-tab sticker-tab-pack';
+        btn.dataset.tab = 'pack-' + p.id;
+        btn.textContent = p.name;
+        btn.onclick = () => switchStickerTab('pack-' + p.id);
+        toolbar.appendChild(btn);
+      });
+    }
+
+    function switchStickerTab(tab) {
+      stickerCurrentTab = tab;
+      document.querySelectorAll('#stickerToolbar .sticker-tab').forEach(el => {
+        el.classList.toggle('active', el.dataset.tab === tab);
+      });
+      const searchView = document.getElementById('stickerSearchView');
+      const contentView = document.getElementById('stickerContentView');
+      if (tab === 'search') {
+        searchView.style.display = 'flex';
+        contentView.innerHTML = '<div class="sticker-hint-inline">输入关键词搜索表情，点击即可发送</div>';
+        document.getElementById('stickerSearchInput').value = '';
+        document.getElementById('stickerSearchInput').oninput = debounceStickerSearch;
+        document.getElementById('stickerSearchInput').onkeydown = (e) => { if (e.key === 'Enter') doStickerSearch(); };
+        return;
+      }
+      searchView.style.display = 'none';
+      if (tab === 'add') {
+        renderStickerPackList();
+        return;
+      }
+      if (tab === 'favorites') {
+        renderStickerFavorites();
+        return;
+      }
+      if (tab.startsWith('pack-')) {
+        const packId = tab.replace('pack-', '');
+        renderPackStickers(packId);
+      }
+    }
+
+    let stickerSearchDebounceTimer;
+    function debounceStickerSearch() {
+      clearTimeout(stickerSearchDebounceTimer);
+      stickerSearchDebounceTimer = setTimeout(doStickerSearch, 300);
+    }
+    async function doStickerSearch() {
+      const q = document.getElementById('stickerSearchInput').value.trim();
+      const contentView = document.getElementById('stickerContentView');
+      if (!q) {
+        contentView.innerHTML = '<div class="sticker-hint-inline">输入关键词搜索表情</div>';
+        return;
+      }
+      try {
+        const r = await fetch('/api/stickers/search?q=' + encodeURIComponent(q));
+        const list = await r.json();
+        contentView.innerHTML = '';
+        list.forEach(s => {
+          const div = document.createElement('div');
+          div.className = 'sticker-item sticker-item-with-name';
+          const img = document.createElement('img');
+          img.src = s.url;
+          img.alt = s.name;
+          div.appendChild(img);
+          const label = document.createElement('span');
+          label.className = 'sticker-item-label';
+          label.textContent = s.name || '';
+          div.appendChild(label);
+          div.onclick = () => sendStickerAndClose(s.path, s.name);
+          contentView.appendChild(div);
+        });
+        if (list.length === 0) contentView.innerHTML = '<div class="sticker-hint-inline">未找到匹配表情</div>';
+      } catch (e) {
+        contentView.innerHTML = '<div class="sticker-hint-inline" style="color:#c00;">加载失败</div>';
+      }
+    }
+
+    function sendStickerAndClose(path, name) {
+      const content = '[表情]' + path;
+      if (window.sendStickerMessage) {
+        window.sendStickerMessage(content);
+      } else {
+        const input = document.getElementById('messageInput');
+        if (input) input.value = content;
+        const sendBtn = document.getElementById('sendBtn');
+        if (sendBtn) sendBtn.click();
+      }
+      closeAllPanels();
+    }
+
+    let allStickerPacksForAdd = [];
+
+    async function renderStickerPackList() {
+      const contentView = document.getElementById('stickerContentView');
+      contentView.innerHTML = '<div class="sticker-hint-inline">加载中…</div>';
+      try {
+        const r = await fetch('/api/stickers/packs');
+        allStickerPacksForAdd = await r.json();
+      } catch (e) { allStickerPacksForAdd = []; }
+      contentView.innerHTML = '';
+      const searchRow = document.createElement('div');
+      searchRow.className = 'sticker-pack-search-row';
+      searchRow.style.justifyContent = 'space-between';
+      const searchInput = document.createElement('input');
+      searchInput.type = 'text';
+      searchInput.placeholder = '按名称搜索表情包…';
+      searchInput.oninput = () => renderStickerPackGrid(contentView, searchInput.value.trim());
+      searchRow.appendChild(searchInput);
+      const uploadLink = document.createElement('a');
+      uploadLink.href = '/stickers/upload';
+      uploadLink.textContent = '上传表情包至公开';
+      uploadLink.style.cssText = 'flex-shrink:0; margin-left:10px; font-size:12px; color:#ffb6b9;';
+      searchRow.appendChild(uploadLink);
+      contentView.appendChild(searchRow);
+      const gridWrap = document.createElement('div');
+      gridWrap.style.cssText = 'grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); row-gap: 16px; column-gap: 12px; align-content: start;';
+      gridWrap.id = 'stickerPackGridWrap';
+      contentView.appendChild(gridWrap);
+      renderStickerPackGrid(contentView, '');
+    }
+
+    function renderStickerPackGrid(contentView, query) {
+      const gridWrap = document.getElementById('stickerPackGridWrap');
+      if (!gridWrap) return;
+      const q = (query || '').toLowerCase();
+      const list = q ? allStickerPacksForAdd.filter(p => (p.name || '').toLowerCase().includes(q)) : allStickerPacksForAdd;
+      gridWrap.innerHTML = '';
+      list.forEach(p => {
+        const div = document.createElement('div');
+        div.className = 'sticker-item';
+        div.style.aspectRatio = '1';
+        if (p.cover) {
+          const img = document.createElement('img');
+          img.src = p.cover;
+          img.alt = p.name;
+          div.appendChild(img);
+        } else {
+          div.innerHTML = '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:14px;color:#666;">' + (p.name || p.id) + '</div>';
+        }
+        div.onclick = () => {
+          const from = currentId;
+          const group = isGroupMode ? '1' : '0';
+          window.location.href = '/stickers/pack/' + encodeURIComponent(p.id) + '?from=' + encodeURIComponent(from) + '&group=' + group;
+        };
+        gridWrap.appendChild(div);
+      });
+      if (list.length === 0) {
+        gridWrap.innerHTML = '<div class="sticker-hint-inline" style="grid-column:1/-1;">' + (q ? '未找到匹配表情包' : '暂无官方表情包') + '</div>';
+      }
+    }
+
+    async function renderPackStickers(packId) {
+      const contentView = document.getElementById('stickerContentView');
+      contentView.innerHTML = '<div class="sticker-hint-inline">加载中…</div>';
+      try {
+        const r = await fetch('/api/stickers/pack/' + encodeURIComponent(packId));
+        const data = await r.json();
+        contentView.innerHTML = '';
+        (data.stickers || []).forEach(s => {
+          const div = document.createElement('div');
+          div.className = 'sticker-item sticker-item-with-name';
+          const img = document.createElement('img');
+          img.src = s.url;
+          img.alt = s.name;
+          div.appendChild(img);
+          const label = document.createElement('span');
+          label.className = 'sticker-item-label';
+          label.textContent = s.name || '';
+          div.appendChild(label);
+          div.onclick = () => sendStickerAndClose(s.path, s.name);
+          contentView.appendChild(div);
+        });
+      } catch (e) {
+        contentView.innerHTML = '<div class="sticker-hint-inline" style="color:#c00;">加载失败</div>';
+      }
+    }
+
+    async function renderStickerFavorites() {
+      const contentView = document.getElementById('stickerContentView');
+      contentView.innerHTML = '<div class="sticker-hint-inline">加载中…</div>';
+      try {
+        const r = await fetch('/api/stickers/favorites');
+        const list = await r.json();
+        contentView.innerHTML = '';
+        const addCell = document.createElement('div');
+        addCell.className = 'sticker-item';
+        addCell.innerHTML = '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:28px;color:#aaa;">+</div>';
+        addCell.onclick = () => triggerStickerUpload();
+        contentView.appendChild(addCell);
+        list.forEach(s => {
+          const div = document.createElement('div');
+          div.className = 'sticker-item';
+          const img = document.createElement('img');
+          img.src = s.url;
+          img.alt = s.name;
+          div.appendChild(img);
+          div.onclick = () => sendStickerAndClose(s.path, s.name);
+          contentView.appendChild(div);
+        });
+      } catch (e) {
+        contentView.innerHTML = '<div class="sticker-hint-inline" style="color:#c00;">加载失败</div>';
+      }
+    }
+
+    function triggerStickerUpload() {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/png,image/jpeg,image/gif,image/webp';
+      input.onchange = () => {
+        if (!input.files || !input.files[0]) return;
+        const file = input.files[0];
+        const modal = document.getElementById('stickerUploadModal');
+        const nameInput = document.getElementById('stickerUploadNameInput');
+        const cancelBtn = document.getElementById('stickerUploadCancelBtn');
+        const confirmBtn = document.getElementById('stickerUploadConfirmBtn');
+        nameInput.value = '';
+        modal.style.display = 'flex';
+        nameInput.focus();
+        const closeModal = () => { modal.style.display = 'none'; };
+        cancelBtn.onclick = closeModal;
+        modal.onclick = (e) => { if (e.target === modal) closeModal(); };
+        confirmBtn.onclick = async () => {
+          const fd = new FormData();
+          fd.append('file', file);
+          const name = (nameInput.value || '').trim();
+          if (name) fd.append('name', name);
+          closeModal();
+          try {
+            const r = await fetch('/api/stickers/upload', { method: 'POST', body: fd });
+            const data = await r.json();
+            if (data.path) {
+              await fetch('/api/stickers/favorites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: data.path }) });
+              renderStickerFavorites();
+            } else if (data.message) alert(data.message);
+          } catch (e) { alert('上传失败'); }
+        };
+      };
+      input.click();
+    }
+
+    document.getElementById('stickerDetailPackLink').onclick = (e) => {
+      e.preventDefault();
+      const packId = document.getElementById('stickerDetailPackLink').dataset.packId;
+      document.getElementById('stickerDetailModal').classList.remove('show');
+      document.getElementById('stickerDetailModal').style.display = 'none';
+      if (packId) {
+        const from = currentId;
+        const group = isGroupMode ? '1' : '0';
+        window.location.href = '/stickers/pack/' + encodeURIComponent(packId) + '?from=' + encodeURIComponent(from) + '&group=' + group;
+      }
+    };
+    document.getElementById('stickerDetailModal').onclick = (e) => {
+      if (e.target.id === 'stickerDetailModal') {
+        e.target.classList.remove('show');
+        e.target.style.display = 'none';
+      }
+    };
+
+    async function addStickerToFavorites(path) {
+      if (!path) return;
+      try {
+        const r = await fetch('/api/stickers/favorites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) });
+        const data = r.json && await r.json().catch(function(){ return {}; });
+        if (!r.ok) throw new Error(data.message || '添加失败');
+        if (typeof showToast === 'function') showToast('已加入喜欢');
+        else alert('已加入喜欢');
+      } catch (e) { if (typeof showToast === 'function') showToast(e.message || '添加失败'); else alert(e.message || '添加失败'); }
     }
 
     async function loadQuickPhrases() {

@@ -12,20 +12,16 @@ logs/
 *.log
 chat_history.db
 
-# --- 核心数据 (隐私) ---
-# 1. 角色数据
-characters/
-
-# 2. 群聊数据
-groups/
-
 # 3. 配置文件 (只保留通用模板，忽略个人设置)
 # 忽略用户个人设置 (用户名、语言)
-configs/*.json
+# configs/*.json
 # 忽略全局人设
 configs/global_user_persona.md
+configs/users.db
 
+docs/
 scripts/
+users/
 
 static/avatar_user.png
 

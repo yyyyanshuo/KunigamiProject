@@ -6,3 +6,5 @@ Flask
 APScheduler
 urllib3
 pywebpush
+janome
+jieba

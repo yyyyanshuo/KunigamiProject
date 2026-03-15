@@ -55,11 +55,15 @@
 
   <div id="error-msg" class="error-msg"></div>
 
-  <!-- 用户名默认就是您的昵称，或者这里填 user 也可以，根据您的设置 -->
-  <input type="text" id="username" placeholder="用户名 (Username)">
+  <!-- 现在统一使用邮箱登录，请填写注册时的邮箱地址 -->
+  <input type="text" id="username" placeholder="邮箱 (Email)">
   <input type="password" id="password" placeholder="密码 (Password)">
 
   <button onclick="doLogin()">登 录</button>
+
+  <div style="margin-top: 8px; font-size: 12px; color: #888;">
+    还没有账号？<a href="/register" style="color:#d81b60; text-decoration:none;">去注册</a>
+  </div>
 </div>
 
 <script>
@@ -69,7 +73,7 @@
     const errorEl = document.getElementById('error-msg');
 
     if(!username || !password) {
-      errorEl.textContent = "请输入用户名和密码";
+      errorEl.textContent = "请输入邮箱和密码";
       errorEl.style.display = 'block';
       return;
     }

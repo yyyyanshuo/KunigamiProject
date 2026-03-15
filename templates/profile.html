@@ -1,357 +1,604 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>个人中心</title>
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#fff3f8">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <style>
+    :root {
+      --primary-color: #ffb6b9;
+      --primary-dark: #f09598;
+      --bg-color: #f2f4f8;
+      --card-bg: #ffffff;
+      --text-main: #2c3e50;
+      --text-muted: #8ca0b3;
+      --border-color: #eef0f5;
+      --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+      --shadow-md: 0 8px 16px rgba(0, 0, 0, 0.06);
+      --radius-lg: 16px;
+      --radius-md: 10px;
+    }
+
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
     body {
-      font-family: "Segoe UI", "PingFang SC", sans-serif;
-      background: #f7f7f7; margin: 0; padding: 0 0 80px 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Helvetica Neue", sans-serif;
+      background: var(--bg-color);
+      margin: 0;
+      padding: 0 0 88px 0;
+      color: var(--text-main);
     }
 
-    /* 头部样式 */
+    /* 头部样式（带柔和渐变） */
     .header {
-      background: #fff; padding: 40px 20px 20px;
-      text-align: center; border-bottom: 1px solid #eee;
+      background: linear-gradient(135deg, #fff3f8 0%, #ffffff 100%);
+      padding: 38px 16px 24px;
+      text-align: center;
+      border-bottom-left-radius: 24px;
+      border-bottom-right-radius: 24px;
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 14px;
     }
-    .avatar-large {
-      width: 80px; height: 80px; border-radius: 50%;
-      background: #eee; margin: 0 auto 10px;
-      border: 3px solid #fff; box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-    }
-    .username { font-size: 18px; font-weight: bold; color: #333; }
 
-    /* 模块通用样式 */
-    .section-container { margin: 20px 0; }
+    .avatar-wrapper {
+      position: relative;
+      display: inline-block;
+      cursor: pointer;
+    }
+
+    .avatar-large {
+      width: 80px; height: 80px;
+      border-radius: 50%;
+      background: #eee;
+      border: 3px solid #fff;
+      box-shadow: 0 6px 14px rgba(255, 182, 185, 0.3);
+      object-fit: cover;
+      transition: transform 0.3s ease;
+    }
+    .avatar-wrapper:active .avatar-large { transform: scale(0.95); }
+
+    .camera-badge {
+      position: absolute; bottom: 2px; right: 0;
+      background: var(--primary-color); color: white;
+      border-radius: 50%; width: 24px; height: 24px;
+      display: flex; align-items: center; justify-content: center;
+      border: 2px solid #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+      transition: background 0.3s;
+    }
+
+    .username-wrapper {
+      margin-top: 12px;
+      display: block;
+      width: 100%;
+      text-align: center;
+    }
+    .username-inner {
+      display: inline-block;
+      position: relative;
+    }
+    .username-edit-icon {
+      width: 16px; height: 16px;
+      color: #adb5bd; cursor: pointer;
+      position: absolute;
+      right: -20px;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+    
+    .username-input {
+      font-size: 17px; font-weight: 700; color: var(--text-main);
+      text-align: center; border: none; background: transparent;
+      width: auto; min-width: 80px; max-width: 200px; padding: 4px 8px; border-radius: 8px;
+      transition: all 0.2s;
+    }
+    .username-input:focus {
+      background: rgba(255, 182, 185, 0.1); outline: none;
+    }
+
+    /* 模块通用卡片样式 */
+    .section-container {
+      margin: 0 14px 12px;
+      background: var(--card-bg);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+      transition: box-shadow 0.3s;
+    }
+    .section-container:active { box-shadow: none; }
 
     .section-header {
-      padding: 0 20px 10px; display: flex; justify-content: space-between; align-items: center;
-    }
-    .section-title { font-size: 13px; color: #888; font-weight: bold; }
-
-    .btn-edit-toggle {
-      color: #2196f3; font-size: 13px; background: none; border: none;
-      cursor: pointer; font-weight: bold; padding: 5px;
+      padding: 14px 16px;
+      display: flex; justify-content: space-between; align-items: center;
+      cursor: pointer; background: var(--card-bg);
+      user-select: none;
     }
 
-    .config-card {
-      background: #fff; border-top: 1px solid #eee; border-bottom: 1px solid #eee;
-      padding: 15px 20px; position: relative;
+    .section-header-main {
+      display: flex; align-items: center; gap: 6px;
     }
 
-    /* --- 两种模式的样式 --- */
-
-    /* 1. 查看模式 (View Mode) */
-    .view-box {
-      font-size: 14px; line-height: 1.6; color: #444;
-      white-space: pre-wrap; /* 保留换行 */
-      min-height: 20px;
+    .section-title { 
+      font-size: 14px; color: var(--text-main); font-weight: 600; 
     }
 
-    /* 2. 编辑模式 (Edit Mode) */
-    .edit-box { display: none; } /* 默认隐藏 */
+    .section-arrow {
+      font-size: 14px; color: var(--text-muted);
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      display: inline-block;
+    }
+    .section-container.collapsed .section-arrow { transform: rotate(-90deg); }
 
-    .editor-area {
-      width: 100%; min-height: 150px; padding: 10px;
-      border: 1px solid #ddd; border-radius: 8px; outline: none;
-      font-size: 14px; line-height: 1.6; font-family: monospace;
-      resize: vertical; box-sizing: border-box; color: #333; background: #fafafa;
+    .section-body {
+      max-height: 2000px;
+      transition: max-height 0.3s ease-in-out, opacity 0.3s ease-in-out;
+      opacity: 1;
+      border-top: 1px solid var(--border-color);
+    }
+    .section-container.collapsed .section-body {
+      max-height: 0; opacity: 0; overflow: hidden; border-top: none; display: none; /* 若原JS依赖display:none则保留 */
     }
 
-    .action-bar {
-      margin-top: 10px; text-align: right; display: flex; gap: 10px; justify-content: flex-end;
+    .config-card { padding: 12px 16px; }
+
+    /* 表单与输入框 */
+    .field-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 0; border-bottom: 1px dashed var(--border-color);
+    }
+    .field-row:last-child { border-bottom: none; padding-bottom: 0; }
+
+    .field-label {
+      font-size: 12px; color: var(--text-muted); font-weight: 500;
+      flex-shrink: 0; min-width: 84px;
     }
 
+    .field-input {
+      flex: 1; font-size: 13px; color: var(--text-main);
+      padding: 6px 10px; background: #f8f9fa;
+      border: 1px solid transparent; border-radius: var(--radius-md);
+      text-align: left; box-sizing: border-box; width: 100%;
+      transition: all 0.2s;
+    }
+    .field-input:focus {
+      background: #fff; border-color: var(--primary-color);
+      box-shadow: 0 0 0 3px rgba(255,182,185,0.2); outline: none;
+    }
+    .field-input::placeholder { color: #c0c4cc; }
+
+    select.field-input { appearance: none; background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238ca0b3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e"); background-repeat: no-repeat; background-position: right 10px center; background-size: 14px; padding-right: 30px; }
+
+    /* 按钮样式 */
     .btn {
-      padding: 6px 16px; border-radius: 20px; font-size: 12px; cursor: pointer; font-weight: bold; border: none;
+      padding: 6px 16px; border-radius: 18px; font-size: 12px; 
+      cursor: pointer; font-weight: 600; border: none; transition: all 0.2s;
+      display: inline-flex; align-items: center; justify-content: center;
     }
-    .btn-cancel { background: #f5f5f5; color: #666; }
-    .btn-save { background: #ffb6b9; color: #fff; }
+    .btn:active { transform: scale(0.96); }
+    .btn-cancel { background: #f1f3f5; color: #495057; }
+    .btn-save { background: var(--primary-color); color: #fff; box-shadow: 0 4px 10px rgba(255,182,185,0.4); }
+    
+    .btn-edit-toggle {
+      color: #3b82f6; font-size: 13px; background: rgba(59,130,246,0.1); 
+      border: none; cursor: pointer; font-weight: 600; 
+      padding: 4px 12px; border-radius: 12px; transition: all 0.2s;
+      margin-right: 10px;
+    }
+    .btn-edit-toggle:active { background: rgba(59,130,246,0.2); }
 
-    /* --- 状态切换类 --- */
+    /* 编辑器样式 */
+    .view-box {
+      font-size: 13px; line-height: 1.55; color: var(--text-main);
+      white-space: pre-wrap; min-height: 20px; padding: 4px 0;
+    }
+    .edit-box { display: none; }
+    .editor-area {
+      width: 100%; min-height: 100px; padding: 10px;
+      border: 1px solid var(--border-color); border-radius: var(--radius-md); 
+      outline: none; font-size: 13px; line-height: 1.55; 
+      resize: vertical; box-sizing: border-box; color: var(--text-main); 
+      background: #fcfcfd; font-family: inherit;
+    }
+    .editor-area:focus { border-color: var(--primary-color); }
+    
+    .action-bar { margin-top: 12px; display: flex; gap: 8px; justify-content: flex-end; }
     .editing .view-box { display: none; }
     .editing .edit-box { display: block; }
-    .editing .btn-edit-toggle { display: none; } /* 编辑时隐藏右上角编辑按钮 */
+    .editing .btn-edit-toggle { display: none; }
+    .empty-tip { color: #adb5bd; font-style: italic; }
 
-    .empty-tip { color: #ccc; font-style: italic; }
+    /* API 设置特有样式 */
+    .api-status-grid {
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
+      background: #f8f9fa; padding: 12px; border-radius: var(--radius-md);
+    }
+    .api-status-item { display: flex; flex-direction: column; gap: 4px; }
+    .api-label { font-size: 12px; color: var(--text-muted); }
+    .api-value { font-size: 13px; font-weight: 600; color: var(--text-main); word-break: break-all; }
+    .api-value.highlight { color: #d81b60; font-size: 14px; }
+    .api-badge { 
+      font-family: monospace; background: #fff; border: 1px solid #e2e8f0; 
+      padding: 3px 8px; border-radius: 6px; display: inline-block; font-size: 12px; 
+    }
+
+    .radio-card {
+      flex: 1; border: 2px solid transparent; padding: 10px 6px; 
+      border-radius: var(--radius-md); cursor: pointer; text-align: center; 
+      font-size: 12px; color: var(--text-muted); background: #f8f9fa; 
+      transition: all 0.2s; font-weight: 500;
+    }
+    .radio-card:has(input:checked) {
+      border-color: var(--primary-color); background: #fff5f6; 
+      color: var(--primary-dark); font-weight: 600;
+    }
+    .radio-card input { display: none; }
+    
+    .model-select {
+      width: 100%; padding: 8px 10px; border: 1px solid #eef0f5; 
+      border-radius: var(--radius-md); font-size: 13px; background: #fff;
+      color: var(--text-main); outline: none; transition: border-color 0.2s;
+    }
+    .model-select:focus { border-color: var(--primary-color); }
+    .input-label { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; font-weight: 500;}
+
+    /* 表格样式优化 */
+    .table-container {
+      max-height: 300px; overflow-y: auto; 
+      border-radius: var(--radius-md); border: 1px solid var(--border-color);
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { 
+      background: rgba(248, 249, 250, 0.95); backdrop-filter: blur(4px);
+      color: var(--text-muted); font-weight: 600; position: sticky; top: 0;
+      padding: 10px 8px; z-index: 10;
+    }
+    td { padding: 10px 8px; border-bottom: 1px solid var(--border-color); color: var(--text-main); }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: #fbfbfc; }
+
+    /* 底部按钮区 */
+    .bottom-actions {
+      display: flex; justify-content: center; align-items: center; gap: 12px;
+      margin: 22px 16px 36px;
+    }
+    .btn-switch {
+      padding: 8px 16px; border-radius: 22px; border: 1px solid #ff9b73; 
+      background: transparent; color: #ff9b73; font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px;
+    }
+    .btn-switch:active { background: rgba(255, 155, 115, 0.1); }
+    .btn-logout {
+      color: var(--text-muted); text-decoration: none; font-size: 13px; 
+      display: flex; align-items: center; gap: 6px; padding: 8px; transition: color 0.2s;
+    }
+    .btn-logout:active { color: var(--primary-color); }
+
+    /* 模态框优化 */
+    .modal-overlay {
+      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+      background: rgba(0,0,0,0.4); backdrop-filter: blur(4px);
+      z-index: 3000; align-items: center; justify-content: center;
+      animation: fadeIn 0.2s ease;
+    }
+    .modal-card {
+      background: #fff; padding: 20px; border-radius: 18px; width: 85%; max-width: 360px; 
+      box-shadow: 0 10px 30px rgba(0,0,0,0.15); animation: slideUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
   </style>
 </head>
 <body>
 
 <div class="header">
-  <!-- 【修改】头像点击上传区域 -->
-  <div style="position: relative; display: inline-block; cursor: pointer;" onclick="document.getElementById('user-avatar-input').click()">
-
-    <!-- 头像图片 -->
-    <img id="user-avatar-img" src="/static/avatar_user.png" class="avatar-large" style="transition: opacity 0.3s;">
-
+  <!-- 头像点击上传区域 -->
+  <div class="avatar-wrapper" onclick="document.getElementById('user-avatar-input').click()">
+    <!-- 头像图片：默认从 /user_avatar 获取 -->
+    <img id="user-avatar-img" src="/user_avatar" class="avatar-large" onerror="this.src='https://api.dicebear.com/7.x/notionists/svg?seed=Felix'">
+    
     <!-- 右下角的小相机图标 -->
-    <div style="position: absolute; bottom: 10px; right: 0; background: #ffb6b9; color: white; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border: 2px solid #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">
-      <svg viewBox="0 0 24 24" style="width:16px; height:16px; fill:currentColor;"><path d="M9 2L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/></svg>
+    <div class="camera-badge">
+      <svg viewBox="0 0 24 24" style="width:12px; height:12px; fill:currentColor;">
+        <path d="M9 2L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/>
+      </svg>
     </div>
-
-    <!-- 隐藏的文件输入框 -->
     <input type="file" id="user-avatar-input" accept="image/*" style="display: none;" onchange="uploadUserAvatar(this)">
   </div>
 
-  <!-- 头像部分保持不变 -->
-
-  <!-- 【修改】用户名区域 -->
-  <div style="margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 8px;">
-    <input type="text" id="current-username-input" value="加载中..."
-           style="font-size: 18px; font-weight: bold; color: #333; text-align: center; border: none; background: transparent; border-bottom: 1px dashed #ccc; width: 150px;"
-           onfocus="this.style.borderBottom='1px solid #ffb6b9'"
-           onblur="saveUserName(this)">
-
-    <!-- 一个小小的编辑图标提示 -->
-    <svg viewBox="0 0 24 24" style="width:16px; height:16px; color:#aaa; cursor:pointer;" onclick="document.getElementById('current-username-input').focus()">
-      <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
-    </svg>
-  </div>
-
-  <!-- 【新增】用户年龄（每年1月1日自动+1） -->
-  <div style="margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 8px;">
-    <label style="font-size: 12px; color: #888;">年龄 (每年自动+1):</label>
-    <input type="number" id="user-age-input" placeholder="留空表示未设置" min="1" max="150"
-           style="font-size: 14px; color: #555; text-align: center; border: 1px solid #eee; border-radius: 15px; width: 80px; padding: 5px 10px;"
-           onblur="saveUserAge(this)">
-  </div>
-
-  <!-- 拍一拍后缀（被拍时的描述） -->
-  <div style="margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 8px;">
-    <label style="font-size: 12px; color: #888;">拍一拍后缀:</label>
-    <input type="text" id="user-tickle-input" placeholder="的狐狸脑袋"
-           style="font-size: 14px; color: #555; text-align: center; border: 1px solid #eee; border-radius: 15px; width: 120px; padding: 5px 10px;"
-           onblur="saveUserTickle(this)">
-  </div>
-
-  <!-- 【新增】密码修改区域 -->
-  <div style="margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 8px;">
-    <input type="password" id="new-password-input" placeholder="设置新密码 (留空不改)"
-           style="font-size: 14px; color: #555; text-align: center; border: 1px solid #eee; border-radius:15px; width: 180px; padding: 5px 10px;"
-           onchange="savePassword(this)">
-  </div>
-
-  <!-- 语言选择 -->
-  <div style="margin-top: 15px; text-align: center;">
-    <label style="font-size: 12px; color: #999; margin-right: 5px;">AI 语言 / Language:</label>
-    <select id="ai-lang-select" onchange="saveAiLanguage(this)" style="padding: 4px; border: 1px solid #ddd; border-radius: 6px; font-size: 12px; color: #555;">
-      <option value="ja">🇯🇵 日本語 (默认)</option>
-      <option value="zh">🇨🇳 中文 (Chinese)</option>
-    </select>
+  <!-- 用户名区域 -->
+  <div class="username-wrapper">
+    <span class="username-inner">
+      <input type="text" id="current-username-input" value="加载中..." class="username-input" onblur="saveUserName(this)">
+      <svg class="username-edit-icon" viewBox="0 0 24 24" onclick="document.getElementById('current-username-input').focus()">
+        <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+      </svg>
+    </span>
   </div>
 </div>
 
-<div class="config-card" style="text-align:center; padding:20px;">
-  <div style="font-weight:bold; margin-bottom:10px;">🔔 消息通知</div>
-  <button class="btn" style="background:#6200ea; color:white; width:100%;" onclick="enableNotifications()">点击开启通知权限</button>
-  <div style="font-size:11px; color:#999; margin-top:5px;">* iOS需添加到主屏幕才能使用</div>
+<!-- 账号与通知设置 -->
+<div class="section-container collapsed">
+  <div class="section-header" onclick="toggleSectionByHeader(this)">
+    <div class="section-header-main">
+      <div class="section-title">⚙️ 账号与通知设置</div>
+    </div>
+    <span class="section-arrow">▾</span>
+  </div>
+  <div class="section-body">
+    <div class="config-card">
+      <div class="field-row">
+        <label class="field-label">年龄 (自动+1)</label>
+        <input type="number" id="user-age-input" placeholder="留空表示未设置" min="1" max="150" class="field-input" onblur="saveUserAge(this)">
+      </div>
+      <div class="field-row">
+        <label class="field-label">拍一拍后缀</label>
+        <input type="text" id="user-tickle-input" placeholder="的狐狸脑袋" class="field-input" onblur="saveUserTickle(this)">
+      </div>
+      <div class="field-row">
+        <label class="field-label">登录密码</label>
+        <div style="display:flex; gap:8px; width:100%;">
+          <input type="password" id="new-password-input" placeholder="设置新密码 (留空不改)" class="field-input" style="flex:1;">
+          <button class="btn" style="background:#ffe0e3; color:#d81b60; border-radius:16px; padding:6px 12px; font-size:12px;"
+                  onclick="savePassword(document.getElementById('new-password-input'))">
+            修改
+          </button>
+        </div>
+      </div>
+      <div class="field-row">
+        <label class="field-label">通知邮箱</label>
+        <input type="email" id="user-email-input" placeholder="用于接收通知的邮箱" class="field-input" onblur="saveUserEmail(this)">
+      </div>
+      <div class="field-row">
+        <label class="field-label">AI 语言设置</label>
+        <select id="ai-lang-select" onchange="saveAiLanguage(this)" class="field-input">
+          <option value="ja">🇯🇵 日本語 (默认)</option>
+          <option value="zh">🇨🇳 中文 (Chinese)</option>
+        </select>
+      </div>
+      <div class="field-row">
+        <label class="field-label">Gemini Key</label>
+        <input type="password" id="gemini-key-input" placeholder="填写 API Key" class="field-input" onblur="saveGeminiKey(this)">
+      </div>
+      <div class="field-row">
+        <label class="field-label">OpenRouter</label>
+        <input type="password" id="openrouter-key-input" placeholder="填写 API Key" class="field-input" onblur="saveOpenrouterKey(this)">
+      </div>
+      <div class="field-row">
+        <label class="field-label"></label>
+        <button class="btn" style="background:#f5f5f5; color:#555; border-radius:16px; padding:6px 14px;" onclick="unlockKeys()">
+          🔐 输入登录密码后显示 Key
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 消息通知 -->
+<div class="section-container collapsed">
+  <div class="section-header" onclick="toggleSectionByHeader(this)">
+    <div class="section-header-main">
+      <div class="section-title">🔔 浏览器消息推送</div>
+    </div>
+    <span class="section-arrow">▾</span>
+  </div>
+  <div class="section-body">
+    <div class="config-card" style="text-align:center; padding: 24px 20px;">
+      <div style="font-weight:600; margin-bottom:12px; color:var(--text-main);">启用浏览器推送通知</div>
+      <button class="btn" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:white; width:100%; padding: 12px; border-radius: 12px; font-size: 14px;" onclick="enableNotifications()">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="margin-right:8px;"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2zm-2 1H8v-6c0-2.48 1.51-4.5 4-4.5s4 2.02 4 4.5v6z"/></svg>
+        点击开启通知权限
+      </button>
+      <div style="font-size:12px; color:var(--text-muted); margin-top:10px;">* iOS 设备需将网页「添加到主屏幕」才能使用</div>
+    </div>
+  </div>
 </div>
 
 <!-- 模块 1: 用户设定 -->
-<div class="section-container" id="container-user">
-  <div class="section-header">
-    <div class="section-title">👤 全局用户设定 (Global User Persona)</div>
-    <button class="btn-edit-toggle" onclick="enterEdit('user')">编辑 / Edit</button>
+<div class="section-container collapsed" id="container-user">
+  <div class="section-header" onclick="toggleSectionByHeader(this)">
+    <div class="section-header-main">
+      <div class="section-title">👤 全局用户设定 (Persona)</div>
+    </div>
+    <div>
+      <button class="btn-edit-toggle" onclick="event.stopPropagation(); enterEdit('user')">编辑 Edit</button>
+      <span class="section-arrow">▾</span>
+    </div>
   </div>
-
-  <div class="config-card">
-    <!-- 查看模式 -->
-    <div class="view-box" id="view-user"><span class="empty-tip">加载中...</span></div>
-
-    <!-- 编辑模式 -->
-    <div class="edit-box">
-      <textarea id="input-user" class="editor-area"></textarea>
-      <div class="action-bar">
-        <button class="btn btn-cancel" onclick="cancelEdit('user')">取消</button>
-        <button class="btn btn-save" onclick="saveConfig('user')">保存设定</button>
+  <div class="section-body">
+    <div class="config-card">
+      <div class="view-box" id="view-user"><span class="empty-tip">加载中...</span></div>
+      <div class="edit-box">
+        <textarea id="input-user" class="editor-area" placeholder="在此输入用户人设信息..."></textarea>
+        <div class="action-bar">
+          <button class="btn btn-cancel" onclick="cancelEdit('user')">取消</button>
+          <button class="btn btn-save" onclick="saveConfig('user')">保存设定</button>
+        </div>
       </div>
     </div>
   </div>
 </div>
 
 <!-- 模块 2: 系统规则 -->
-<div class="section-container" id="container-format">
-  <div class="section-header">
-    <div class="section-title">⚖️ 全局系统规则 (Global System Rules)</div>
-    <button class="btn-edit-toggle" onclick="enterEdit('format')">编辑 / Edit</button>
+<div class="section-container collapsed" id="container-format">
+  <div class="section-header" onclick="toggleSectionByHeader(this)">
+    <div class="section-header-main">
+      <div class="section-title">⚖️ 全局系统规则 (System Rules)</div>
+    </div>
+    <div>
+      <button class="btn-edit-toggle" onclick="event.stopPropagation(); enterEdit('format')">编辑 Edit</button>
+      <span class="section-arrow">▾</span>
+    </div>
   </div>
-
-  <div class="config-card">
-    <!-- 查看模式 -->
-    <div class="view-box" id="view-format"><span class="empty-tip">加载中...</span></div>
-
-    <!-- 编辑模式 -->
-    <div class="edit-box">
-      <textarea id="input-format" class="editor-area"></textarea>
-      <div class="action-bar">
-        <button class="btn btn-cancel" onclick="cancelEdit('format')">取消</button>
-        <button class="btn btn-save" onclick="saveConfig('format')">保存规则</button>
+  <div class="section-body">
+    <div class="config-card">
+      <div class="view-box" id="view-format"><span class="empty-tip">加载中...</span></div>
+      <div class="edit-box">
+        <textarea id="input-format" class="editor-area" placeholder="在此输入系统规则约束..."></textarea>
+        <div class="action-bar">
+          <button class="btn btn-cancel" onclick="cancelEdit('format')">取消</button>
+          <button class="btn btn-save" onclick="saveConfig('format')">保存规则</button>
+        </div>
       </div>
     </div>
   </div>
 </div>
 
-<!-- 【重构版】API 线路与模型设置 -->
-<div class="section-title">🔌 线路与模型设置 (API Settings)</div>
-
-<div class="module" id="module-api">
-  <div class="config-card">
-
-    <!-- 1. 查看模式 (View Mode) -->
-    <div class="view-mode" id="api-view-mode" style="padding: 10px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-        <div style="font-weight:bold; color:#555;">当前状态</div>
-        <button class="btn-edit-toggle" onclick="toggleApiEdit(true)">编辑配置 / Edit</button>
-      </div>
-
-      <!-- 展示当前选中的内容 -->
-      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
-        <div>
-          <div style="font-size:12px; color:#999;">当前线路</div>
-          <div id="view-route-name" style="font-weight:bold; color:#d81b60; font-size:15px;">-</div>
-        </div>
-        <div>
-          <div style="font-size:12px; color:#999;">聊天模型</div>
-          <div id="view-chat-model" style="font-family:monospace; background:#f0f0f0; padding:2px 6px; border-radius:4px; display:inline-block;">-</div>
-        </div>
-        <div>
-          <div style="font-size:12px; color:#999;">朋友圈模型</div>
-          <div id="view-moments-model" style="font-family:monospace; background:#f0f0f0; padding:2px 6px; border-radius:4px; display:inline-block;">-</div>
-        </div>
-        <div>
-          <div style="font-size:12px; color:#999;">记忆总结模型</div>
-          <div id="view-summary-model" style="font-family:monospace; background:#f0f0f0; padding:2px 6px; border-radius:4px; display:inline-block;">-</div>
-        </div>
-        <div>
-          <div style="font-size:12px; color:#999;">人设生成模型</div>
-          <div id="view-gen-model" style="font-family:monospace; background:#f0f0f0; padding:2px 6px; border-radius:4px; display:inline-block;">-</div>
-        </div>
-      </div>
+<!-- API 线路与模型设置 -->
+<div class="section-container collapsed" id="module-api">
+  <div class="section-header" onclick="toggleSectionByHeader(this)">
+    <div class="section-header-main">
+      <div class="section-title">🔌 线路与模型设置 (API)</div>
     </div>
+    <span class="section-arrow">▾</span>
+  </div>
 
-    <!-- 2. 编辑模式 (Edit Mode) -->
-    <div class="edit-mode" id="api-edit-mode" style="display:none; padding: 10px;">
-
-      <!-- A. 线路选择 -->
-      <div style="margin-bottom: 20px;">
-        <div style="font-size:13px; color:#888; margin-bottom:8px; font-weight:bold;">1. 选择线路 Route</div>
-        <div style="display:flex; gap:10px;">
-          <label class="radio-card" onclick="selectRoute('gemini')">
-            <input type="radio" name="route" value="gemini" id="radio-gemini">
-            <span>线路一：Gemini 直连</span>
-          </label>
-          <label class="radio-card" onclick="selectRoute('relay')">
-            <input type="radio" name="route" value="relay" id="radio-relay">
-            <span>线路二：国内中转</span>
-          </label>
+  <div class="section-body">
+    <div class="config-card">
+      <!-- 1. 查看模式 -->
+      <div class="view-mode" id="api-view-mode">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+          <div style="font-weight:600; color:var(--text-main); font-size:14px;">当前分配状态</div>
+          <button class="btn-edit-toggle" style="margin:0;" onclick="toggleApiEdit(true)">配置 Configuration</button>
         </div>
-      </div>
 
-      <!-- B. 模型选择 (下拉框) -->
-      <div id="model-settings" style="margin-bottom: 20px;">
-        <div style="font-size:13px; color:#888; margin-bottom:8px; font-weight:bold;">2. 选择模型 Select Models</div>
-        <div style="display:grid; grid-template-columns: 1fr; gap:10px;">
-          <div>
-            <div class="input-label">聊天 (Chat)</div>
-            <select id="model-chat" class="model-select"></select>
+        <div class="api-status-grid">
+          <div class="api-status-item" style="grid-column: span 2;">
+            <div class="api-label">当前执行线路</div>
+            <div id="view-route-name" class="api-value highlight">-</div>
           </div>
-          <div>
-            <div class="input-label">朋友圈 (Moments)</div>
-            <select id="model-moments" class="model-select"></select>
+          <div class="api-status-item">
+            <div class="api-label">聊天 (Chat)</div>
+            <div id="view-chat-model" class="api-badge">-</div>
           </div>
-          <div>
-            <div class="input-label">记忆总结 (Summary)</div>
-            <select id="model-summary" class="model-select"></select>
+          <div class="api-status-item">
+            <div class="api-label">朋友圈 (Moments)</div>
+            <div id="view-moments-model" class="api-badge">-</div>
           </div>
-          <div>
-            <div class="input-label">人设生成 (Persona)</div>
-            <select id="model-gen" class="model-select"></select>
+          <div class="api-status-item">
+            <div class="api-label">记忆 (Summary)</div>
+            <div id="view-summary-model" class="api-badge">-</div>
+          </div>
+          <div class="api-status-item">
+            <div class="api-label">人设 (Persona)</div>
+            <div id="view-gen-model" class="api-badge">-</div>
           </div>
         </div>
       </div>
 
-      <hr style="border:0; border-top:1px dashed #eee; margin:20px 0;">
-
-      <!-- C. 模型列表管理 (添加/删除) -->
-      <div style="margin-bottom: 20px;">
-        <div style="font-size:13px; color:#888; margin-bottom:8px; font-weight:bold;">
-          3. 管理列表 (自定义添加模型)
-          <span id="manage-route-name" style="font-weight:normal; color:#ffb6b9; margin-left:5px;">-</span>
+      <!-- 2. 编辑模式 -->
+      <div class="edit-mode" id="api-edit-mode" style="display:none;">
+        <div style="margin-bottom: 20px;">
+          <div class="input-label" style="font-weight:600; color:var(--text-main);">1. 选择 API 线路 (Route)</div>
+          <div style="display:flex; gap:12px; margin-top:8px;">
+            <label class="radio-card" onclick="selectRoute('gemini')">
+              <input type="radio" name="route" value="gemini" id="radio-gemini">
+              <span>🚀 Gemini 直连</span>
+            </label>
+            <label class="radio-card" onclick="selectRoute('relay')">
+              <input type="radio" name="route" value="relay" id="radio-relay">
+              <span>⚡ 国内中转</span>
+            </label>
+          </div>
         </div>
 
-        <!-- 标签列表 -->
-        <div id="model-tags-list" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px;"></div>
+        <div id="model-settings" style="margin-bottom: 20px;">
+          <div class="input-label" style="font-weight:600; color:var(--text-main);">2. 为功能指派模型 (Select Models)</div>
+          <div style="display:grid; grid-template-columns: 1fr; gap:12px; margin-top:8px;">
+            <div><div class="input-label">聊天对话</div><select id="model-chat" class="model-select"></select></div>
+            <div><div class="input-label">朋友圈生成</div><select id="model-moments" class="model-select"></select></div>
+            <div><div class="input-label">记忆提取总结</div><select id="model-summary" class="model-select"></select></div>
+            <div><div class="input-label">人设自动演进</div><select id="model-gen" class="model-select"></select></div>
+          </div>
+        </div>
 
-        <!-- 添加框 -->
-        <div style="display:flex; gap:8px;">
-          <input type="text" id="new-model-input" placeholder="输入模型ID (如 gpt-4o)" class="model-select" style="flex:1;">
-          <button class="btn" style="background:#e3f2fd; color:#1565c0; padding:8px 15px; border:none; border-radius:6px; cursor:pointer;" onclick="addNewModel()">+ 添加</button>
+        <hr style="border:0; border-top:1px dashed var(--border-color); margin:24px 0;">
+
+        <div style="margin-bottom: 20px;">
+          <div class="input-label" style="font-weight:600; color:var(--text-main);">
+            3. 扩展模型列表
+            <span id="manage-route-name" style="font-weight:normal; color:var(--primary-color); margin-left:6px;">-</span>
+          </div>
+          <div id="model-tags-list" style="display:flex; flex-wrap:wrap; gap:8px; margin: 10px 0;"></div>
+          <div style="display:flex; gap:8px;">
+            <input type="text" id="new-model-input" placeholder="输入模型ID (如 gpt-4o)" class="model-select">
+            <button class="btn" style="background:#e3f2fd; color:#1565c0; border-radius:10px; padding: 0 16px; flex-shrink:0;" onclick="addNewModel()">+ 添加</button>
+          </div>
+        </div>
+
+        <div class="action-bar">
+          <button class="btn btn-cancel" onclick="toggleApiEdit(false)">取消</button>
+          <button class="btn btn-save" onclick="saveApiConfig()">保存配置</button>
         </div>
       </div>
-
-      <!-- 操作按钮 -->
-      <div class="action-bar">
-        <button class="btn btn-cancel" onclick="toggleApiEdit(false)">取消 / Cancel</button>
-        <button class="btn btn-save" onclick="saveApiConfig()">保存配置 / Save Config</button>
-      </div>
-
     </div>
   </div>
 </div>
 
-<style>
-  /* 配套样式 */
-  .radio-card {
-    flex: 1; border: 1px solid #ddd; padding: 10px; border-radius: 8px;
-    cursor: pointer; text-align: center; font-size: 13px; color: #555;
-    background: #fafafa; transition: all 0.2s;
-  }
-  .radio-card:has(input:checked) {
-    border-color: #ffb6b9; background: #fff0f2; color: #d81b60; font-weight: bold;
-  }
-  .radio-card input { display: none; }
-
-  .model-select {
-    width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px;
-    font-size: 12px; background: #fff;
-  }
-  .input-label { font-size: 11px; color: #999; margin-bottom: 4px; }
-</style>
-
-<!-- 【新增】API 消耗日志面板 -->
-<div class="section-title">📊 系统调用日志 (API Usage Logs)</div>
-<div class="config-card" style="padding: 0; overflow: hidden; margin-bottom: 80px;">
-  <div style="max-height: 300px; overflow-y: auto;">
-    <table style="width: 100%; border-collapse: collapse; font-size: 12px; font-family: monospace;">
-      <thead style="background: #f8f9fa; color: #666; position: sticky; top: 0;">
-      <tr>
-        <th style="padding: 10px; text-align: left;">时间</th>
-        <th style="padding: 10px; text-align: left;">角色</th>
-        <th style="padding: 10px; text-align: right;">Input</th>
-        <th style="padding: 10px; text-align: right;">Output</th>
-        <th style="padding: 10px; text-align: right;">Total</th>
-      </tr>
-      </thead>
-      <tbody id="usage-log-body">
-      <tr><td colspan="5" style="text-align:center; padding:20px; color:#ccc;">加载中...</td></tr>
-      </tbody>
-    </table>
+<!-- API 消耗日志面板 -->
+<div class="section-container collapsed">
+  <div class="section-header" onclick="toggleSectionByHeader(this)">
+    <div class="section-header-main">
+      <div class="section-title">📊 系统调用日志 (API Logs)</div>
+    </div>
+    <span class="section-arrow">▾</span>
+  </div>
+  <div class="section-body">
+    <div class="config-card" style="padding: 12px;">
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th style="text-align: left;">时间</th>
+              <th style="text-align: left;">角色</th>
+              <th style="text-align: right;">In</th>
+              <th style="text-align: right;">Out</th>
+              <th style="text-align: right;">Total</th>
+            </tr>
+          </thead>
+          <tbody id="usage-log-body">
+            <tr><td colspan="5" style="text-align:center; padding:30px; color:#adb5bd;">加载中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </div>
 
-<div style="text-align:center; margin: 30px 0;">
-  <a href="/logout" style="color: #ffb6b9; text-decoration: none; font-size:14px;">🚪 退出登录 (Logout)</a>
+<!-- 底部操作区 -->
+<div class="bottom-actions">
+  <button class="btn-switch" onclick="openAccountSwitchModal()">
+    🔄 切换账号
+  </button>
+  <a href="/logout" class="btn-logout">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+    退出登录
+  </a>
 </div>
 
 <!-- 引入底部导航栏 -->
 {% include 'tabbar.html' %}
+
+<!-- 账号切换弹窗 -->
+<div id="account-switch-modal" class="modal-overlay">
+  <div class="modal-card">
+    <h3 style="margin:0 0 8px 0; font-size:18px; color:var(--text-main);">切换账号</h3>
+    <p style="margin:0 0 16px 0; font-size:13px; color:var(--text-muted);">仅展示最近 30 天在本设备登录过的账号。</p>
+    
+    <div id="account-switch-list" style="max-height:240px; overflow-y:auto; font-size:14px; margin-bottom: 16px; background: #f8f9fa; border-radius: 12px; padding: 8px;">
+      <div style="padding:16px; text-align:center; color:#adb5bd;">加载中...</div>
+    </div>
+    
+    <div style="text-align:right;">
+      <button onclick="closeAccountSwitchModal()" class="btn btn-cancel" style="width: 100%;">关闭窗口</button>
+    </div>
+  </div>
+</div>
+
+</body>
 
 <script>
   // 缓存数据
@@ -359,6 +606,13 @@
     user: '',
     format: ''
   };
+
+  // 折叠/展开模块
+  function toggleSectionByHeader(headerEl) {
+    const container = headerEl.closest('.section-container');
+    if (!container) return;
+    container.classList.toggle('collapsed');
+  }
 
   // 1. 加载所有配置 (合并调用)
   async function loadConfigs() {
@@ -393,7 +647,11 @@
       const ageInput = document.getElementById('user-age-input');
       if (ageInput) ageInput.value = (dataUser.age !== undefined && dataUser.age !== null) ? dataUser.age : '';
       const tickleInput = document.getElementById('user-tickle-input');
-      if (tickleInput) tickleInput.value = dataUser.tickle_suffix || '的狐狸脑袋';
+      // 默认不填值，只在有配置时回显；“的狐狸脑袋”仅作为 placeholder 提示
+      if (tickleInput) tickleInput.value = dataUser.tickle_suffix || '';
+      const emailInput = document.getElementById('user-email-input');
+      if (emailInput) emailInput.value = dataUser.email || '';
+      // 默认不回显具体 Key，除非用户通过密码解锁
 
     } catch(e) {
       console.error("配置加载失败", e);
@@ -402,12 +660,29 @@
   }
 
   async function saveUserTickle(input) {
-    const val = input.value.trim() || '的狐狸脑袋';
+    const val = input.value.trim(); // 留空就存空字符串
     try {
       const res = await fetch('/api/user/profile_settings', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ tickle_suffix: val })
+      });
+      const result = await res.json();
+      if (result.status === 'success') {
+        input.style.border = '1px solid #4cd964';
+        setTimeout(() => { input.style.border = '1px solid #eee'; }, 1000);
+      }
+    } catch(e) { /* silent */ }
+  }
+
+  // 保存用户邮箱
+  async function saveUserEmail(input) {
+    const val = input.value.trim();
+    try {
+      const res = await fetch('/api/user/profile_settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ email: val })
       });
       const result = await res.json();
       if (result.status === 'success') {
@@ -434,6 +709,83 @@
         setTimeout(() => { input.style.border = '1px solid #eee'; }, 1000);
       }
     } catch(e) { /* silent */ }
+  }
+
+  // 保存 Gemini API Key
+  async function saveGeminiKey(input) {
+    const val = input.value.trim();
+    try {
+      const res = await fetch('/api/user/profile_settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ gemini_api_key: val })
+      });
+      const result = await res.json();
+      if (result.status === 'success') {
+        input.style.border = '1px solid #4cd964';
+        setTimeout(() => { input.style.border = '1px solid #eee'; }, 1000);
+      }
+    } catch(e) { /* silent */ }
+  }
+
+  // 保存 OpenRouter API Key
+  async function saveOpenrouterKey(input) {
+    const val = input.value.trim();
+    try {
+      const res = await fetch('/api/user/profile_settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ openrouter_api_key: val })
+      });
+      const result = await res.json();
+      if (result.status === 'success') {
+        input.style.border = '1px solid #4cd964';
+        setTimeout(() => { input.style.border = '1px solid #eee'; }, 1000);
+      }
+    } catch(e) { /* silent */ }
+  }
+
+  // 解锁并显示 API Keys（需输入登录密码）
+  let keysUnlocked = false;
+  async function unlockKeys() {
+    if (keysUnlocked) {
+      // 已解锁，直接切换为明文显示
+      const g = document.getElementById('gemini-key-input');
+      const o = document.getElementById('openrouter-key-input');
+      if (g) g.type = 'text';
+      if (o) o.type = 'text';
+      return;
+    }
+
+    const pwd = prompt("请输入当前账号的登录密码，用于解锁并显示已保存的 API Key：");
+    if (!pwd) return;
+
+    try {
+      const res = await fetch('/api/user/unlock_keys', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ password: pwd })
+      });
+      const data = await res.json();
+      if (!res.ok || data.status === 'error') {
+        alert(data.message || '密码校验失败，请重试');
+        return;
+      }
+
+      const geminiKeyInput = document.getElementById('gemini-key-input');
+      const openrouterKeyInput = document.getElementById('openrouter-key-input');
+      if (geminiKeyInput) {
+        geminiKeyInput.type = 'text';
+        geminiKeyInput.value = data.gemini_api_key || '';
+      }
+      if (openrouterKeyInput) {
+        openrouterKeyInput.type = 'text';
+        openrouterKeyInput.value = data.openrouter_api_key || '';
+      }
+      keysUnlocked = true;
+    } catch (e) {
+      alert('网络错误，无法解锁 Key');
+    }
   }
 
   // 2. 【新增】保存用户名 (失去焦点时触发)
@@ -849,6 +1201,78 @@
 
   // 顺便加一个退出登录按钮在页面最底部
   // 在 <body> 结束前，或者 tabbar 上面加一个
+
+  // --- 账号切换 ---
+  async function openAccountSwitchModal() {
+    const modal = document.getElementById('account-switch-modal');
+    const listEl = document.getElementById('account-switch-list');
+    if (!modal || !listEl) return;
+
+    modal.style.display = 'flex';
+    listEl.innerHTML = '<div style="padding:8px; color:#999;">加载中...</div>';
+
+    try {
+      const res = await fetch('/api/accounts/recent');
+      if (!res.ok) {
+        listEl.innerHTML = '<div style="padding:8px; color:#f44336;">无法获取账号列表，请稍后重试</div>';
+        return;
+      }
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length === 0) {
+        listEl.innerHTML = '<div style="padding:8px; color:#999;">暂无可切换账号，请先使用其它账号登录一次。</div>';
+        return;
+      }
+
+      let html = '';
+      data.forEach(acc => {
+        const isCurrent = acc.is_current;
+        const displayName = acc.display_name || acc.email || (`用户 ${acc.user_id}`);
+        const email = acc.email || '';
+        const badge = isCurrent ? '<span style="margin-left:6px; font-size:11px; color:#4cd964;">当前</span>' : '';
+        const btnHtml = isCurrent
+                ? ''
+                : `<button onclick="switchAccount(${acc.user_id})" style="padding:4px 10px; border:none; background:#ffb6b9; color:#fff; border-radius:12px; cursor:pointer; font-size:12px;">切换</button>`;
+
+        html += `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 4px; border-bottom:1px solid #f2f2f2;">
+            <div>
+              <div>${displayName}${badge}</div>
+              <div style="font-size:11px; color:#999;">${email}</div>
+            </div>
+            ${btnHtml}
+          </div>`;
+      });
+      listEl.innerHTML = html;
+    } catch (e) {
+      console.error(e);
+      listEl.innerHTML = '<div style="padding:8px; color:#f44336;">加载失败，请检查网络</div>';
+    }
+  }
+
+  function closeAccountSwitchModal() {
+    const modal = document.getElementById('account-switch-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  async function switchAccount(userId) {
+    if (!confirm('确定切换到该账号吗？')) return;
+    try {
+      const res = await fetch('/api/accounts/switch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ user_id: userId })
+      });
+      const data = await res.json();
+      if (data.status === 'success') {
+        // 切换成功后回到首页或刷新页面
+        window.location.href = '/';
+      } else {
+        alert(data.message || '切换失败，请稍后重试');
+      }
+    } catch (e) {
+      alert('网络错误，切换失败');
+    }
+  }
 
   // --- 通知注册逻辑 ---
 

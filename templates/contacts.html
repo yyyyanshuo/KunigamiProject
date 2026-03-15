@@ -2,11 +2,11 @@
 <html lang="zh">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
     <!-- PWA 配置 -->
     <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#fff3f8">
+    <meta name="theme-color" content="#ffffff">
     <!-- iOS 专用配置 -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -14,153 +14,350 @@
 
     <title>消息列表</title>
     <style>
-        body {
-            font-family: "Segoe UI", "PingFang SC", sans-serif;
-            background: #f7f7f7; margin: 0; padding: 0;
+        :root {
+            --primary: #ffb6b9;
+            --primary-light: #fff0f2;
+            --primary-dark: #f09598;
+            --bg-color: #f5f7fa;
+            --card-bg: #ffffff;
+            --text-main: #2c3e50;
+            --text-muted: #8ca0b3;
+            --border-color: #edf1f5;
+            --shadow-sm: 0 4px 15px rgba(0, 0, 0, 0.03);
+            --radius-md: 12px;
+            --radius-lg: 20px;
         }
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Helvetica Neue", sans-serif;
+            background: var(--card-bg); /* 消息列表底色使用白色更通透 */
+            margin: 0; 
+            padding: 0;
+            color: var(--text-main);
+        }
+
+        /* 顶部导航（毛玻璃效果） */
         .header {
-            background: #fff; padding: 15px 20px;
-            font-weight: bold; font-size: 18px; border-bottom: 1px solid #eee;
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            padding: 12px 18px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.04);
             position: sticky; top: 0; z-index: 10;
             display: flex; justify-content: space-between; align-items: center;
         }
+        
+        .header-title {
+            font-size: 18px; font-weight: 700; color: var(--text-main);
+        }
 
-        .contact-list { padding-bottom: 20px; }
+        /* 顶部加号按钮 */
+        .header-add-btn {
+            display: flex; align-items: center; justify-content: center;
+            width: 30px; height: 30px; border-radius: 50%;
+            background: var(--primary-light); color: var(--primary-dark);
+            cursor: pointer; transition: all 0.2s;
+        }
+        .header-add-btn:active { transform: scale(0.9); background: var(--primary); color: #fff; }
+        .header-add-btn svg { width: 16px; height: 16px; stroke-width: 2.5px; }
+
+        /* 消息列表区 */
+        .contact-list { padding-bottom: 100px; }
 
         .contact-item {
             display: flex; align-items: center;
-            background: #fff; padding: 12px 15px;
-            border-bottom: 1px solid #f0f0f0;
-            cursor: pointer; transition: background 0.2s;
+            background: var(--card-bg); padding: 14px 20px;
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer; transition: all 0.2s;
             position: relative;
         }
-        .contact-item:active { background: #f5f5f5; }
+        .contact-item:active { background: var(--bg-color); }
 
         /* 置顶样式 */
-        .contact-item.pinned { background: #fdfdfd; } /* 可以稍微给个不一样的背景 */
-        .contact-item.pinned::after {
-            content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
-            background-color: #ffb6b9; /* 置顶标记色 */
+        .contact-item.pinned { background: #fdfdfd; }
+        .contact-item.pinned::before {
+            content: ''; position: absolute; left: 0; top: 18%; bottom: 18%; width: 3px;
+            background: linear-gradient(to bottom, var(--primary), #ffa1a5);
+            border-top-right-radius: 3px; border-bottom-right-radius: 3px;
         }
 
+        /* 头像 */
         .avatar {
-            width: 50px; height: 50px; border-radius: 8px; margin-right: 12px;
+            width: 46px; height: 46px; border-radius: 12px; margin-right: 14px;
             object-fit: cover; flex-shrink: 0;
-            border: 1px solid #f0f0f0;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+            border: 1px solid #f9f9f9;
         }
 
-        .info { flex: 1; min-width: 0; /* 防止文本溢出 */ }
+        .info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
 
-        .top-row { display: flex; justify-content: space-between; margin-bottom: 6px; }
-        .name { font-size: 16px; font-weight: 500; color: #333; }
-        .time { font-size: 11px; color: #bbb; }
+        .top-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        .name { font-size: 15px; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .time { font-size: 12px; color: #a0aec0; flex-shrink: 0; font-weight: 500; }
 
+        .bottom-row { display: flex; justify-content: space-between; align-items: center; }
         .msg-preview {
-            font-size: 13px; color: #888;
+            font-size: 14px; color: var(--text-muted);
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            padding-right: 8px;
         }
-        /* --- 下拉菜单修复版 --- */
+
+        /* 未读红点 */
+        .unread-badge {
+            background-color: #ff3b30; color: white;
+            border-radius: 999px; padding: 0 5px; min-width: 16px; height: 16px;
+            display: inline-flex; align-items: center; justify-content: center;
+            font-size: 10px; font-weight: 700; flex-shrink: 0;
+            box-shadow: 0 2px 4px rgba(255, 59, 48, 0.3);
+        }
+
+        /* --- 下拉菜单美化 --- */
         #plusMenu {
-            display: none;
-            position: absolute;
-            top: 35px; right: 0;
-            background: #fff;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
-            border-radius: 8px;
-            min-width: 150px; /* 【修改】加宽 */
-            z-index: 100;
-            overflow: hidden;
-            border: 1px solid #eee;
+            display: none; position: absolute; top: 38px; right: 0;
+            background: var(--card-bg); box-shadow: 0 10px 30px rgba(0,0,0,0.12);
+            border-radius: var(--radius-md); min-width: 150px; z-index: 100;
+            overflow: hidden; border: 1px solid var(--border-color);
+            transform-origin: top right; animation: menu-pop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes menu-pop {
+            0% { opacity: 0; transform: scale(0.9); }
+            100% { opacity: 1; transform: scale(1); }
         }
 
         #plusMenu div {
-            padding: 12px 15px;
-            border-bottom: 1px solid #f9f9f9;
-            cursor: pointer;
-            font-size: 14px; /* 【修改】字体适中 */
-            color: #555;
-            white-space: nowrap; /* 【修改】禁止换行 */
-            transition: background 0.1s;
+            padding: 11px 16px; border-bottom: 1px solid #f8f9fa;
+            cursor: pointer; font-size: 14px; font-weight: 500; color: var(--text-main);
+            white-space: nowrap; transition: all 0.2s; display: flex; align-items: center; gap: 6px;
         }
-
-        #plusMenu div:hover { background-color: #fff5f6; color: #ffb6b9; }
+        #plusMenu div:hover, #plusMenu div:active { background-color: var(--primary-light); color: var(--primary-dark); }
         #plusMenu div:last-child { border-bottom: none; }
 
-        .unread-badge {
-            background-color: #ff3b30; color: white;
-            border-radius: 10px; padding: 2px 8px; font-size: 12px;
-            font-weight: bold; margin-left: 5px;
+        /* --- 弹窗美化 (Modals) --- */
+        .modal-overlay {
+            display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+            backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px);
+            z-index: 1000; align-items: center; justify-content: center;
+            animation: fade-in 0.2s ease-out;
         }
+        .modal-card {
+            background: var(--card-bg); padding: 24px; border-radius: var(--radius-lg);
+            width: 85%; max-width: 360px; box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+            animation: slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slide-up { from { transform: translateY(20px) scale(0.95); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
+
+        .modal-title { margin: 0 0 20px 0; color: var(--text-main); text-align: center; font-size: 18px; font-weight: 700; }
+        
+        .input-group { margin-bottom: 16px; }
+        .input-label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; font-weight: 500; }
+        .input-field {
+            width: 100%; padding: 12px 14px; border: 1px solid transparent;
+            background: #f0f2f5; border-radius: var(--radius-md); font-size: 14px; color: var(--text-main);
+            transition: all 0.2s; outline: none; box-sizing: border-box; font-family: inherit;
+        }
+        .input-field:focus { background: #fff; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(255,182,185,0.15); }
+
+        #char-selection-list {
+            max-height: 180px; overflow-y: auto; border: 1px solid var(--border-color);
+            border-radius: var(--radius-md); padding: 8px; background: #fafafa;
+        }
+
+        .modal-actions { display: flex; justify-content: space-between; gap: 12px; margin-top: 24px; }
+        .btn-cancel {
+            flex: 1; padding: 12px; border: none; background: #f0f2f5; color: var(--text-muted);
+            border-radius: 24px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s;
+        }
+        .btn-cancel:hover { background: #e4e6eb; color: var(--text-main); }
+        .btn-submit {
+            flex: 1; padding: 12px; border: none; background: linear-gradient(135deg, var(--primary), #ffa1a5); color: #fff;
+            border-radius: 24px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s;
+            box-shadow: 0 4px 12px rgba(255, 182, 185, 0.4);
+        }
+        .btn-submit:active { transform: scale(0.96); box-shadow: 0 2px 6px rgba(255, 182, 185, 0.4); }
+
+        /* --- 多选模式 --- */
+        .header-actions .header-add-wrap { display: flex; align-items: center; gap: 8px; }
+        .header-actions.select-mode .header-add-wrap { display: none; }
+        .contact-item .select-checkbox { display: none; margin-right: 12px; flex-shrink: 0; width: 22px; height: 22px; cursor: pointer; border-radius: 50%; -webkit-appearance: none; appearance: none; border: 2px solid #ccc; background: #fff; box-sizing: border-box; position: relative; }
+        .contact-item .select-checkbox:checked { background: var(--primary); border-color: var(--primary); }
+        .contact-item .select-checkbox:checked::after { content: ''; position: absolute; left: 5px; top: 2px; width: 6px; height: 11px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+        .select-mode .contact-item .select-checkbox { display: block; }
+        .select-mode .contact-item { cursor: pointer; }
+        .select-mode .contact-item:active { background: var(--primary-light); }
+        .multi-select-bar {
+            display: none; position: fixed; bottom: 0; left: 0; right: 0;
+            background: rgba(255,255,255,0.98); backdrop-filter: blur(10px);
+            border-top: 1px solid var(--border-color);
+            padding: 10px 12px 10px 20px;
+            padding-bottom: calc(10px + env(safe-area-inset-bottom));
+            align-items: center; gap: 10px; z-index: 999;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.06);
+        }
+        .multi-select-bar.active { display: flex; }
+        .multi-select-bar .select-all-wrap {
+            display: flex; align-items: center; gap: 8px; cursor: pointer; flex-shrink: 0;
+            font-size: 14px; font-weight: 600; color: var(--primary-dark);
+        }
+        .multi-select-bar .select-all-checkbox {
+            width: 22px; height: 22px; cursor: pointer; border-radius: 50%;
+            -webkit-appearance: none; appearance: none; border: 2px solid #ccc; background: #fff; box-sizing: border-box; position: relative; flex-shrink: 0;
+        }
+        .multi-select-bar .select-all-checkbox:checked { background: var(--primary); border-color: var(--primary); }
+        .multi-select-bar .select-all-checkbox:checked::after { content: ''; position: absolute; left: 5px; top: 2px; width: 6px; height: 11px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+        .multi-select-bar .btn-third { flex: 1; min-width: 0; padding: 10px 8px; border-radius: 20px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; }
+        .multi-select-bar .action-dropdown-wrap { position: relative; flex: 1; min-width: 0; }
+        .multi-select-bar .btn-action {
+            width: 100%; padding: 10px 8px; border-radius: 20px; font-size: 13px; font-weight: 600;
+            background: var(--primary-light); color: var(--primary-dark); border: none;
+            cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+        }
+        .multi-select-bar .btn-action:active { transform: scale(0.96); }
+        .multi-select-bar .btn-cancel-bar { flex: 1; min-width: 0; padding: 10px 8px; border-radius: 20px; background: #f0f2f5; color: var(--text-muted); border: none; font-weight: 600; cursor: pointer; font-size: 13px; }
+        .multi-select-bar .btn-save-bar { flex: 1; min-width: 0; padding: 10px 8px; border-radius: 20px; background: linear-gradient(135deg, var(--primary), #ffa1a5); color: #fff; border: none; font-weight: 600; cursor: pointer; font-size: 13px; }
+        #actionDropdown { display: none; position: absolute; bottom: 100%; left: 0; margin-bottom: 6px; background: #fff; box-shadow: 0 6px 20px rgba(0,0,0,0.15); border-radius: 12px; min-width: 180px; max-height: 60vh; overflow-y: auto; z-index: 1000; border: 1px solid var(--border-color); }
+        #actionDropdown.show { display: block; }
+        #actionDropdown div { padding: 12px 16px; cursor: pointer; font-size: 14px; color: var(--text-main); border-bottom: 1px solid #f5f5f5; }
+        #actionDropdown div:last-child { border-bottom: none; }
+        #actionDropdown div:hover, #actionDropdown div:active { background: var(--primary-light); color: var(--primary-dark); }
+        #actionDropdown div.disabled { color: #bbb; cursor: not-allowed; }
     </style>
 </head>
 
-<!-- 在 </body> 之前加入这一行 -->
-{% include 'tabbar.html' %}
 <body>
 
 <div class="header">
-    <span>消息</span>
-    <div style="position:relative;">
-        <span style="font-size:24px; color:#ffb6b9; cursor:pointer;" onclick="toggleMenu()">+</span>
-        <!-- 下拉菜单 -->
-        <div id="plusMenu" style="display:none; position:absolute; top:30px; right:0; background:#fff; box-shadow:0 2px 10px rgba(0,0,0,0.1); border-radius:8px; width:120px; z-index:100; overflow:hidden;">
-            <div onclick="openAddCharModal()" style="padding:10px; border-bottom:1px solid #eee; cursor:pointer;">👤 新建联系人</div>
-            <div onclick="openAddGroupModal()" style="padding:10px; cursor:pointer;">👥 新建群聊</div>
+    <span class="header-title" id="headerTitle">消息</span>
+    <div class="header-actions" style="position:relative;">
+        <!-- 多选/加号（进入多选后整块隐藏） -->
+        <div class="header-add-wrap">
+            <div class="header-add-btn" id="btnMultiselect" onclick="toggleSelectMode()" title="多选">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" id="iconMultiselect">
+                    <rect x="3" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="14" width="7" height="7"></rect>
+                    <rect x="3" y="14" width="7" height="7"></rect>
+                </svg>
+            </div>
+            <div class="header-add-btn" onclick="toggleMenu()" id="btnPlus">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+            </div>
+        </div>
+        <div id="plusMenu">
+            <div onclick="openAddCharModal()"><span style="font-size:14px;">👤</span> 新建联系人</div>
+            <div onclick="openAddGroupModal()"><span style="font-size:14px;">👥</span> 新建群聊</div>
         </div>
     </div>
 </div>
 
 <div class="contact-list" id="list">
-    <div style="text-align:center; padding:20px; color:#999;">加载中...</div>
+    <div style="text-align:center; padding:28px 16px; color:#a0aec0; font-size:13px;">
+        <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" stroke-width="1.5" fill="none" style="opacity:0.5; margin-bottom:10px; display:block; margin:0 auto;">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+        </svg>
+        加载中...
+    </div>
 </div>
 
-<!-- 【新增】添加角色弹窗 -->
-<div id="addCharModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
-    <div style="background:#fff; padding:25px; border-radius:12px; width:80%; max-width:320px; box-shadow:0 4px 20px rgba(0,0,0,0.2);">
-        <h3 style="margin:0 0 15px 0; color:#333; text-align:center;">新建联系人</h3>
+<!-- 新建联系人弹窗 -->
+<div id="addCharModal" class="modal-overlay">
+    <div class="modal-card">
+        <h3 class="modal-title">新建联系人</h3>
 
-        <div style="margin-bottom:15px;">
-            <label style="display:block; font-size:12px; color:#888; margin-bottom:5px;">角色 ID (英文/数字, 不可改)</label>
-            <input type="text" id="new-char-id" placeholder="例如: bachira" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; box-sizing:border-box;">
+        <div class="input-group">
+            <label class="input-label">角色 ID (英文/数字, 不可改)</label>
+            <input type="text" id="new-char-id" class="input-field" placeholder="例如: bachira">
         </div>
 
-        <div style="margin-bottom:20px;">
-            <label style="display:block; font-size:12px; color:#888; margin-bottom:5px;">角色姓名</label>
-            <input type="text" id="new-char-name" placeholder="例如: 蜂乐回" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; box-sizing:border-box;">
+        <div class="input-group" style="margin-bottom: 24px;">
+            <label class="input-label">角色姓名</label>
+            <input type="text" id="new-char-name" class="input-field" placeholder="例如: 蜂乐回">
         </div>
 
-        <div style="display:flex; justify-content:space-between; gap:10px;">
-            <button onclick="closeAddModal()" style="flex:1; padding:10px; border:none; background:#f5f5f5; color:#666; border-radius:8px; cursor:pointer;">取消</button>
-            <button onclick="submitNewChar()" style="flex:1; padding:10px; border:none; background:#ffb6b9; color:#fff; border-radius:8px; cursor:pointer; font-weight:bold;">创建</button>
+        <div class="modal-actions">
+            <button onclick="closeAddModal()" class="btn-cancel">取消</button>
+            <button onclick="submitNewChar()" class="btn-submit">创建</button>
         </div>
     </div>
 </div>
 
-<!-- 【新增】新建群聊弹窗 -->
-<div id="addGroupModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
-    <div style="background:#fff; padding:25px; border-radius:12px; width:85%; max-width:350px; box-shadow:0 4px 20px rgba(0,0,0,0.2);">
-        <h3 style="margin:0 0 15px 0; color:#333; text-align:center;">创建群聊</h3>
+<!-- 新建群聊弹窗 -->
+<div id="addGroupModal" class="modal-overlay">
+    <div class="modal-card">
+        <h3 class="modal-title">创建群聊</h3>
 
-        <div style="margin-bottom:15px;">
-            <label style="display:block; font-size:12px; color:#888; margin-bottom:5px;">群 ID (英文)</label>
-            <input type="text" id="new-group-id" placeholder="例如: team_z" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; box-sizing:border-box;">
+        <div class="input-group">
+            <label class="input-label">群 ID (英文)</label>
+            <input type="text" id="new-group-id" class="input-field" placeholder="例如: team_z">
         </div>
 
-        <div style="margin-bottom:15px;">
-            <label style="display:block; font-size:12px; color:#888; margin-bottom:5px;">群名称</label>
-            <input type="text" id="new-group-name" placeholder="例如: 洁&蜂乐" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; box-sizing:border-box;">
+        <div class="input-group">
+            <label class="input-label">群名称</label>
+            <input type="text" id="new-group-name" class="input-field" placeholder="例如: 洁&蜂乐">
         </div>
 
-        <div style="margin-bottom:20px;">
-            <label style="display:block; font-size:12px; color:#888; margin-bottom:5px;">选择成员 (至少2人)</label>
-            <div id="char-selection-list" style="max-height:150px; overflow-y:auto; border:1px solid #eee; border-radius:8px; padding:5px;">
+        <div class="input-group" style="margin-bottom: 24px;">
+            <label class="input-label">选择成员 (至少2人)</label>
+            <div id="char-selection-list">
                 <!-- JS 动态填充 -->
+                <div style="text-align:center; padding:15px; color:#bbb; font-size:12px;">加载联系人中...</div>
             </div>
         </div>
 
-        <div style="display:flex; justify-content:space-between; gap:10px;">
-            <button onclick="document.getElementById('addGroupModal').style.display='none'" style="flex:1; padding:10px; border:none; background:#f5f5f5; color:#666; border-radius:8px; cursor:pointer;">取消</button>
-            <button onclick="submitNewGroup()" style="flex:1; padding:10px; border:none; background:#ffb6b9; color:#fff; border-radius:8px; cursor:pointer; font-weight:bold;">创建</button>
+        <div class="modal-actions">
+            <button onclick="document.getElementById('addGroupModal').style.display='none'" class="btn-cancel">取消</button>
+            <button onclick="submitNewGroup()" class="btn-submit">创建</button>
+        </div>
+    </div>
+</div>
+
+<!-- 底部导航栏 -->
+{% include 'tabbar.html' %}
+
+<!-- 多选模式底部操作栏：左侧全选选择框 + 右侧操作/取消/保存三等分 -->
+<div class="multi-select-bar" id="multiSelectBar">
+    <label class="select-all-wrap" onclick="event.preventDefault(); toggleSelectAll();">
+        <input type="checkbox" class="select-all-checkbox" id="selectAllCheckbox" tabindex="-1">
+        <span id="selectAllLabel">全选</span>
+    </label>
+    <div class="action-dropdown-wrap">
+        <button type="button" class="btn-action" onclick="toggleActionDropdown()">操作 ▼</button>
+        <div id="actionDropdown">
+            <div data-action="delete">删除</div>
+            <div data-action="pin">置顶</div>
+            <div data-action="unpin">取消置顶</div>
+            <div data-action="light_sleep_on">开启浅睡眠（仅单聊）</div>
+            <div data-action="light_sleep_off">关闭浅睡眠（仅单聊）</div>
+            <div data-action="deep_sleep_on">开启深睡眠（仅单聊）</div>
+            <div data-action="deep_sleep_off">关闭深睡眠（仅单聊）</div>
+            <div data-action="deep_sleep_time">设置深睡眠时间（仅单聊）</div>
+            <div data-action="active_mode_on">开启主动消息（仅群聊）</div>
+            <div data-action="active_mode_off">关闭主动消息（仅群聊）</div>
+        </div>
+    </div>
+    <button type="button" class="btn-cancel-bar btn-third" onclick="cancelSelectMode()">取消</button>
+    <button type="button" class="btn-save-bar btn-third" onclick="saveSelectModeAndExit()">保存</button>
+</div>
+
+<!-- 设置深睡眠时间弹窗 -->
+<div id="deepSleepTimeModal" class="modal-overlay">
+    <div class="modal-card">
+        <h3 class="modal-title">设置深睡眠时间（仅对选中的单聊生效）</h3>
+        <div class="input-group">
+            <label class="input-label">入睡时间 (HH:MM)</label>
+            <input type="text" id="ds_start_input" class="input-field" placeholder="例如: 23:00">
+        </div>
+        <div class="input-group" style="margin-bottom: 20px;">
+            <label class="input-label">起床时间 (HH:MM)</label>
+            <input type="text" id="ds_end_input" class="input-field" placeholder="例如: 07:00">
+        </div>
+        <div class="modal-actions">
+            <button onclick="closeDeepSleepTimeModal()" class="btn-cancel">取消</button>
+            <button onclick="applyDeepSleepTime()" class="btn-submit">确定</button>
         </div>
     </div>
 </div>
@@ -174,9 +371,11 @@
         const menu = document.getElementById('plusMenu');
         menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
     }
-    // 点击其他地方关闭菜单
+    // 点击其他地方关闭菜单（加号按钮和菜单本身除外）
     window.addEventListener('click', (e) => {
-        if (!e.target.matches('.header span') && !e.target.closest('#plusMenu')) {
+        const inAddBtn = e.target.closest('.header-add-btn');
+        const inMenu = e.target.closest('#plusMenu');
+        if (!inAddBtn && !inMenu) {
             document.getElementById('plusMenu').style.display = 'none';
         }
     });
@@ -247,46 +446,309 @@
         } catch(e) { document.getElementById('list').innerHTML = '<div style="text-align:center; padding:20px;">加载失败</div>'; }
     }
 
+    let selectMode = false;
+    let savedContactsSnapshot = null; // 进入多选时保存，取消时恢复
+    let pendingOps = [];              // 待保存的操作，点保存时才请求接口
+    const listEl = document.getElementById('list');
+
     function renderList(contacts) {
-        const listEl = document.getElementById('list');
         if(contacts.length === 0) {
-            listEl.innerHTML = '<div style="text-align:center; padding:40px; color:#ccc;">暂无联系人</div>';
+            listEl.innerHTML = '<div style="text-align:center; padding:28px; color:#ccc; font-size:13px;">暂无联系人</div>';
             return;
         }
 
         let html = '';
         contacts.forEach(c => {
             const pinnedClass = c.pinned ? 'pinned' : '';
-
-            // 【关键】区分跳转链接
-            // 如果是群聊，跳到 /chat/group/group_id (这是我们下一步要做的路由)
-            // 如果是单人，跳到 /chat/char_id
-            let jumpUrl = '';
-            if (c.type === 'group') {
-                jumpUrl = `/chat/group/${c.id}`;
-            } else {
-                jumpUrl = `/chat/${c.id}`;
-            }
-
-            // 在遍历渲染列表时...
+            const type = c.type === 'group' ? 'group' : 'char';
+            let jumpUrl = type === 'group' ? `/chat/group/${c.id}` : `/chat/${c.id}`;
             let unreadHtml = '';
             if (c.unread && c.unread > 0) {
                 unreadHtml = `<span class="unread-badge">${c.unread}</span>`;
             }
+            const escapedRemark = (c.remark || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+            const escapedMsg = (c.last_msg || '暂无消息').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+            const escapedTime = (c.last_time || '').replace(/"/g, '&quot;');
 
             html += `
-          <div class="contact-item ${pinnedClass}" onclick="window.location.href='${jumpUrl}'">
+          <div class="contact-item ${pinnedClass}" data-id="${c.id}" data-type="${type}" data-pinned="${!!c.pinned}"
+               onclick="handleContactItemClick(this, event, '${jumpUrl}')">
+              <input type="checkbox" class="select-checkbox" onclick="event.stopPropagation(); handleCheckboxClick(this)">
               <img src="${c.avatar}" class="avatar" onerror="this.src='/static/default_avatar.png'">
               <div class="info">
                   <div class="top-row">
-                      <span class="name">${c.remark} ${unreadHtml}</span> <!-- 加在这里 -->
-                      <span class="time">${c.last_time}</span>
+                      <span class="name">${escapedRemark} ${unreadHtml}</span>
+                      <span class="time">${escapedTime}</span>
                   </div>
-                  <div class="msg-preview">${c.last_msg || '暂无消息'}</div>
+                  <div class="msg-preview">${escapedMsg}</div>
               </div>
           </div>`;
         });
         listEl.innerHTML = html;
+        if (selectMode) {
+            document.body.classList.add('select-mode');
+            listEl.parentElement.classList.add('select-mode');
+        }
+    }
+
+    function handleContactItemClick(el, ev, jumpUrl) {
+        if (selectMode) {
+            if (ev && ev.target && ev.target.classList && ev.target.classList.contains('select-checkbox')) return;
+            const cb = el.querySelector('.select-checkbox');
+            if (cb) { cb.checked = !cb.checked; updateSelectCount(); updateSelectAllLabel(); }
+        } else {
+            window.location.href = jumpUrl;
+        }
+    }
+
+    function handleCheckboxClick(cb) {
+        updateSelectCount();
+        updateSelectAllLabel();
+    }
+
+    function updateSelectCount() {
+        const n = getSelected().length;
+        const t = document.getElementById('headerTitle');
+        if (selectMode && t) t.textContent = n > 0 ? `已选 ${n} 项` : '多选';
+    }
+
+    function updateSelectAllLabel() {
+        const total = listEl.querySelectorAll('.contact-item').length;
+        const checked = listEl.querySelectorAll('.contact-item .select-checkbox:checked').length;
+        const label = document.getElementById('selectAllLabel');
+        const allCb = document.getElementById('selectAllCheckbox');
+        if (label) label.textContent = checked >= total && total > 0 ? '取消全选' : '全选';
+        if (allCb) allCb.checked = total > 0 && checked >= total;
+    }
+
+    function toggleSelectAll() {
+        const total = listEl.querySelectorAll('.contact-item .select-checkbox').length;
+        const checked = listEl.querySelectorAll('.contact-item .select-checkbox:checked').length;
+        const isAll = checked >= total && total > 0;
+        listEl.querySelectorAll('.contact-item .select-checkbox').forEach(cb => { cb.checked = !isAll; });
+        const allCb = document.getElementById('selectAllCheckbox');
+        if (allCb) allCb.checked = !isAll;
+        updateSelectCount();
+        updateSelectAllLabel();
+    }
+
+    function getSelected() {
+        const items = listEl.querySelectorAll('.contact-item');
+        const out = [];
+        items.forEach(item => {
+            const cb = item.querySelector('.select-checkbox');
+            if (cb && cb.checked) {
+                out.push({ id: item.dataset.id, type: item.dataset.type, pinned: item.dataset.pinned === 'true' });
+            }
+        });
+        return out;
+    }
+
+    function toggleSelectMode() {
+        selectMode = !selectMode;
+        document.body.classList.toggle('select-mode', selectMode);
+        var headerActions = document.querySelector('.header-actions');
+        if (headerActions) headerActions.classList.toggle('select-mode', selectMode);
+        listEl.parentElement && listEl.parentElement.classList.toggle('select-mode', selectMode);
+        document.getElementById('multiSelectBar').classList.toggle('active', selectMode);
+        var tabBar = document.querySelector('.tab-bar'); if (tabBar) tabBar.style.display = selectMode ? 'none' : 'flex';
+        const title = document.getElementById('headerTitle');
+        if (selectMode) {
+            savedContactsSnapshot = JSON.parse(JSON.stringify(allContactsData));
+            pendingOps = [];
+            title.textContent = '多选';
+            updateSelectCount();
+            updateSelectAllLabel();
+        } else {
+            title.textContent = '消息';
+        }
+        const allCb = document.getElementById('selectAllCheckbox'); if (allCb) allCb.checked = false;
+        hideActionDropdown();
+    }
+
+    function exitSelectMode() {
+        selectMode = false;
+        savedContactsSnapshot = null;
+        pendingOps = [];
+        document.body.classList.remove('select-mode');
+        var headerActions = document.querySelector('.header-actions');
+        if (headerActions) headerActions.classList.remove('select-mode');
+        listEl.parentElement && listEl.parentElement.classList.remove('select-mode');
+        document.getElementById('multiSelectBar').classList.remove('active');
+        var tb = document.querySelector('.tab-bar'); if (tb) tb.style.display = 'flex';
+        document.getElementById('headerTitle').textContent = '消息';
+        hideActionDropdown();
+    }
+
+    function cancelSelectMode() {
+        if (savedContactsSnapshot) {
+            allContactsData = JSON.parse(JSON.stringify(savedContactsSnapshot));
+            renderList(allContactsData);
+        }
+        exitSelectMode();
+    }
+
+    async function saveSelectModeAndExit() {
+        const deleteCount = pendingOps.filter(op => op.action === 'delete').reduce((sum, op) => sum + op.items.length, 0);
+        if (deleteCount > 0 && !confirm(`本次操作包含删除 ${deleteCount} 项，确定保存吗？删除后无法恢复。`)) return;
+        for (const op of pendingOps) {
+            if (op.action === 'delete') {
+                for (const x of op.items) {
+                    try {
+                        if (x.type === 'group') await fetch(`/api/group/${x.id}/delete`, { method: 'DELETE' });
+                        else await fetch(`/api/character/${x.id}/delete`, { method: 'DELETE' });
+                    } catch (e) { console.error(e); }
+                }
+            } else if (op.action === 'pin') {
+                for (const x of op.items) {
+                    try {
+                        if (x.type === 'group') await fetch(`/api/group/${x.id}/update_meta`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ pinned: true }) });
+                        else await fetch(`/api/${x.id}/update_meta`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ pinned: true }) });
+                    } catch (e) { console.error(e); }
+                }
+            } else if (op.action === 'unpin') {
+                for (const x of op.items) {
+                    try {
+                        if (x.type === 'group') await fetch(`/api/group/${x.id}/update_meta`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ pinned: false }) });
+                        else await fetch(`/api/${x.id}/update_meta`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ pinned: false }) });
+                    } catch (e) { console.error(e); }
+                }
+            } else if (op.action === 'light_sleep') {
+                for (const x of op.items) {
+                    try { await fetch(`/api/${x.id}/update_meta`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ light_sleep: op.value }) }); } catch (e) { console.error(e); }
+                }
+            } else if (op.action === 'deep_sleep') {
+                for (const x of op.items) {
+                    try { await fetch(`/api/${x.id}/update_meta`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ deep_sleep: op.value }) }); } catch (e) { console.error(e); }
+                }
+            } else if (op.action === 'deep_sleep_time') {
+                for (const x of op.items) {
+                    try { await fetch(`/api/${x.id}/update_meta`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ ds_start: op.value.ds_start, ds_end: op.value.ds_end }) }); } catch (e) { console.error(e); }
+                }
+            } else if (op.action === 'active_mode') {
+                for (const x of op.items) {
+                    try { await fetch(`/api/group/${x.id}/update_meta`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ active_mode: op.value }) }); } catch (e) { console.error(e); }
+                }
+            }
+        }
+        await loadContacts();
+        exitSelectMode();
+    }
+
+    function hideActionDropdown() {
+        const d = document.getElementById('actionDropdown');
+        if (d) d.classList.remove('show');
+    }
+
+    function toggleActionDropdown() {
+        const d = document.getElementById('actionDropdown');
+        d.classList.toggle('show');
+    }
+    window.addEventListener('click', function(e) {
+        if (!e.target.closest('.action-dropdown-wrap')) hideActionDropdown();
+    });
+
+    document.getElementById('actionDropdown').addEventListener('click', function(e) {
+        const div = e.target.closest('[data-action]');
+        if (!div || div.classList.contains('disabled')) return;
+        const action = div.dataset.action;
+        hideActionDropdown();
+        runBatchAction(action);
+    });
+
+    function applyOpLocally(op) {
+        if (op.action === 'delete') {
+            allContactsData = allContactsData.filter(c => !op.items.some(i => i.id === c.id && i.type === c.type));
+        } else {
+            const ids = new Set(op.items.map(x => x.id));
+            allContactsData.forEach(c => {
+                if (!ids.has(c.id)) return;
+                const item = op.items.find(i => i.id === c.id);
+                if (!item || (item.type === 'group' && c.type !== 'group') || (item.type === 'char' && c.type !== 'char')) return;
+                if (op.action === 'pin') c.pinned = true;
+                else if (op.action === 'unpin') c.pinned = false;
+                else if (op.action === 'light_sleep') c.light_sleep = op.value;
+                else if (op.action === 'deep_sleep') c.deep_sleep = op.value;
+                else if (op.action === 'deep_sleep_time') { c.ds_start = op.value.ds_start; c.ds_end = op.value.ds_end; }
+                else if (op.action === 'active_mode') c.active_mode = op.value;
+            });
+        }
+        renderList(allContactsData);
+        updateSelectCount();
+        updateSelectAllLabel();
+    }
+
+    function runBatchAction(action) {
+        const sel = getSelected();
+        if (sel.length === 0) { alert('请先选择至少一项'); return; }
+        const chars = sel.filter(x => x.type === 'char');
+        const groups = sel.filter(x => x.type === 'group');
+
+        if (action === 'delete') {
+            if (!confirm(`确定要删除选中的 ${sel.length} 项吗？点保存后生效，点取消可恢复。`)) return;
+            pendingOps.push({ action: 'delete', items: sel });
+            applyOpLocally({ action: 'delete', items: sel });
+            return;
+        }
+        if (action === 'pin') {
+            pendingOps.push({ action: 'pin', items: sel });
+            applyOpLocally({ action: 'pin', items: sel });
+            return;
+        }
+        if (action === 'unpin') {
+            pendingOps.push({ action: 'unpin', items: sel });
+            applyOpLocally({ action: 'unpin', items: sel });
+            return;
+        }
+        if (action === 'light_sleep_on' || action === 'light_sleep_off') {
+            if (chars.length === 0) { alert('请选择单聊联系人后再操作。'); return; }
+            if (!confirm(`将对选中的 ${chars.length} 个单聊${action === 'light_sleep_on' ? '开启' : '关闭'}浅睡眠（点保存后生效）。`)) return;
+            const val = action === 'light_sleep_on';
+            pendingOps.push({ action: 'light_sleep', value: val, items: chars });
+            applyOpLocally({ action: 'light_sleep', value: val, items: chars });
+            return;
+        }
+        if (action === 'deep_sleep_on' || action === 'deep_sleep_off') {
+            if (chars.length === 0) { alert('请选择单聊联系人后再操作。'); return; }
+            if (!confirm(`将对选中的 ${chars.length} 个单聊${action === 'deep_sleep_on' ? '开启' : '关闭'}深睡眠（点保存后生效）。`)) return;
+            const val = action === 'deep_sleep_on';
+            pendingOps.push({ action: 'deep_sleep', value: val, items: chars });
+            applyOpLocally({ action: 'deep_sleep', value: val, items: chars });
+            return;
+        }
+        if (action === 'deep_sleep_time') {
+            if (chars.length === 0) { alert('请选择单聊联系人后再操作。'); return; }
+            document.getElementById('ds_start_input').value = '';
+            document.getElementById('ds_end_input').value = '';
+            document.getElementById('deepSleepTimeModal').style.display = 'flex';
+            window._pendingDsCharIds = chars.map(x => x.id);
+            return;
+        }
+        if (action === 'active_mode_on' || action === 'active_mode_off') {
+            if (groups.length === 0) { alert('请选择群聊后再操作。'); return; }
+            if (!confirm(`将对选中的 ${groups.length} 个群聊${action === 'active_mode_on' ? '开启' : '关闭'}主动消息（点保存后生效）。`)) return;
+            const val = action === 'active_mode_on';
+            pendingOps.push({ action: 'active_mode', value: val, items: groups });
+            applyOpLocally({ action: 'active_mode', value: val, items: groups });
+            return;
+        }
+    }
+
+    function closeDeepSleepTimeModal() {
+        document.getElementById('deepSleepTimeModal').style.display = 'none';
+        window._pendingDsCharIds = null;
+    }
+
+    function applyDeepSleepTime() {
+        const ids = window._pendingDsCharIds;
+        if (!ids || !ids.length) return;
+        const start = document.getElementById('ds_start_input').value.trim();
+        const end = document.getElementById('ds_end_input').value.trim();
+        if (!start || !end) { alert('请填写入睡时间和起床时间（HH:MM）'); return; }
+        const items = ids.map(id => ({ id, type: 'char' }));
+        pendingOps.push({ action: 'deep_sleep_time', value: { ds_start: start, ds_end: end }, items: items });
+        applyOpLocally({ action: 'deep_sleep_time', value: { ds_start: start, ds_end: end }, items: items });
+        closeDeepSleepTimeModal();
     }
 
     // 页面加载时请求

@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+
+<title>上传表情包</title>
+
+<style>
+
+*{
+box-sizing:border-box;
+-webkit-tap-highlight-color:transparent;
+}
+
+body{
+margin:0;
+font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;
+
+background:linear-gradient(180deg,#fff7f8,#ffeef1);
+
+color:#333;
+
+padding:18px 16px 90px;
+}
+
+
+/* 顶部 */
+
+.header{
+
+position:relative;
+display:flex;
+align-items:center;
+justify-content:space-between;
+
+margin-bottom:22px;
+}
+
+.back-link{
+
+text-decoration:none;
+
+color:#ff8da1;
+
+font-size:15px;
+}
+
+.title{
+
+position:absolute;
+left:50%;
+transform:translateX(-50%);
+font-size:18px;
+
+font-weight:600;
+
+color:#444;
+}
+
+
+/* 卡片 */
+
+.card{
+
+background:rgba(255,255,255,0.8);
+
+border-radius:16px;
+
+padding:16px;
+
+margin-bottom:16px;
+
+backdrop-filter:blur(10px);
+
+box-shadow:0 6px 18px rgba(255,170,190,0.18);
+}
+
+
+/* label */
+
+.label{
+
+font-size:13px;
+
+color:#666;
+
+margin-bottom:6px;
+
+display:block;
+}
+
+
+/* 输入 */
+
+.input{
+
+width:100%;
+
+padding:11px 12px;
+
+border-radius:10px;
+
+border:1px solid #eee;
+
+font-size:14px;
+
+background:#fff;
+}
+
+
+/* 文件 */
+
+.file{
+
+width:100%;
+
+padding:10px;
+
+border-radius:10px;
+
+border:1px dashed #ffb6b9;
+
+background:#fff;
+}
+
+
+/* 表情列表 */
+
+#stickerRows{
+
+margin-top:10px;
+}
+
+
+/* 单个表情 */
+
+.sticker-row{
+
+display:flex;
+
+align-items:center;
+
+gap:10px;
+
+padding:10px;
+
+margin-bottom:10px;
+
+background:#fff;
+
+border-radius:12px;
+
+box-shadow:0 4px 10px rgba(255,160,180,0.15);
+}
+
+
+/* 表情文件 */
+
+.sticker-file{
+
+flex:0 0 120px;
+}
+
+
+/* 表情描述下拉 */
+
+.sticker-name{
+
+flex:1;
+
+padding:8px 10px;
+
+border-radius:8px;
+
+border:1px solid #eee;
+
+font-size:13px;
+
+background:#fff;
+
+min-width:0;
+}
+
+
+/* 删除按钮 */
+
+.btn-del{
+
+flex-shrink:0;
+
+border:none;
+
+background:#fff0f2;
+
+color:#d9305c;
+
+border-radius:8px;
+
+padding:6px 10px;
+
+cursor:pointer;
+
+font-size:13px;
+}
+
+
+/* 添加按钮 */
+
+.btn-add-row{
+
+width:100%;
+
+padding:12px;
+
+margin-top:8px;
+
+border-radius:12px;
+
+border:2px dashed #ffb6b9;
+
+background:#fff;
+
+color:#ff8da1;
+
+font-size:14px;
+
+cursor:pointer;
+}
+
+
+/* 上传按钮 */
+
+.btn-submit{
+
+position:fixed;
+
+bottom:16px;
+
+left:16px;
+
+right:16px;
+
+border:none;
+
+border-radius:24px;
+
+padding:15px;
+
+font-size:16px;
+
+font-weight:600;
+
+color:#fff;
+
+background:linear-gradient(135deg,#ffb6b9,#ffa0c5);
+
+box-shadow:0 6px 20px rgba(255,140,160,0.4);
+
+cursor:pointer;
+}
+
+.btn-submit:disabled{
+
+opacity:0.6;
+
+box-shadow:none;
+}
+
+</style>
+</head>
+
+
+<body>
+
+
+<div class="header">
+
+<a href="javascript:history.back()" class="back-link">← 返回</a>
+
+<div class="title">上传表情包</div>
+
+<div></div>
+
+</div>
+
+
+<form id="uploadForm">
+
+
+<div class="card">
+
+<label class="label">表情包名称</label>
+
+<input class="input" type="text" id="packName" name="name" placeholder="输入表情包名称" required>
+
+</div>
+
+
+
+<div class="card">
+
+<label class="label">封面图</label>
+
+<input class="file" type="file" id="cover" name="cover" accept="image/png,image/jpeg,image/gif,image/webp" required>
+
+</div>
+
+
+
+<div class="card">
+
+<label class="label">表情列表</label>
+
+<div id="stickerRows"></div>
+
+<button type="button" id="btnAddRow" class="btn-add-row">＋ 添加一个表情</button>
+
+</div>
+
+
+<button id="btnSubmit" class="btn-submit" type="submit">
+
+上传表情包
+
+</button>
+
+
+</form>
+
+
+
+<script>
+
+(function(){
+
+const stickerRows=document.getElementById('stickerRows');
+
+const btnAddRow=document.getElementById('btnAddRow');
+
+let rowIndex=0;
+
+let allowedDescriptions=[];
+
+
+
+function buildSelectName(i){
+
+var html='<select class="sticker-name" name="sticker_name_'+i+'" required><option value="">请选择描述</option>';
+
+var list=Array.isArray(allowedDescriptions)?allowedDescriptions:[];
+
+for(var j=0;j<list.length;j++){
+
+var d=String(list[j]);
+
+var val=d.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+
+var text=d.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+html+='<option value="'+val+'">'+text+'</option>';
+
+}
+
+html+='</select>';
+
+return html;
+
+}
+
+
+
+function addRow(){
+
+const i=rowIndex++;
+
+const div=document.createElement('div');
+
+div.className='sticker-row';
+
+div.innerHTML=
+
+'<input class="sticker-file" type="file" name="sticker_'+i+'" accept="image/png,image/jpeg,image/gif,image/webp" required>'+
+
+buildSelectName(i)+
+
+'<button type="button" class="btn-del">删除</button>';
+
+div.querySelector('.btn-del').onclick=function(){
+
+div.remove();
+
+};
+
+stickerRows.appendChild(div);
+
+}
+
+
+
+function initThenAddRows(){
+
+fetch('/api/stickers/allowed_descriptions')
+
+.then(function(r){ if(!r.ok) throw new Error('API '+r.status); return r.json(); })
+
+.then(function(list){
+
+allowedDescriptions=Array.isArray(list)?list:[];
+
+if(allowedDescriptions.length===0) allowedDescriptions=['开心','捂脸','爱心','难过','害羞','点赞','happy','love'];
+
+btnAddRow.onclick=addRow;
+
+addRow();
+
+addRow();
+
+})
+
+.catch(function(){
+
+allowedDescriptions=['开心','捂脸','爱心','难过','害羞','点赞','happy','love'];
+
+btnAddRow.onclick=addRow;
+
+addRow();
+
+addRow();
+
+});
+
+}
+
+
+
+initThenAddRows();
+
+
+
+document.getElementById('uploadForm').onsubmit=async function(e){
+
+e.preventDefault();
+
+
+
+const btn=document.getElementById('btnSubmit');
+
+
+
+const name=document.getElementById('packName').value.trim();
+
+const cover=document.getElementById('cover').files[0];
+
+
+
+if(!name){
+
+alert('请填写表情包名称');
+
+return;
+
+}
+
+
+
+if(!cover){
+
+alert('请选择封面图');
+
+return;
+
+}
+
+
+
+const fileInputs=stickerRows.querySelectorAll('input[type="file"]');
+
+let hasFile=false;
+
+
+
+fileInputs.forEach(function(inp){
+
+if(inp.files && inp.files[0]) hasFile=true;
+
+});
+
+
+
+if(!hasFile){
+
+alert('请至少添加一个表情');
+
+return;
+
+}
+
+
+
+btn.disabled=true;
+
+btn.textContent='上传中…';
+
+
+
+const fd=new FormData();
+
+
+
+fd.append('name',name);
+
+fd.append('cover',cover);
+
+
+
+let idx=0;
+
+
+
+let descError=false;
+
+stickerRows.querySelectorAll('.sticker-row').forEach(function(row){
+
+const fileInput=row.querySelector('input[type="file"]');
+
+const nameSelect=row.querySelector('select.sticker-name');
+
+if(fileInput.files && fileInput.files[0]){
+
+const desc=(nameSelect && nameSelect.value)?nameSelect.value.trim():'';
+
+if(!desc){ descError=true; }
+
+}
+
+});
+
+if(descError){
+
+alert('请为每个表情选择描述');
+
+btn.disabled=false;
+
+btn.textContent='上传表情包';
+
+return;
+
+}
+
+stickerRows.querySelectorAll('.sticker-row').forEach(function(row){
+
+const fileInput=row.querySelector('input[type="file"]');
+
+const nameSelect=row.querySelector('select.sticker-name');
+
+if(fileInput.files && fileInput.files[0]){
+
+fd.append('sticker_'+idx,fileInput.files[0]);
+
+fd.append('sticker_name_'+idx,(nameSelect && nameSelect.value)?nameSelect.value.trim():'');
+
+idx++;
+
+}
+
+});
+
+
+
+try{
+
+const r=await fetch('/api/stickers/packs/upload',{method:'POST',body:fd});
+
+const data=await r.json();
+
+
+
+if(data.status==='success' && data.pack_id){
+
+window.location.href='/stickers/pack/'+encodeURIComponent(data.pack_id);
+
+return;
+
+}
+
+
+
+alert(data.message || '上传失败');
+
+}catch(err){
+
+alert('上传失败');
+
+}
+
+
+
+btn.disabled=false;
+
+btn.textContent='上传表情包';
+
+};
+
+
+
+})();
+
+</script>
+
+
+</body>
+</html>
