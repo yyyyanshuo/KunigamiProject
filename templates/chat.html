@@ -803,6 +803,12 @@
   <!-- JS 会在这里动态填充按钮 -->
 </div>
 
+<!-- 【新增】翻译输入框 (仅在日语模式下显示) -->
+<div id="translation-input-container" style="display: none; padding: 6px 15px; background: #fff8e1; border-top: 1px solid #ffe082; align-items: center; gap: 8px;">
+  <textarea id="transInput" placeholder="输入中文，翻译为日语..." rows="1" style="flex: 1; border: 1px solid #ffd54f; border-radius: 18px; padding: 6px 12px; font-size: 13px; outline: none; resize: none; background: #fff;"></textarea>
+  <button id="transBtn" style="background: #ffca28; color: #fff; border: none; border-radius: 16px; padding: 6px 12px; font-size: 13px; font-weight: bold; cursor: pointer; flex-shrink: 0;">翻译</button>
+</div>
+
 <div class="input-container">
   <textarea id="messageInput" placeholder="输入消息…" rows="1"></textarea>
   <button id="sendBtn">发送</button><!-- 【新增】+号按钮 -->
@@ -1156,6 +1162,14 @@
       }
       // 进入页面时，标记为已读
       fetch(`/api/${currentId}/mark_read`, { method: 'POST' });
+
+      // 根据语言模式显示翻译框
+      if (aiLanguage === 'ja') {
+        document.getElementById('translation-input-container').style.display = 'flex';
+      } else {
+        document.getElementById('translation-input-container').style.display = 'none';
+      }
+
     } catch (e) { console.error("UI加载失败", e); }
   }
 
@@ -1244,8 +1258,36 @@
     const fullText = content != null ? String(content) : '';
     const { tickles, rest } = extractTicklesFromContent(fullText);
 
-    // 分段：保留 [recall] 用于解析
-    const segments = rest.split('/').map(p => p.trim()).filter(s => s !== '');
+    // 分段：按 " / " 分割，且保证 [图片](地址)(描述) 整段不被打断（描述中可能含 /），并且不分割 HTML 标签内部的 / (如 </ruby>)
+    const rawParts = [];
+    let current = '';
+    let inTag = false;
+    for (let i = 0; i < rest.length; i++) {
+      if (rest[i] === '<') inTag = true;
+      else if (rest[i] === '>') inTag = false;
+      
+      if (rest[i] === '/' && !inTag) {
+        rawParts.push(current);
+        current = '';
+      } else {
+        current += rest[i];
+      }
+    }
+    rawParts.push(current);
+    
+    // 清理首尾空格并过滤空段
+    const cleanedParts = rawParts.map(p => p.trim()).filter(s => s !== '');
+    
+    const segments = [];
+    for (let i = 0; i < cleanedParts.length; i++) {
+      let seg = cleanedParts[i];
+      // 若以 [图片]( 开头且尚未成对闭合，与后续段合并直到匹配 [图片](path)(desc)
+      while (seg.startsWith('[图片](') && !/^\[图片\]\([^)]+\)\([\s\S]*$/.test(seg) && i + 1 < cleanedParts.length) {
+        i++;
+        seg = seg + ' / ' + cleanedParts[i];
+      }
+      segments.push(seg);
+    }
     const displayItems = []; // { type: 'bubble', text } | { type: 'recall' }
     for (let i = 0; i < segments.length; i++) {
       const seg = segments[i];
@@ -1374,14 +1416,17 @@
       if (!groupEl) return;
       var parts = [];
       groupEl.querySelectorAll('.message-wrapper').forEach(function(wrap) {
-        var sticker = wrap.querySelector('.bubble-sticker');
-        if (sticker) {
-          var path = wrap.dataset.resolvedStickerPath || wrap.dataset.stickerPath || '';
-          parts.push(path ? '[表情]' + path : '');
+        if (wrap.dataset.fullSegment) {
+          parts.push(wrap.dataset.fullSegment);
         } else {
-          var b = wrap.querySelector('.bubble');
-          // 【修正】使用 innerText 替代 textContent，保留文本的换行符
-          if (b) parts.push(b.innerText.trim());
+          var sticker = wrap.querySelector('.bubble-sticker');
+          if (sticker) {
+            var path = wrap.dataset.resolvedStickerPath || wrap.dataset.stickerPath || '';
+            parts.push(path ? '[表情]' + path : '');
+          } else {
+            var b = wrap.querySelector('.bubble');
+            if (b) parts.push(b.innerText.trim());
+          }
         }
       });
       var s = parts.filter(Boolean).join(' / ');
@@ -1395,11 +1440,15 @@
       const bubble = document.createElement('div');
       bubble.classList.add('bubble');
       const stickerMatch = text && text.match(/^\[表情\](.+)$/);
-      const imageMatch = text && text.match(/^\[图片\](.+)$/);
+      // 新格式 [图片](地址)(描述)：只显示图片，复制/编辑用整段（描述用 [\s\S]+ 支持换行等）
+      const imageMatchNew = text && text.match(/^\[图片\]\(([^)]+)\)\(([\s\S]*)$/);
+      const imageMatchOld = text && !imageMatchNew && text.match(/^\[图片\](.+)$/);
+      const isImage = !!(imageMatchNew || imageMatchOld);
+      const imagePath = imageMatchNew ? imageMatchNew[1].trim() : (imageMatchOld ? imageMatchOld[1].trim() : '');
       
-      if (stickerMatch || imageMatch) {
+      if (stickerMatch || isImage) {
         let isSticker = !!stickerMatch;
-        const pathOrName = isSticker ? stickerMatch[1].trim() : imageMatch[1].trim();
+        const pathOrName = isSticker ? stickerMatch[1].trim() : imagePath;
         const url = isSticker ? ('/api/stickers/file?path=' + encodeURIComponent(pathOrName)) : ('/api/user/image/' + encodeURIComponent(pathOrName));
         
         bubble.classList.add('bubble-sticker');
@@ -1467,6 +1516,9 @@
             } else {
               wrapper.dataset.resolvedStickerPath = pathOrName;
             }
+        } else {
+            // 图片：保存整段 [图片](地址)(描述) 供复制/编辑
+            wrapper.dataset.fullSegment = text;
         }
         
         wrapper.appendChild(bubble);
@@ -1539,9 +1591,21 @@
           regenBtn.onclick = () => doRegenerate(wrapper);
           controls.appendChild(regenBtn);
         }
+        
+        // 翻译按钮
+        let translateBtn = null;
+        if (aiLanguage === 'ja') {
+          translateBtn = document.createElement('button');
+          translateBtn.className = 'action-btn';
+          translateBtn.title = '翻译';
+          translateBtn.innerHTML = '<span style="font-size: 10px; font-weight: bold;">文</span>';
+          translateBtn.onclick = () => translateMessage(wrapper, id, text);
+        }
+
         const timestampEl = document.createElement('div');
         timestampEl.classList.add('timestamp');
         timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        
         const editBtn = document.createElement('button');
         editBtn.className = 'action-btn';
         editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
@@ -1555,6 +1619,7 @@
         copyBtn.innerHTML = `<img src="${copyIconPath}" style="width:14px;height:14px;opacity:0.6;">`;
         copyBtn.onclick = () => {
           var textToCopy = group.dataset.resolvedFulltext || fullText;
+          textToCopy = stripRubyTags(textToCopy);
           if (navigator.clipboard && window.isSecureContext) {
             navigator.clipboard.writeText(textToCopy).then(() => showCopySuccess(copyBtn, copyIconPath)).catch(() => fallbackCopyTextToClipboard(textToCopy, copyBtn, copyIconPath));
           } else {
@@ -1562,6 +1627,7 @@
           }
         };
         controls.appendChild(timestampEl);
+        if (translateBtn) controls.appendChild(translateBtn);
         const firstStickerPath = (fullText && fullText.match(/\[表情\]([^\]]+)/)) ? fullText.match(/\[表情\]([^\]]+)/)[1].trim() : '';
         if (firstStickerPath) {
           const likeBtn = document.createElement('button');
@@ -2072,6 +2138,64 @@
       }
     });
     btn.addEventListener('click', sendMessage);
+
+    // ==============================
+    // 翻译输入框事件
+    // ==============================
+    const transBtn = document.getElementById('transBtn');
+    const transInput = document.getElementById('transInput');
+    if (transBtn && transInput) {
+      transBtn.addEventListener('click', async () => {
+        const txt = transInput.value.trim();
+        if (!txt) return;
+
+        transBtn.innerText = '翻译中...';
+        transBtn.disabled = true;
+
+        // 获取上下文（过滤掉注音的 rt 标签内容）
+        const allBubbles = Array.from(document.querySelectorAll('.message-bubble'));
+        const contextStr = allBubbles.slice(-5).map(b => {
+          const clone = b.cloneNode(true);
+          clone.querySelectorAll('rt').forEach(rt => rt.remove());
+          return clone.textContent.trim();
+        }).filter(Boolean).join('\n');
+
+        try {
+          const res = await fetch('/api/translate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: txt,
+              context: contextStr,
+              direction: 'zh_to_ja'
+            })
+          });
+          const data = await res.json();
+          if (data.result) {
+            // 将翻译结果填入正式输入框
+            input.value = data.result;
+            // 清空翻译框
+            transInput.value = '';
+          } else {
+            alert('翻译失败：' + (data.error || '未知错误'));
+          }
+        } catch (err) {
+          console.error(err);
+          alert('请求翻译接口失败');
+        } finally {
+          transBtn.innerText = '翻译';
+          transBtn.disabled = false;
+        }
+      });
+      
+      // 支持回车翻译 (Ctrl+Enter或Enter视需求，这里用Enter，Shift+Enter换行)
+      transInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          transBtn.click();
+        }
+      });
+    }
     input.addEventListener('keypress', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
     input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${input.scrollHeight}px`; });
 
@@ -2146,23 +2270,37 @@
       return parts.filter(Boolean).join(' / ');
     }
 
-    async function openEditModal(id, content, groupElement) {
-      currentEditId = id;
-      currentEditGroup = groupElement;
-      const input = document.getElementById('editInput');
-      document.getElementById('editModal').style.display = 'flex';
-      input.value = '加载中…';
-      input.focus();
+  function stripRubyTags(text) {
+    if (!text) return text;
+    // 移除 <rt>...</rt> 以及里面的注音内容
+    text = text.replace(/<rt>.*?<\/rt>/g, '');
+    // 移除 <ruby> 和 </ruby> 标签
+    text = text.replace(/<\/?ruby>/g, '');
+    return text;
+  }
 
-      var fullContent = (content != null ? String(content) : '').trim();
-      var contentToShow = fullContent;
+  async function openEditModal(id, content, groupElement) {
+    currentEditId = id;
+    currentEditGroup = groupElement;
+    const input = document.getElementById('editInput');
+    document.getElementById('editModal').style.display = 'flex';
+    input.value = '加载中…';
+    input.focus();
+
+    var fullContent = (content != null ? String(content) : '').trim();
+    
+    // 清理可能存在的注音标签
+    fullContent = stripRubyTags(fullContent);
+    
+    var contentToShow = fullContent;
       try {
         var groupEl = groupElement;
         if (!groupEl && id) groupEl = document.querySelector('.message-group[data-id="' + id + '"]');
-        if (groupEl) {
-          fullContent = (groupEl.dataset.resolvedFulltext || groupEl.dataset.originalContent || fullContent).trim();
-          contentToShow = fullContent;
-        }
+      if (groupEl) {
+        fullContent = (groupEl.dataset.resolvedFulltext || groupEl.dataset.originalContent || fullContent).trim();
+        fullContent = stripRubyTags(fullContent);
+        contentToShow = fullContent;
+      }
         if (fullContent.indexOf('[表情]') >= 0) {
           var paths = [];
           if (groupEl) {
@@ -2685,16 +2823,16 @@
               return;
             }
 
-            // 2. 构造消息发给后端
-            const filename = uploadData.url.split('/').pop();
-            const picTag = `[图片]${filename}`;
-            const messageContent = picTag + " / 我发了一张图片，这是图片的客观描述：" + (uploadData.description || '无') + "。请你根据这张图片的内容做出真实的反应。";
+            // 2. 存库与发给 AI 的格式：[图片](地址)(描述)。显示时只显示图片
+            const path = uploadData.path || uploadData.url.split('/').pop();
+            const desc = (uploadData.description || '无').replace(/\)/g, '）'); // 避免描述里的 ) 破坏解析
+            const messageContent = `[图片](${path})(${desc})`;
 
             const endpoint = isGroupMode ? `/api/group/${encodeURIComponent(chatGroupId)}/chat` : `/api/${encodeURIComponent(charId)}/chat`;
             
-            // 手动在前端追加用户发的图片气泡
+            // 手动在前端追加用户发的图片气泡，并保留引用以便成功后补上编辑/删除
             const now = new Date();
-            renderMessageGroup({id: null, content: messageContent, role: 'user', timestamp: now.toISOString()}, 'append');
+            const userBubbleElement = renderMessageGroup({id: null, content: messageContent, role: 'user', timestamp: now.toISOString()}, 'append');
             chatContainer.scrollTop = chatContainer.scrollHeight;
 
             // 3. 复用发送消息逻辑，发给当前聊天对象
@@ -2714,13 +2852,52 @@
                 alert('发送失败: ' + data.error);
               }
             } else {
-              // 刷新视图 (可稍微优化只 append 新的)
-              if (isGroupMode) {
-                await loadGroupChatHistory(chatGroupId);
-              } else {
-                await loadChatHistory(charId);
+              // 为刚发的图片消息补上 id 与编辑/删除按钮
+              if (data.user_id && userBubbleElement) {
+                userBubbleElement.dataset.id = data.user_id;
+                const controls = userBubbleElement.querySelector('.controls-container');
+                if (controls) {
+                  const editBtn = document.createElement('button');
+                  editBtn.className = 'action-btn';
+                  editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+                  editBtn.onclick = () => openEditModal(data.user_id, messageContent, userBubbleElement);
+                  const delBtn = document.createElement('button');
+                  delBtn.className = 'action-btn';
+                  delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+                  delBtn.onclick = () => deleteMessage(data.user_id, userBubbleElement);
+                  controls.insertBefore(delBtn, controls.lastChild);
+                  controls.insertBefore(editBtn, delBtn);
+                }
               }
-              chatContainer.scrollTop = chatContainer.scrollHeight;
+              // 立即渲染 AI 回复，与普通发送一致
+              if (data.replies && data.replies.length > 0) {
+                const aiTime = new Date();
+                checkAndAppendDateSeparator(aiTime);
+                if (typeof data.replies[0] === 'object') {
+                  for (const reply of data.replies) {
+                    await (typeof sleep === 'function' ? sleep(800) : Promise.resolve());
+                    const t = reply.timestamp ? new Date(reply.timestamp) : aiTime;
+                    checkAndAppendDateSeparator(t);
+                    renderMessageGroup({
+                      id: reply.id || Date.now(),
+                      content: reply.content,
+                      role: isGroupMode ? (reply.role || reply.char_id) : charId,
+                      timestamp: t
+                    }, 'append');
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                  }
+                } else {
+                  await (typeof sleep === 'function' ? sleep(800) : Promise.resolve());
+                  renderMessageGroup({
+                    id: data.id,
+                    content: data.replies.join(' / '),
+                    role: charId,
+                    timestamp: aiTime
+                  }, 'append');
+                }
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+              }
+              if (data.memory_sync_warning && typeof showMemorySyncWarning === 'function') showMemorySyncWarning(data.memory_sync_warning);
             }
           } catch (err) {
             console.error('发送图片异常', err);
@@ -3274,6 +3451,65 @@
       }
     } finally {
       isLoading = false;
+    }
+  }
+
+  // ==============================
+  // 翻译消息功能
+  // ==============================
+  async function translateMessage(wrapper, id, text) {
+    // 获取上下文 (简单取前后几条消息文本，过滤掉 rt 标签的内容)
+    const allBubbles = Array.from(document.querySelectorAll('.message-bubble'));
+    const currentBubble = wrapper.querySelector('.message-bubble');
+    const currentIndex = allBubbles.indexOf(currentBubble);
+    
+    let contextStr = "";
+    if (currentIndex !== -1) {
+      const start = Math.max(0, currentIndex - 5);
+      const end = Math.min(allBubbles.length, currentIndex + 2);
+      contextStr = allBubbles.slice(start, end).map(b => {
+        const clone = b.cloneNode(true);
+        clone.querySelectorAll('rt').forEach(rt => rt.remove());
+        return clone.textContent.trim();
+      }).filter(Boolean).join('\n');
+    }
+
+    // 获取原始纯文本（去除可能已经存在的翻译或注音）
+    // 从后端传来的 text 可能包含 <ruby> 等 HTML 标签
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = text;
+    tempDiv.querySelectorAll('rt').forEach(rt => rt.remove());
+    const originalText = tempDiv.textContent.trim();
+
+    // 创建一个显示翻译结果的地方，如果已有则不重复创建
+    let transDiv = wrapper.querySelector('.translation-result');
+    if (!transDiv) {
+      transDiv = document.createElement('div');
+      transDiv.className = 'translation-result';
+      transDiv.style.cssText = 'margin-top: 8px; font-size: 13px; color: #555; background: rgba(0,0,0,0.05); padding: 6px 10px; border-radius: 6px; border-left: 3px solid #666;';
+      wrapper.appendChild(transDiv);
+    }
+    
+    transDiv.textContent = '正在翻译...';
+
+    try {
+      const res = await fetch('/api/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: originalText,
+          context: contextStr,
+          direction: 'ja_to_zh'
+        })
+      });
+      const data = await res.json();
+      if (data.result) {
+        transDiv.textContent = data.result;
+      } else {
+        transDiv.textContent = '翻译失败：' + (data.error || '未知错误');
+      }
+    } catch (err) {
+      transDiv.textContent = '请求翻译接口失败';
     }
   }
 

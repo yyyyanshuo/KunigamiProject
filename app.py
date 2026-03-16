@@ -22,8 +22,55 @@ import tempfile # <--- 记得在最上面加这个 import
 from urllib.parse import quote as url_quote
 from werkzeug.security import generate_password_hash, check_password_hash
 import uuid
+import pykakasi
 
-# 这是在 app.py 文件的开头部分
+# 初始化 kakasi (用于日语注音)
+kks = pykakasi.kakasi()
+
+def _add_furigana_to_japanese(text: str) -> str:
+    """给日语文本中的汉字注音。跳过 [表情]、[图片] 等功能性标签。"""
+    if not text: return text
+    # 跳过特定的标签段落
+    pattern = r'(\[表情\][^\s/]+|\[图片\]\([^)]+\)\([\s\S]*?\)|\[recall\])'
+    parts = re.split(pattern, text)
+    
+    out = ""
+    for i, part in enumerate(parts):
+        if i % 2 == 1:
+            # tag 保持原样
+            out += part
+        else:
+            # 普通文本进行分词和注音
+            result = kks.convert(part)
+            for item in result:
+                orig = item['orig']
+                hira = item['hira']
+                
+                # 如果不含汉字，直接追加
+                if not re.search(r'[\u4e00-\u9faf]', orig):
+                    out += orig
+                    continue
+                
+                # 去除末尾相同的假名 (如 '思い' 和 'おもい'，去掉 'い')
+                suf = ''
+                while orig and hira and orig[-1] == hira[-1]:
+                    suf = orig[-1] + suf
+                    orig = orig[:-1]
+                    hira = hira[:-1]
+                
+                # 去除开头相同的假名 (一般较少，但也处理)
+                pre = ''
+                while orig and hira and orig[0] == hira[0]:
+                    pre += orig[0]
+                    orig = orig[1:]
+                    hira = hira[1:]
+                
+                # 如果中间有汉字，加 <ruby> 注音
+                if orig and hira:
+                    out += f"{pre}<ruby>{orig}<rt>{hira}</rt></ruby>{suf}"
+                else:
+                    out += pre + suf
+    return out
 
 load_dotenv()  # 从 .env 读取环境变量
 
@@ -3220,6 +3267,11 @@ def get_history(char_id):
     total_messages = cursor.fetchone()[0]
     conn.close()
 
+    # 日语注音处理（不写回DB）
+    if get_ai_language() == "ja":
+        for m in messages:
+            m["content"] = _add_furigana_to_japanese(m["content"])
+
     return jsonify({
         "messages": messages,
         "total": total_messages
@@ -3280,6 +3332,11 @@ def get_group_history(group_id):
     cursor.execute("SELECT COUNT(id) FROM messages")
     total = cursor.fetchone()[0]
     conn.close()
+
+    # 日语注音处理（不写回DB）
+    if get_ai_language() == "ja":
+        for m in messages:
+            m["content"] = _add_furigana_to_japanese(m["content"])
 
     return jsonify({"messages": messages, "total": total})
 
@@ -3454,6 +3511,9 @@ def chat(char_id):
 
         reply_bubbles = list(filter(None, [part.strip() for part in cleaned_reply_text.split('/')]))
 
+        if get_ai_language() == "ja":
+            reply_bubbles = [_add_furigana_to_japanese(b) for b in reply_bubbles]
+
         # 【重点】把 ID 返回给前端；记忆同步失败时附带提示
         resp = {
             "replies": reply_bubbles,
@@ -3572,6 +3632,9 @@ def regenerate_message(char_id):
         conn.close()
 
         reply_bubbles = list(filter(None, [part.strip() for part in cleaned_reply_text.split('/')]))
+
+        if get_ai_language() == "ja":
+            reply_bubbles = [_add_furigana_to_japanese(b) for b in reply_bubbles]
 
         return jsonify({
             "status": "success",
@@ -3856,6 +3919,12 @@ def group_chat(group_id):
         except Exception as e:
             print(f"Group Chat Error ({speaker_id}): {e}")
 
+    # 注音处理
+    if get_ai_language() == "ja":
+        for rep in replies_for_frontend:
+            # group chat 返回的是单个 string 还是分段？其实分段在前端分，这里 content 是 string
+            rep["content"] = _add_furigana_to_japanese(rep["content"])
+
     # 7. 最终返回；记忆同步失败时附带提示
     resp = {"replies": replies_for_frontend, "user_id": user_msg_id}
     if memory_sync_warning:
@@ -4027,11 +4096,11 @@ def handle_system_config():
         "routes": {
             "gemini": {
                 "name": "线路一：Gemini 直连",
-                "models": {"chat": "gemini-2.5-pro", "moments": "gemini-2.5-pro", "gen_persona": "gemini-3-pro-preview", "summary": "gemini-2.5-pro", "vision": "gemini-2.5-pro"}
+                "models": {"chat": "gemini-2.5-pro", "moments": "gemini-2.5-pro", "gen_persona": "gemini-3-pro-preview", "summary": "gemini-2.5-pro", "vision": "gemini-2.5-pro", "translation": "gemini-1.5-flash-8b"}
             },
             "relay": {
                 "name": "线路二：国内中转",
-                "models": {"chat": "gpt-3.5-turbo", "moments": "gpt-3.5-turbo", "gen_persona": "gpt-3.5-turbo", "summary": "gpt-3.5-turbo", "vision": "gpt-4o"}
+                "models": {"chat": "gpt-3.5-turbo", "moments": "gpt-3.5-turbo", "gen_persona": "gpt-3.5-turbo", "summary": "gpt-3.5-turbo", "vision": "gpt-4o", "translation": "gpt-3.5-turbo-0125"}
             }
         },
         # 【新增】可用的模型列表 (把以前前端写死的搬到这里)
@@ -4040,7 +4109,9 @@ def handle_system_config():
                 'gemini-3-pro-preview',
                 'gemini-3-flash-preview',
                 'gemini-2.5-pro',
-                'gemini-2.5-flash-lite'
+                'gemini-2.5-flash-lite',
+                'gemini-1.5-flash',
+                'gemini-1.5-flash-8b'
             ],
             'relay': [
                 'gpt-3.5-turbo',
@@ -4068,11 +4139,24 @@ def handle_system_config():
         try:
             with open(cfg_file, "r", encoding="utf-8") as f:
                 config = json.load(f)
-            # 兼容旧配置：若某线路未配置 moments，则与 chat 相同
+            # 兼容旧配置：若某线路未配置新功能（moments、vision、translation），则补齐默认值
             for route_key, route_data in config.get("routes", {}).items():
                 models = route_data.get("models", {})
                 if "moments" not in models:
                     models["moments"] = models.get("chat", "gemini-2.5-pro")
+                if "vision" not in models:
+                    models["vision"] = "gemini-2.5-pro" if route_key == "gemini" else "gpt-4o"
+                if "translation" not in models:
+                    models["translation"] = "gemini-1.5-flash-8b" if route_key == "gemini" else "gpt-3.5-turbo-0125"
+                if "summary" not in models:
+                    models["summary"] = models.get("chat", "gemini-2.5-pro")
+                if "gen_persona" not in models:
+                    models["gen_persona"] = models.get("chat", "gemini-3-pro-preview")
+            
+            # 合并 default_config 中新增的 model_options
+            if "model_options" not in config:
+                config["model_options"] = default_config["model_options"]
+
             return jsonify(config)
         except:
             return jsonify(default_config)
@@ -7226,16 +7310,22 @@ def vision_upload():
     if file.filename == "":
         return jsonify({"error": "Empty filename"}), 400
 
-    # 创建用户图片目录
+    # 聊天图片专用目录：users/<user_id>/chat_images/
     img_dir = os.path.join(USERS_ROOT, str(user_id), "chat_images")
     os.makedirs(img_dir, exist_ok=True)
 
-    # 随机文件名
-    ext = os.path.splitext(file.filename)[1]
-    if not ext:
+    ext = (os.path.splitext(file.filename)[1] or "").lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
         ext = ".jpg"
-    filename = f"{uuid.uuid4().hex}{ext}"
+    base_name = uuid.uuid4().hex
+    filename = base_name + ext
     filepath = os.path.join(img_dir, filename)
+    # 名称重复时自动重命名
+    n = 0
+    while os.path.exists(filepath):
+        n += 1
+        filename = f"{base_name}_{n}{ext}"
+        filepath = os.path.join(img_dir, filename)
     file.save(filepath)
 
     # 调用识图模型
@@ -7277,23 +7367,54 @@ def vision_upload():
         print(f"   [Vision] Error: {e}")
         description = "图片解析失败"
 
-    # 生成访问 URL
+    # 地址仅用文件名，前端/DB 存为 [图片](filename)(描述)
     url = f"/api/user/image/{filename}"
-    
     return jsonify({
         "status": "success",
         "url": url,
-        "description": description.strip()
+        "path": filename,
+        "description": (description or "").strip()
     })
 
 @app.route("/api/user/image/<filename>", methods=["GET"])
 def get_user_chat_image(filename):
     """访问用户上传在聊天中的图片"""
+    if ".." in filename or "/" in filename or "\\" in filename:
+        return "Forbidden", 403
     user_id = get_current_user_id()
     if not user_id:
         return "Unauthorized", 401
     img_dir = os.path.join(USERS_ROOT, str(user_id), "chat_images")
     return send_from_directory(img_dir, filename)
+
+@app.route("/api/translate", methods=["POST"])
+def translate_text():
+    data = request.json
+    text = data.get("text", "")
+    context = data.get("context", "")
+    direction = data.get("direction", "ja_to_zh")
+
+    if not text:
+        return jsonify({"error": "No text provided"}), 400
+
+    if direction == "zh_to_ja":
+        prompt = f"请将以下中文翻译成日语。仅输出翻译后的日语，不要带有任何解释或多余符号。\n\n[上下文参考]\n{context}\n\n[需要翻译的原句]\n{text}"
+    else:
+        prompt = f"请将以下日语翻译成中文。仅输出翻译后的中文，不要带有任何解释或多余符号。\n\n[上下文参考]\n{context}\n\n[需要翻译的原句]\n{text}"
+
+    messages = [{"role": "user", "content": prompt}]
+
+    try:
+        route, current_model = get_model_config("translation")
+        if route == "relay":
+            result = call_openrouter(messages, char_id="system", model_name=current_model)
+        else:
+            result = call_gemini(messages, char_id="system", model_name=current_model)
+
+        return jsonify({"result": result.strip()})
+    except Exception as e:
+        print(f"Translation Error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 # ---------------------- 启动 ----------------------
 

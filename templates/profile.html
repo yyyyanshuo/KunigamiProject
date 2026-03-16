@@ -513,6 +513,7 @@
           <div class="input-label" style="font-weight:600; color:var(--text-main);">2. 为功能指派模型 (Select Models)</div>
           <div style="display:grid; grid-template-columns: 1fr; gap:12px; margin-top:8px;">
             <div><div class="input-label">聊天对话</div><select id="model-chat" class="model-select"></select></div>
+            <div><div class="input-label">翻译功能</div><select id="model-translation" class="model-select"></select></div>
             <div><div class="input-label">朋友圈生成</div><select id="model-moments" class="model-select"></select></div>
             <div><div class="input-label">识图理解</div><select id="model-vision" class="model-select"></select></div>
             <div><div class="input-label">记忆提取总结</div><select id="model-summary" class="model-select"></select></div>
@@ -1058,6 +1059,7 @@
             : '<option value="">(暂无模型，请在下方添加)</option>';
 
     document.getElementById('model-chat').innerHTML = optionsHtml;
+    document.getElementById('model-translation').innerHTML = optionsHtml;
     document.getElementById('model-moments').innerHTML = optionsHtml;
     document.getElementById('model-vision').innerHTML = optionsHtml;
     document.getElementById('model-summary').innerHTML = optionsHtml;
@@ -1068,6 +1070,7 @@
     const savedModels = apiConfig.routes[route].models;
 
     setSelectValue('model-chat', savedModels.chat);
+    setSelectValue('model-translation', savedModels.translation != null ? savedModels.translation : savedModels.chat);
     setSelectValue('model-moments', savedModels.moments != null ? savedModels.moments : savedModels.chat);
     setSelectValue('model-vision', savedModels.vision != null ? savedModels.vision : (route === 'gemini' ? 'gemini-2.5-pro' : 'gpt-4o'));
     setSelectValue('model-summary', savedModels.summary);
@@ -1143,6 +1146,7 @@
     // 更新内存中的配置对象
     apiConfig.active_route = activeRoute;
     apiConfig.routes[activeRoute].models.chat = document.getElementById('model-chat').value;
+    apiConfig.routes[activeRoute].models.translation = document.getElementById('model-translation').value;
     apiConfig.routes[activeRoute].models.moments = document.getElementById('model-moments').value;
     apiConfig.routes[activeRoute].models.vision = document.getElementById('model-vision').value;
     apiConfig.routes[activeRoute].models.summary = document.getElementById('model-summary').value;
