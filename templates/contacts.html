@@ -366,7 +366,7 @@
     // --- 全局变量缓存 ---
     let allContactsData = []; // 存一下API返回的数据，方便弹窗里复用
 
-    // --- 菜单逻辑 ---
+    // 菜单逻辑
     function toggleMenu() {
         const menu = document.getElementById('plusMenu');
         menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
@@ -805,6 +805,25 @@
         }
     }
 </script>
+
+<!-- 打赏弹窗 (每日首次) -->
+<div class="modal-overlay" id="daily-donate-modal" style="position:fixed; display:none; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); backdrop-filter:blur(4px); z-index:3000; align-items:center; justify-content:center;">
+  <div style="background:#fff; padding:20px; border-radius:18px; width:85%; max-width:320px; box-shadow:0 10px 30px rgba(0,0,0,0.15);">
+    <div style="text-align:center; padding-bottom:16px; border-bottom:1px solid #eee;">
+      <div style="font-size:48px; margin-bottom:8px;">☕</div>
+      <h3 style="margin:0; font-size:18px; color:#2c3e50;">打赏开发者</h3>
+    </div>
+    <div style="padding:20px 0; font-size:13px; color:#8ca0b3; line-height:1.6; text-align:center;">
+      <p style="margin:0 0 8px 0;">开发者是用爱发电的卑微大学生，为了给大家提供不卡顿的 38ms 极速通道和最聪明的 AI，服务器每天都在疯狂燃烧我的余额😭</p>
+      <p style="margin:8px 0; font-weight:600; color:#ffb6b9;">如果这个角色曾经治愈过你，求老板请我喝瓶可乐续命！</p>
+      <p style="margin:8px 0 0 0;">你的每一分钱都会变成新功能开发的代码！</p>
+    </div>
+    <div style="display:flex; gap:12px; margin:20px 0 0 0;">
+      <button onclick="document.getElementById('daily-donate-modal').style.display='none'; localStorage.setItem('last_donate_show', new Date().toISOString().split('T')[0]);" style="flex:1; background:#f5f5f5; color:#555; border:none; padding:10px; border-radius:10px; cursor:pointer; font-weight:600;">稍后再说</button>
+      <a href="/profile" style="flex:1; background:#ffb6b9; color:white; border:none; text-decoration:none; text-align:center; padding:10px; border-radius:10px; font-weight:600;">查看收款码</a>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>

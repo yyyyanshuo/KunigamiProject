@@ -53,6 +53,7 @@
             font-size: 18px;
             font-weight: 700;
             background: linear-gradient(135deg, #ffb6b9, #f09598);
+            background-clip: text;
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
@@ -194,6 +195,12 @@
             white-space: pre-wrap;
             word-break: break-word;
         }
+        .moment-head-actions {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+        }
 
         /* 点赞区 */
         .moment-likes {
@@ -226,6 +233,60 @@
         }
         .comment-reply-label { font-size: 11px; color: #999; margin-right: 2px; }
         .comment-text { font-size: 13px; color: #333; line-height: 1.4; }
+        /* 朋友圈头部：翻译按钮与重生成按钮风格保持一致 */
+        .moment-translate-btn {
+            flex-shrink: 0;
+            width: 28px;
+            height: 28px;
+            border: none;
+            background: #f8f9fb;
+            color: var(--text-muted);
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 12px;
+            font-weight: 700;
+            padding: 0;
+        }
+        .moment-translate-btn:hover { color: var(--primary); background: var(--primary-light); }
+        .moment-translate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* 评论区翻译按钮维持轻量样式 */
+        .comment-translate-btn {
+            margin-left: 6px;
+            border: none;
+            background: transparent;
+            color: #a8b4c1;
+            font-size: 12px;
+            cursor: pointer;
+            padding: 0 2px;
+            border-radius: 4px;
+        }
+        .comment-translate-btn:hover { color: var(--primary-dark); background: #eef2f6; }
+        .moment-translation-result,
+        .comment-translation-result {
+            margin-top: 4px;
+            font-size: 12px;
+            color: #5c6b7a;
+            background: #f2f5f8;
+            border-left: 3px solid #c9d3de;
+            border-radius: 6px;
+            padding: 6px 8px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .comment-regen-btn {
+            margin-left: 6px;
+            border: none;
+            background: transparent;
+            color: #a8b4c1;
+            font-size: 12px;
+            cursor: pointer;
+            padding: 0 2px;
+            border-radius: 4px;
+        }
+        .comment-regen-btn:hover { color: var(--primary-dark); background: #eef2f6; }
+        .comment-regen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
         /* 底部互动操作 */
         .moment-actions {
@@ -248,23 +309,59 @@
         .moment-like-btn.is-liked { color: var(--primary); }
 
         .moment-comment-form { display: flex; gap: 8px; flex: 1; min-width: 0; }
+        .moment-comment-trans-row {
+            margin-top: 6px;
+            display: flex;
+            gap: 8px;
+            width: 100%;
+        }
+        .moment-comment-trans-input {
+            flex: 1;
+            min-width: 0;
+            padding: 6px 10px;
+            border: 1px solid #ffe082;
+            background: #fff8e1;
+            border-radius: 14px;
+            font-size: 12px;
+            box-sizing: border-box;
+        }
+        .moment-comment-trans-btn {
+            padding: 6px 10px;
+            border: none;
+            border-radius: 14px;
+            background: #ffca28;
+            color: #fff;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+        }
         
-        /* 优雅的输入框 */
-        .moment-comment-input {
-            flex: 1; min-width: 0; padding: 6px 12px;
-            border: 1px solid transparent; background: #f0f2f5;
-            border-radius: 20px; font-size: 13px; transition: all 0.2s;
-        }
-        .moment-comment-input:focus {
-            background: #fff; border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(255, 182, 185, 0.15); outline: none;
-        }
         .moment-comment-btn {
             padding: 6px 14px; background: var(--primary); color: #fff;
             border: none; border-radius: 20px; font-size: 13px; font-weight: 600;
             cursor: pointer; box-shadow: 0 2px 8px rgba(255, 182, 185, 0.3); transition: all 0.2s;
+            display: flex; align-items: center; gap: 6px; justify-content: center;
         }
         .moment-comment-btn:active { transform: scale(0.95); }
+        .moment-comment-btn:disabled {
+            opacity: 0.7; cursor: not-allowed;
+        }
+        .moment-comment-btn.is-loading { opacity: 0.8; }
+        
+        /* 评论发送中的加载动画 */
+        .comment-sending-spinner {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: comment-spinner-spin 0.8s linear infinite;
+        }
+        @keyframes comment-spinner-spin {
+            to { transform: rotate(360deg); }
+        }
 
         /* ✨ 重点美化：加载更多按钮 */
         .moment-load-more {
@@ -329,6 +426,32 @@
             font-size: 18px; font-weight: 700; color: var(--text-main);
             margin-bottom: 16px; text-align: center;
         }
+        .moment-compose-trans-row {
+            margin-bottom: 10px;
+            display: flex;
+            gap: 8px;
+        }
+        .moment-compose-trans-input {
+            flex: 1;
+            min-width: 0;
+            padding: 10px 12px;
+            border: 1px solid #ffe082;
+            background: #fff8e1;
+            border-radius: 12px;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+        .moment-compose-trans-btn {
+            padding: 10px 12px;
+            border: none;
+            border-radius: 12px;
+            background: #ffca28;
+            color: #fff;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+        }
         .moment-compose-text {
             width: 100%; min-height: 120px; padding: 14px;
             background: #f8f9fb; border: 1px solid var(--border-color);
@@ -338,6 +461,67 @@
         .moment-compose-text:focus {
             background: #fff; border-color: var(--primary);
             box-shadow: 0 0 0 4px rgba(255, 182, 185, 0.15); outline: none;
+        }
+        .moment-compose-text.is-full {
+            border-color: #ff6b6b; background-color: #ffebee;
+        }
+
+        /* 字数显示区 */
+        .moment-char-count {
+            font-size: 12px; color: var(--text-muted); text-align: right;
+            margin-top: 6px; transition: color 0.2s;
+        }
+        .moment-char-count.is-full {
+            color: #ff6b6b; font-weight: 600;
+        }
+
+        /* 评论字数显示 */
+        .moment-comment-form {
+            display: flex; gap: 8px; align-items: flex-end;
+        }
+        .moment-comment-input-wrapper {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            position: relative;
+        }
+        .moment-comment-input {
+            width: 100%;
+            padding: 8px 55px 8px 12px;
+            border: 1px solid transparent;
+            background: #f0f2f5;
+            border-radius: 20px;
+            font-size: 13px;
+            transition: all 0.2s;
+            box-sizing: border-box;
+        }
+        .moment-comment-input:focus {
+            background: #fff;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(255, 182, 185, 0.15);
+            outline: none;
+        }
+        .moment-comment-input.is-full {
+            border-color: #ff6b6b;
+            background-color: #ffebee;
+        }
+        .comment-char-count {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 11px;
+            color: var(--text-muted);
+            pointer-events: none;
+            white-space: nowrap;
+            transition: color 0.2s;
+            line-height: 1;
+            padding: 0 4px;
+        }
+        .comment-char-count.is-full {
+            color: #ff6b6b;
+            font-weight: 600;
         }
 
         .moment-modal-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px; }
@@ -404,7 +588,12 @@
             <div class="moment-modal" id="momentModal">
                 <div class="moment-modal-title">写点什么...</div>
                 <div class="moment-modal-body">
-                    <textarea class="moment-compose-text" id="momentComposeText" placeholder="分享此刻的想法…" maxlength="500"></textarea>
+                    <div class="moment-compose-trans-row" id="momentComposeTransRow" style="display:none;">
+                        <input type="text" class="moment-compose-trans-input" id="momentComposeTransText" placeholder="输入中文，翻译成日语后填入下方正文">
+                        <button type="button" class="moment-compose-trans-btn" id="momentComposeTransBtn">翻译</button>
+                    </div>
+                    <textarea class="moment-compose-text" id="momentComposeText" placeholder="分享此刻的想法…" maxlength="1000"></textarea>
+                    <div class="moment-char-count" id="momentCharCount">0/1000</div>
                     <div class="moment-modal-actions">
                         <button type="button" class="moment-cancel-btn" id="momentModalCancel">取消</button>
                         <button type="button" class="moment-compose-btn" id="momentComposeBtn">发布</button>
@@ -456,6 +645,52 @@
                 } catch (e) { return ts; }
             }
 
+            let aiLanguage = 'zh';
+            const translationCache = {};
+
+            function isJaMode() { return aiLanguage === 'ja'; }
+
+            async function loadUserLanguage() {
+                try {
+                    const r = await fetch('/api/user/profile_settings');
+                    const data = await r.json();
+                    aiLanguage = data && data.ai_language ? data.ai_language : 'zh';
+                } catch (e) {
+                    aiLanguage = 'zh';
+                }
+                const transRow = document.getElementById('momentComposeTransRow');
+                if (transRow) transRow.style.display = isJaMode() ? 'flex' : 'none';
+            }
+
+            async function addFurigana(text) {
+                if (!isJaMode() || !text) return text || '';
+                try {
+                    const r = await fetch('/api/furigana', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: text })
+                    });
+                    const data = await r.json();
+                    return data && data.result ? data.result : text;
+                } catch (e) {
+                    return text;
+                }
+            }
+
+            async function decorateMomentsBatch(moments) {
+                if (!isJaMode() || !Array.isArray(moments)) return moments || [];
+                return Promise.all(moments.map(async (m) => {
+                    const copy = Object.assign({}, m);
+                    copy.display_content = await addFurigana(copy.content || '');
+                    copy.comments = await Promise.all((copy.comments || []).map(async (c) => {
+                        const cc = Object.assign({}, c);
+                        cc.display_content = await addFurigana(cc.content || '');
+                        return cc;
+                    }));
+                    return copy;
+                }));
+            }
+
             function renderMoments(moments, options) {
                 if (!moments || moments.length === 0) {
                     listEl.innerHTML = '<p class="empty-state">暂无内容，敬请期待。</p>';
@@ -467,23 +702,50 @@
                     const hasMyLike = (m.liker_ids || []).indexOf(USER_ID) >= 0;
                     const likeBtnClass = hasMyLike ? 'moment-like-btn is-liked' : 'moment-like-btn';
                     const likeBtnText = hasMyLike ? '已赞' : '赞';
+                    const postKey = (m.char_id || '') + '|' + (m.timestamp || '');
                     const likersHtml = m.liker_remarks && m.liker_remarks.length
                         ? '<div class="moment-likes">' + m.liker_remarks.join('、') + '</div>'
                         : '';
                     const commentsHtml = m.comments && m.comments.length
                         ? '<div class="moment-comments">' + m.comments.map(c => {
+                            const commentKey = postKey + '|c|' + String(c.comment_index);
                             const replyLabel = (c.reply_to_remark != null && c.reply_to_remark !== '')
                                 ? '<span class="comment-reply-label">回复 ' + escapeHtml(c.reply_to_remark) + '：</span>'
+                                : '';
+                            const canRegen = c.commenter_id && c.commenter_id !== USER_ID;
+                            const regenBtn = canRegen
+                                ? '<button type="button" class="comment-regen-btn" title="重生成评论" data-comment-index="' + escapeAttr(c.comment_index) + '">↻</button>'
+                                : '';
+                            const transBtn = isJaMode()
+                                ? '<button type="button" class="comment-translate-btn" title="翻译评论" data-comment-index="' + escapeAttr(c.comment_index) + '" data-comment-key="' + escapeAttr(commentKey) + '">文</button>'
+                                : '';
+                            const transResult = translationCache[commentKey]
+                                ? '<div class="comment-translation-result">' + escapeHtml(translationCache[commentKey]) + '</div>'
                                 : '';
                             return '<div class="comment-item">' +
                                 '<div class="comment-body">' +
                                 '<span class="comment-remark">' + escapeHtml(c.remark) + '</span>' +
                                 replyLabel +
-                                '<span class="comment-text">' + escapeHtml(c.content) + '</span>' +
+                                '<span class="comment-text">' + (c.display_content || escapeHtml(c.content)) + '</span>' +
+                                transBtn +
+                                regenBtn +
+                                transResult +
                                 '</div></div>';
                         }).join('') + '</div>'
                         : '';
                     const avatarHref = (m.char_id === USER_ID) ? '/profile' : ('/memory/' + escapeAttr(m.char_id));
+                    const postTransBtn = isJaMode()
+                        ? '<button type="button" class="moment-translate-btn" title="翻译正文" data-post-key="' + escapeAttr(postKey) + '">文</button>'
+                        : '';
+                    const postTransResult = translationCache[postKey]
+                        ? '<div class="moment-translation-result">' + escapeHtml(translationCache[postKey]) + '</div>'
+                        : '';
+                    const commentTransRow = isJaMode()
+                        ? '<div class="moment-comment-trans-row">' +
+                          '<input type="text" class="moment-comment-trans-input" placeholder="输入中文，翻译成日语后填入上方评论框">' +
+                          '<button type="button" class="moment-comment-trans-btn">翻译</button>' +
+                          '</div>'
+                        : '';
                     return '<div class="moment-card" data-char-id="' + escapeAttr(m.char_id) + '" data-timestamp="' + escapeAttr(m.timestamp) + '">' +
                         '<div class="moment-avatar-wrap">' +
                         '<a href="' + avatarHref + '">' +
@@ -496,17 +758,25 @@
                         '<div class="moment-remark">' + escapeHtml(m.remark) + '</div>' +
                         '<div class="moment-time">' + formatTime(m.timestamp) + '</div>' +
                         '</div>' +
+                        '<div class="moment-head-actions">' +
+                        postTransBtn +
                         '<button type="button" class="moment-regen-btn" aria-label="重新生成" title="重新生成">↻</button>' +
                         '</div>' +
-                        '<div class="moment-content">' + escapeHtml(m.content) + '</div>' +
+                        '</div>' +
+                        '<div class="moment-content">' + (m.display_content || escapeHtml(m.content)) + '</div>' +
+                        postTransResult +
                         likersHtml +
                         commentsHtml +
                         '<div class="moment-actions">' +
                         '<button type="button" class="' + likeBtnClass + '" aria-label="赞">' + likeBtnText + '</button>' +
                         '<form class="moment-comment-form" onsubmit="return false;">' +
-                        '<input type="text" class="moment-comment-input" placeholder="说点什么…" maxlength="200">' +
+                        '<div class="moment-comment-input-wrapper">' +
+                        '<input type="text" class="moment-comment-input" placeholder="说点什么…" maxlength="200" data-max="200">' +
+                        '<span class="comment-char-count">0/200</span>' +
+                        '</div>' +
                         '<button type="button" class="moment-comment-btn">发送</button>' +
                         '</form>' +
+                        commentTransRow +
                         '</div>' +
                         '</div></div>';
                 }).join('');
@@ -527,6 +797,42 @@
                         card.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     }
                 }
+                updateCommentCharCounts();
+            }
+
+            function findMomentFromCard(cardEl) {
+                if (!cardEl) return null;
+                const cid = cardEl.getAttribute('data-char-id');
+                const ts = cardEl.getAttribute('data-timestamp');
+                return (allMoments || []).find(m => String(m.char_id) === String(cid) && String(m.timestamp) === String(ts)) || null;
+            }
+
+            function buildMomentsContext(targetMoment) {
+                if (!targetMoment) return '';
+                const idx = (allMoments || []).findIndex(m => m.char_id === targetMoment.char_id && m.timestamp === targetMoment.timestamp);
+                const start = Math.max(0, idx - 20);
+                const prev = idx > 0 ? allMoments.slice(start, idx) : [];
+                return prev.map(m => {
+                    const header = `[${m.remark || m.char_id}] ${m.content || ''}`;
+                    const comments = (m.comments || []).map(c => `  - [评论 ${c.remark || c.commenter_id}] ${c.content || ''}`).join('\n');
+                    return comments ? (header + '\n' + comments) : header;
+                }).join('\n');
+            }
+
+            async function requestTranslation(text, context, direction, charId) {
+                const payload = {
+                    text: text || '',
+                    context: context || '',
+                    direction: direction || 'ja_to_zh',
+                    char_id: charId || null
+                };
+                const r = await fetch('/api/translate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await r.json();
+                return data && data.result ? data.result : (data.error || '翻译失败');
             }
 
             function updateLoadMoreBtn() {
@@ -558,7 +864,7 @@
 
                 fetch('/api/moments?page=' + nextPage)
                     .then(r => r.json())
-                    .then(moments => {
+                    .then(async moments => {
                         if (!moments || moments.length === 0) {
                             if (nextPage === 1) {
                                 renderMoments([]);
@@ -568,6 +874,7 @@
                             }
                             return;
                         }
+                        moments = await decorateMomentsBatch(moments);
                         allMoments = allMoments.concat(moments);
                         currentPage = nextPage;
                         renderMoments(allMoments, opts);
@@ -596,13 +903,14 @@
                 function loadPage(page) {
                     fetch('/api/moments?page=' + page)
                         .then(function(r) { return r.json(); })
-                        .then(function(moments) {
+                        .then(async function(moments) {
                             if (!moments || moments.length === 0) {
                                 if (page === 1) {
                                     renderMoments([]);
                                 }
                                 return;
                             }
+                            moments = await decorateMomentsBatch(moments);
                             allMoments = allMoments.concat(moments);
                             currentPage = page;
                             renderMoments(allMoments, { scrollTo: target });
@@ -621,6 +929,36 @@
                 }
 
                 loadPage(1);
+            }
+
+            function updateCommentCharCounts() {
+                // 为所有评论输入框添加字数显示
+                const commentInputs = listEl.querySelectorAll('.moment-comment-input');
+                commentInputs.forEach(function(input) {
+                    const wrapper = input.closest('.moment-comment-input-wrapper');
+                    if (!wrapper) return;
+                    const charCountEl = wrapper.querySelector('.comment-char-count');
+                    if (!charCountEl) return;
+
+                    function updateCommentCharCount() {
+                        const length = input.value.length;
+                        const maxLength = input.getAttribute('data-max') || 200;
+                        charCountEl.textContent = length + '/' + maxLength;
+                        if (length >= maxLength) {
+                            input.classList.add('is-full');
+                            charCountEl.classList.add('is-full');
+                        } else {
+                            input.classList.remove('is-full');
+                            charCountEl.classList.remove('is-full');
+                        }
+                    }
+
+                    input.removeEventListener('input', input.__updateCommentCharCount);
+                    input.__updateCommentCharCount = updateCommentCharCount;
+                    input.addEventListener('input', updateCommentCharCount);
+                    // 初始化
+                    updateCommentCharCount();
+                });
             }
 
             function attachMomentEvents() {
@@ -643,6 +981,22 @@
                             .finally(() => { regenBtn.disabled = false; });
                         return;
                     }
+                    const postTranslateBtn = e.target.closest('.moment-translate-btn');
+                    if (postTranslateBtn && !postTranslateBtn.disabled) {
+                        const card = postTranslateBtn.closest('.moment-card');
+                        const moment = findMomentFromCard(card);
+                        if (!moment) return;
+                        const postKey = postTranslateBtn.getAttribute('data-post-key');
+                        postTranslateBtn.disabled = true;
+                        requestTranslation(moment.content || '', buildMomentsContext(moment), 'ja_to_zh', moment.char_id)
+                            .then((res) => {
+                                translationCache[postKey] = res;
+                                renderMoments(allMoments, { scrollTo: { char_id: moment.char_id, timestamp: moment.timestamp } });
+                            })
+                            .catch(() => {})
+                            .finally(() => { postTranslateBtn.disabled = false; });
+                        return;
+                    }
                     const likeBtn = e.target.closest('.moment-like-btn');
                     if (likeBtn) {
                         const card = likeBtn.closest('.moment-card');
@@ -659,6 +1013,29 @@
                             .catch(() => {});
                         return;
                     }
+                    const commentTransBtn = e.target.closest('.moment-comment-trans-btn');
+                    if (commentTransBtn && !commentTransBtn.disabled) {
+                        const card = commentTransBtn.closest('.moment-card');
+                        if (!card) return;
+                        const transInput = card.querySelector('.moment-comment-trans-input');
+                        const targetInput = card.querySelector('.moment-comment-input');
+                        const txt = (transInput && transInput.value || '').trim();
+                        if (!txt || !targetInput) return;
+                        const moment = findMomentFromCard(card);
+                        commentTransBtn.disabled = true;
+                        commentTransBtn.textContent = '翻译中…';
+                        requestTranslation(txt, moment ? buildMomentsContext(moment) : '', 'zh_to_ja', moment ? moment.char_id : null)
+                            .then((res) => {
+                                targetInput.value = res;
+                                if (transInput) transInput.value = '';
+                            })
+                            .catch(() => {})
+                            .finally(() => {
+                                commentTransBtn.disabled = false;
+                                commentTransBtn.textContent = '翻译';
+                            });
+                        return;
+                    }
                     const commentBtn = e.target.closest('.moment-comment-btn');
                     if (commentBtn) {
                         const form = commentBtn.closest('.moment-comment-form');
@@ -669,6 +1046,13 @@
                         if (!content) return;
                         const charId = card.getAttribute('data-char-id');
                         const timestamp = card.getAttribute('data-timestamp');
+                        
+                        // 设置发送中状态
+                        commentBtn.disabled = true;
+                        commentBtn.classList.add('is-loading');
+                        const originalText = commentBtn.textContent;
+                        commentBtn.innerHTML = '<span class="comment-sending-spinner"></span>发送中';
+                        
                         fetch('/api/moments/comment', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -679,7 +1063,56 @@
                                 if (input) input.value = '';
                                 reloadAndScrollTo({ char_id: charId, timestamp: timestamp });
                             })
-                            .catch(() => {});
+                            .catch(() => {})
+                            .finally(() => {
+                                // 恢复按钮状态
+                                commentBtn.disabled = false;
+                                commentBtn.classList.remove('is-loading');
+                                commentBtn.innerHTML = originalText;
+                            });
+                        return;
+                    }
+                    const commentTranslateBtn = e.target.closest('.comment-translate-btn');
+                    if (commentTranslateBtn && !commentTranslateBtn.disabled) {
+                        const card = commentTranslateBtn.closest('.moment-card');
+                        const moment = findMomentFromCard(card);
+                        if (!moment) return;
+                        const commentIndex = parseInt(commentTranslateBtn.getAttribute('data-comment-index'), 10);
+                        const comment = (moment.comments || []).find(c => Number(c.comment_index) === commentIndex);
+                        if (!comment) return;
+                        const key = commentTranslateBtn.getAttribute('data-comment-key');
+                        const context = (buildMomentsContext(moment) + '\n[本条朋友圈] ' + (moment.content || '')).trim();
+                        commentTranslateBtn.disabled = true;
+                        requestTranslation(comment.content || '', context, 'ja_to_zh', moment.char_id)
+                            .then((res) => {
+                                translationCache[key] = res;
+                                renderMoments(allMoments, { scrollTo: { char_id: moment.char_id, timestamp: moment.timestamp } });
+                            })
+                            .catch(() => {})
+                            .finally(() => { commentTranslateBtn.disabled = false; });
+                        return;
+                    }
+                    const commentRegenBtn = e.target.closest('.comment-regen-btn');
+                    if (commentRegenBtn && !commentRegenBtn.disabled) {
+                        const card = commentRegenBtn.closest('.moment-card');
+                        if (!card) return;
+                        const charId = card.getAttribute('data-char-id');
+                        const timestamp = card.getAttribute('data-timestamp');
+                        const commentIndex = commentRegenBtn.getAttribute('data-comment-index');
+                        commentRegenBtn.disabled = true;
+                        fetch('/api/moments/comment/regenerate', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                char_id: charId,
+                                timestamp: timestamp,
+                                comment_index: commentIndex
+                            })
+                        })
+                            .then(r => r.json())
+                            .then(() => reloadAndScrollTo({ char_id: charId, timestamp: timestamp }))
+                            .catch(() => reloadAndScrollTo({ char_id: charId, timestamp: timestamp }))
+                            .finally(() => { commentRegenBtn.disabled = false; });
                     }
                 });
             }
@@ -687,14 +1120,35 @@
             function attachComposeEvent() {
                 const composeBtn = document.getElementById('momentComposeBtn');
                 const composeText = document.getElementById('momentComposeText');
+                const composeTransText = document.getElementById('momentComposeTransText');
+                const composeTransBtn = document.getElementById('momentComposeTransBtn');
                 const openBtn = document.getElementById('openMomentModal');
                 const mask = document.getElementById('momentModalMask');
                 const cancelBtn = document.getElementById('momentModalCancel');
+                const charCountEl = document.getElementById('momentCharCount');
                 if (!composeBtn || !composeText || !openBtn || !mask || !cancelBtn) return;
+
+                // 更新朋友圈字数显示
+                function updateCharCount() {
+                    if (!charCountEl) return;
+                    const length = composeText.value.length;
+                    const maxLength = 1000;
+                    charCountEl.textContent = length + '/' + maxLength;
+                    if (length >= maxLength) {
+                        composeText.classList.add('is-full');
+                        charCountEl.classList.add('is-full');
+                    } else {
+                        composeText.classList.remove('is-full');
+                        charCountEl.classList.remove('is-full');
+                    }
+                }
+
+                composeText.addEventListener('input', updateCharCount);
 
                 function openModal() {
                     mask.style.display = 'flex';
                     setTimeout(() => composeText.focus(), 0);
+                    updateCharCount();
                 }
                 function closeModal() {
                     mask.style.display = 'none';
@@ -706,6 +1160,12 @@
                 openBtn.addEventListener('click', openModal);
                 cancelBtn.addEventListener('click', function() {
                     composeText.value = '';
+                    if (composeTransText) composeTransText.value = '';
+                    if (charCountEl) {
+                        charCountEl.textContent = '0/1000';
+                        charCountEl.classList.remove('is-full');
+                    }
+                    composeText.classList.remove('is-full');
                     closeModal();
                 });
                 // 点击遮罩空白处关闭
@@ -714,6 +1174,25 @@
                         closeModal();
                     }
                 });
+
+                if (composeTransBtn && composeTransText) {
+                    composeTransBtn.addEventListener('click', function() {
+                        const txt = (composeTransText.value || '').trim();
+                        if (!txt) return;
+                        composeTransBtn.disabled = true;
+                        composeTransBtn.textContent = '翻译中…';
+                        requestTranslation(txt, '', 'zh_to_ja', null)
+                            .then((res) => {
+                                composeText.value = res;
+                                composeTransText.value = '';
+                            })
+                            .catch(() => {})
+                            .finally(() => {
+                                composeTransBtn.disabled = false;
+                                composeTransBtn.textContent = '翻译';
+                            });
+                    });
+                }
 
                 composeBtn.addEventListener('click', function() {
                     const content = (composeText.value || '').trim();
@@ -729,6 +1208,11 @@
                         .then(r => r.json())
                         .then(() => {
                             composeText.value = '';
+                            if (charCountEl) {
+                                charCountEl.textContent = '0/1000';
+                                charCountEl.classList.remove('is-full');
+                            }
+                            composeText.classList.remove('is-full');
                             closeModal();
                             loadNextPage(true, { highlightFirst: true });
                         })
@@ -786,10 +1270,12 @@
                 });
             }
 
-            loadNextPage(true);
             attachMomentEvents();
             attachComposeEvent();
             initActiveMomentsToggle();
+            loadUserLanguage().finally(function() {
+                loadNextPage(true);
+            });
         })();
     </script>
 </body>

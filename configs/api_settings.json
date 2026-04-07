@@ -1,26 +1,27 @@
 {
-  "active_route": "gemini",
+  "active_route": "relay",
   "routes": {
     "gemini": {
       "name": "线路一：Gemini 直连",
       "models": {
         "chat": "gemini-2.5-pro",
         "moments": "gemini-2.5-pro",
-        "gen_persona": "gemini-3-pro-preview",
-        "summary": "gemini-2.5-pro",
+        "gen_persona": "gemini-3.1-pro-preview",
+        "summary": "gemini-2.5-flash",
         "vision": "gemini-2.5-pro",
-        "translation": "gemini-1.5-flash-8b"
+        "translation": "gemini-2.5-flash-lite"
       }
     },
     "relay": {
       "name": "线路二：国内中转",
+      "relay_provider": "new",
       "models": {
-        "chat": "gpt-3.5-turbo",
-        "moments": "gpt-3.5-turbo",
-        "gen_persona": "gpt-3.5-turbo",
-        "summary": "gpt-3.5-turbo",
+        "chat": "gemini-2.5-flash",
+        "moments": "gemini-2.5-flash",
+        "gen_persona": "gemini-3.1-pro",
+        "summary": "gemini-2.0-flash",
         "vision": "gpt-4o",
-        "translation": "gpt-3.5-turbo-0125"
+        "translation": "gpt-4o-mini"
       }
     }
   },
@@ -30,15 +31,18 @@
       "gemini-3-flash-preview",
       "gemini-2.5-pro",
       "gemini-2.5-flash-lite",
-      "gemini-1.5-flash",
+      "gemini-2.5-flash",
+      "gemini-3.1-pro-preview",
       "gemini-1.5-flash-8b"
     ],
     "relay": [
-      "gpt-3.5-turbo",
-      "deepseek-ai/DeepSeek-R1",
+      "gemini-3.1-pro",
+      "gemini-2.5-pro",
+      "gemini-2.5-flash",
+      "gpt-4o",
       "gpt-3.5-turbo-0125",
-      "deepseek-ai/DeepSeek-V3",
-      "gpt-4o"
+      "gemini-2.0-flash",
+      "gpt-4o-mini"
     ]
   }
 }

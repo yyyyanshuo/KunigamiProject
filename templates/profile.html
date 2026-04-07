@@ -259,6 +259,77 @@
     tbody tr:last-child td { border-bottom: none; }
     tbody tr:hover { background: #fbfbfc; }
 
+    /* 打赏模块样式 */
+    .donate-section {
+      background: linear-gradient(135deg, #fff3f8 0%, #ffe9e1 100%);
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      margin: 20px 16px;
+      text-align: center;
+      box-shadow: var(--shadow-sm);
+    }
+    .donate-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 8px;
+    }
+    .donate-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.5;
+      margin-bottom: 12px;
+    }
+    .donate-button {
+      background: var(--primary-color);
+      color: white;
+      border: none;
+      padding: 10px 24px;
+      border-radius: 16px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      box-shadow: 0 4px 10px rgba(255, 182, 185, 0.3);
+    }
+    .donate-button:active {
+      transform: scale(0.95);
+      box-shadow: 0 2px 6px rgba(255, 182, 185, 0.3);
+    }
+    .donate-codes {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      margin-top: 12px;
+    }
+    .qr-box {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+    .qr-code {
+      width: 160px;
+      height: 160px;
+      background: #f8f9fa;
+      border: 2px solid #eee;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .qr-code img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .qr-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
     /* 底部按钮区 */
     .bottom-actions {
       display: flex; justify-content: center; align-items: center; gap: 12px;
@@ -475,6 +546,10 @@
             <div id="view-chat-model" class="api-badge">-</div>
           </div>
           <div class="api-status-item">
+            <div class="api-label">翻译 (Translate)</div>
+            <div id="view-translation-model" class="api-badge">-</div>
+          </div>
+          <div class="api-status-item">
             <div class="api-label">朋友圈 (Moments)</div>
             <div id="view-moments-model" class="api-badge">-</div>
           </div>
@@ -509,8 +584,26 @@
           </div>
         </div>
 
+        <!-- 【新增】国内中转 - 中转商选择（移到模型设置前面） -->
+        <div id="relay-provider-settings" style="margin-bottom: 20px; display:none;">
+          <div class="input-label" style="font-weight:600; color:var(--text-main);">2. 中转商选择 (Relay Provider)</div>
+          <div style="display:flex; gap:12px; margin-top:8px;">
+            <label class="radio-card" onclick="selectRelayProvider('new')">
+              <input type="radio" name="relay_provider" value="new" id="relay_new">
+              <span>🆕 新中转商 (api2d)</span>
+            </label>
+            <label class="radio-card" onclick="selectRelayProvider('old')">
+              <input type="radio" name="relay_provider" value="old" id="relay_old">
+              <span>📡 旧中转商 (vg)</span>
+            </label>
+          </div>
+          <div style="font-size:12px; color:var(--text-secondary); margin-top:8px;">
+            新中转商：https://api2d.com | 旧中转商：https://vg.a3e.top/
+          </div>
+        </div>
+
         <div id="model-settings" style="margin-bottom: 20px;">
-          <div class="input-label" style="font-weight:600; color:var(--text-main);">2. 为功能指派模型 (Select Models)</div>
+          <div class="input-label" style="font-weight:600; color:var(--text-main);">3. 为功能指派模型 (Select Models)</div>
           <div style="display:grid; grid-template-columns: 1fr; gap:12px; margin-top:8px;">
             <div><div class="input-label">聊天对话</div><select id="model-chat" class="model-select"></select></div>
             <div><div class="input-label">翻译功能</div><select id="model-translation" class="model-select"></select></div>
@@ -525,7 +618,7 @@
 
         <div style="margin-bottom: 20px;">
           <div class="input-label" style="font-weight:600; color:var(--text-main);">
-            3. 扩展模型列表
+            4. 扩展模型列表
             <span id="manage-route-name" style="font-weight:normal; color:var(--primary-color); margin-left:6px;">-</span>
           </div>
           <div id="model-tags-list" style="display:flex; flex-wrap:wrap; gap:8px; margin: 10px 0;"></div>
@@ -574,6 +667,31 @@
   </div>
 </div>
 
+<!-- 打赏模块 -->
+<div class="donate-section" id="donate-section">
+  <div class="donate-title">☕ 打赏开发者</div>
+  <div class="donate-desc">
+    开发者是用爱发电的卑微大学生，为了给大家提供不卡顿的 38ms 极速通道和最聪明的 AI，服务器每天都在疯狂燃烧我的余额😭。
+    <br><br>
+    如果这个角色曾经治愈过你，求老板请我喝瓶可乐续命！你的每一分钱都会变成新功能开发的代码！
+  </div>
+  <button class="donate-button" onclick="toggleDonateQR()">显示收款码</button>
+  <div class="donate-codes" id="donate-codes" style="display:none;">
+    <div class="qr-box">
+      <div class="qr-code">
+        <img src="/static/wechat_qr.png" alt="微信收款码" onerror="this.alt='微信二维码未找到'">
+      </div>
+      <div class="qr-label">微信</div>
+    </div>
+    <div class="qr-box">
+      <div class="qr-code">
+        <img src="/static/alipay_qr.png" alt="支付宝收款码" onerror="this.alt='支付宝二维码未找到'">
+      </div>
+      <div class="qr-label">支付宝</div>
+    </div>
+  </div>
+</div>
+
 <!-- 底部操作区 -->
 <div class="bottom-actions">
   <button class="btn-switch" onclick="openAccountSwitchModal()">
@@ -603,6 +721,8 @@
     </div>
   </div>
 </div>
+
+<!-- 打赏弹窗已移至 tabbar.html -->
 
 </body>
 
@@ -1018,6 +1138,7 @@
 
     document.getElementById('view-route-name').textContent = routeName;
     document.getElementById('view-chat-model').textContent = models.chat;
+    document.getElementById('view-translation-model').textContent = models.translation != null ? models.translation : models.chat;
     document.getElementById('view-moments-model').textContent = models.moments != null ? models.moments : models.chat;
     document.getElementById('view-vision-model').textContent = models.vision != null ? models.vision : (route === 'gemini' ? 'gemini-2.5-pro' : 'gpt-4o');
     document.getElementById('view-summary-model').textContent = models.summary;
@@ -1046,10 +1167,32 @@
     refreshEditUI(route);
   }
 
+  // 【新增】中转商选择处理
+  function selectRelayProvider(provider) {
+    // 更新内存中的配置
+    if (!apiConfig.routes.relay) {
+      apiConfig.routes.relay = {};
+    }
+    apiConfig.routes.relay.relay_provider = provider;
+    // 选中对应的 radio
+    document.getElementById(`relay_${provider}`).checked = true;
+  }
+
   // 5. 刷新编辑界面 UI (下拉框 + 标签列表)
   function refreshEditUI(route) {
     // 更新标题
     document.getElementById('manage-route-name').textContent = (route === 'gemini') ? '[Gemini]' : '[中转]';
+
+    // 【新增】显示/隐藏中转商选择
+    const relayProviderSettings = document.getElementById('relay-provider-settings');
+    if (route === 'relay') {
+      relayProviderSettings.style.display = 'block';
+      // 加载保存的中转商选择
+      const savedProvider = apiConfig.routes.relay?.relay_provider || 'old';
+      document.getElementById(`relay_${savedProvider}`).checked = true;
+    } else {
+      relayProviderSettings.style.display = 'none';
+    }
 
     // A. 渲染下拉框选项
     const options = apiConfig.model_options[route] || [];
@@ -1089,16 +1232,25 @@
     listEl.innerHTML = tagsHtml;
   }
 
-  // 辅助：设置下拉框的值，如果不存在则选第一个
+  // 辅助：设置下拉框的值；若值不在列表中，自动补进列表并选中，避免静默回退
   function setSelectValue(id, value) {
     const select = document.getElementById(id);
-    // 尝试设置
-    select.value = value;
-    // 如果设置失败(value不在options里)，select.value 会是空或者第一个，
-    // 这里我们可以强制设为第一个有效值，或者保留空
-    if (select.selectedIndex === -1 && select.options.length > 0) {
-      select.selectedIndex = 0;
+    const val = (value == null) ? '' : String(value).trim();
+    if (!val) {
+      if (select.selectedIndex === -1 && select.options.length > 0) {
+        select.selectedIndex = 0;
+      }
+      return;
     }
+
+    const exists = Array.from(select.options).some(opt => opt.value === val);
+    if (!exists) {
+      const opt = document.createElement('option');
+      opt.value = val;
+      opt.textContent = val;
+      select.appendChild(opt);
+    }
+    select.value = val;
   }
 
   // 6. 添加新模型
@@ -1151,6 +1303,15 @@
     apiConfig.routes[activeRoute].models.vision = document.getElementById('model-vision').value;
     apiConfig.routes[activeRoute].models.summary = document.getElementById('model-summary').value;
     apiConfig.routes[activeRoute].models.gen_persona = document.getElementById('model-gen').value;
+
+    // 【新增】保存 relay 中转商选择
+    if (activeRoute === 'relay') {
+      const relayProvider = document.querySelector('input[name="relay_provider"]:checked').value;
+      if (!apiConfig.routes.relay) {
+        apiConfig.routes.relay = {};
+      }
+      apiConfig.routes.relay.relay_provider = relayProvider;
+    }
 
     const btn = document.querySelector('#module-api .btn-save');
     const originalText = btn.textContent;
@@ -1284,6 +1445,19 @@
       }
     } catch (e) {
       alert('网络错误，切换失败');
+    }
+  }
+
+  // --- 打赏模块逻辑 ---
+  function toggleDonateQR() {
+    const codes = document.getElementById('donate-codes');
+    const btn = event.target;
+    if (codes.style.display === 'none') {
+      codes.style.display = 'flex';
+      btn.textContent = '隐藏收款码';
+    } else {
+      codes.style.display = 'none';
+      btn.textContent = '显示收款码';
     }
   }
 

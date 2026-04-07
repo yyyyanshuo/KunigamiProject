@@ -62,4 +62,60 @@
             document.getElementById('tab-profile').classList.add('active');
         }
     })();
+
+    // 【全局】检查每日打赏弹窗（在所有包含 tabbar 的页面自动运行）
+    function checkDailyDonateModal() {
+        const today = new Date().toISOString().split('T')[0];
+        const lastShown = localStorage.getItem('last_donate_show');
+        
+        if (lastShown !== today) {
+            const modal = document.getElementById('daily-donate-modal');
+            if (modal) {
+                modal.style.display = 'flex';
+                localStorage.setItem('last_donate_show', today);
+            }
+        }
+    }
+
+    // 页面加载完成后检查弹窗
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', checkDailyDonateModal);
+    } else {
+        checkDailyDonateModal();
+    }
 </script>
+
+<!-- 打赏弹窗 (每日首次) -->
+<div class="modal-overlay" id="daily-donate-modal" style="position:fixed; display:none; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); backdrop-filter:blur(4px); z-index:3000; align-items:center; justify-content:center;">
+  <div style="background:#fff; padding:20px; border-radius:18px; width:90%; max-width:380px; box-shadow:0 10px 30px rgba(0,0,0,0.15); max-height:85vh; overflow-y:auto;">
+    <div style="text-align:center; padding-bottom:16px; border-bottom:1px solid #eee;">
+      <div style="font-size:48px; margin-bottom:8px;">☕</div>
+      <h3 style="margin:0; font-size:18px; color:#2c3e50;">打赏开发者</h3>
+    </div>
+    <div style="padding:20px 0; font-size:13px; color:#8ca0b3; line-height:1.6; text-align:center;">
+      <p style="margin:0 0 8px 0;">开发者是用爱发电的卑微大学生，为了给大家提供不卡顿的 38ms 极速通道和最聪明的 AI，服务器每天都在疯狂燃烧我的余额😭</p>
+      <p style="margin:8px 0; font-weight:600; color:#ffb6b9;">如果这个角色曾经治愈过你，求老板请我喝瓶可乐续命！</p>
+      <p style="margin:8px 0 0 0;">你的每一分钱都会变成新功能开发的代码！</p>
+    </div>
+    
+    <!-- 直接显示收款码 -->
+    <div style="display:flex; gap:16px; justify-content:center; margin:20px 0; flex-wrap:wrap;">
+      <div style="text-align:center;">
+        <div style="width:120px; height:120px; border:1px solid #f0f0f0; border-radius:8px; display:flex; align-items:center; justify-content:center; background:#fafafa;">
+          <img src="/static/wechat_qr.png" alt="微信收款码" style="width:100%; height:100%; object-fit:cover; border-radius:6px;" onerror="this.alt='微信二维码未找到'">
+        </div>
+        <div style="margin-top:8px; font-size:12px; color:#666; font-weight:600;">微信</div>
+      </div>
+      <div style="text-align:center;">
+        <div style="width:120px; height:120px; border:1px solid #f0f0f0; border-radius:8px; display:flex; align-items:center; justify-content:center; background:#fafafa;">
+          <img src="/static/alipay_qr.png" alt="支付宝收款码" style="width:100%; height:100%; object-fit:cover; border-radius:6px;" onerror="this.alt='支付宝二维码未找到'">
+        </div>
+        <div style="margin-top:8px; font-size:12px; color:#666; font-weight:600;">支付宝</div>
+      </div>
+    </div>
+    
+    <div style="display:flex; gap:12px; margin:20px 0 0 0;">
+      <button onclick="document.getElementById('daily-donate-modal').style.display='none'; localStorage.setItem('last_donate_show', new Date().toISOString().split('T')[0]);" style="flex:1; background:#f5f5f5; color:#555; border:none; padding:10px; border-radius:10px; cursor:pointer; font-weight:600;">关闭</button>
+    </div>
+  </div>
+</div>

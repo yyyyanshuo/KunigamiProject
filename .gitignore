@@ -16,14 +16,17 @@ chat_history.db
 # 忽略用户个人设置 (用户名、语言)
 # configs/*.json
 # 忽略全局人设
-configs/global_user_persona.md
+# configs/global_user_persona.md
 configs/users.db
 
 docs/
 scripts/
 users/
 
+# 静态资源 (支付QR码, 头像等)
 static/avatar_user.png
+static/alipay_qr.png
+static/wechat_qr.png
 
 debug_network.py
 test_final_connect.py
@@ -32,3 +35,14 @@ auto_push.bat
 gen_keys.py
 private_key.pem
 public_key.pem
+stats_dialogs.py
+app.py_fixed
+CODE_STRUCTURE_ANALYSIS.md
+commit_docs.txt
+commit_img.txt
+commit_msg.txt
+debug_output.txt
+output.txt
+QUICK_REFERENCE.md
+verify_fixes.py
+verify_modifications.py

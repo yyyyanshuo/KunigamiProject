@@ -1,4 +1,4 @@
-import os
+﻿import os
 import time
 import re
 import json
@@ -19,16 +19,28 @@ import threading # 用于异步发送，防止卡顿
 from contextvars import ContextVar
 from email.utils import formataddr # <--- 新增这个导入
 import tempfile # <--- 记得在最上面加这个 import
-from urllib.parse import quote as url_quote
+import io
+from urllib.parse import quote as url_quote, urlparse
 from werkzeug.security import generate_password_hash, check_password_hash
 import uuid
 import pykakasi
+from PIL import Image, ImageOps
 
 # 初始化 kakasi (用于日语注音)
 kks = pykakasi.kakasi()
+# 常见 emoji / 表情符号范围（用于避免 pykakasi 误分词）
+EMOJI_SPLIT_RE = re.compile(
+    r'('
+    r'[\U0001F1E6-\U0001F1FF]'     # flags
+    r'|[\U0001F300-\U0001FAFF]'    # symbols & pictographs
+    r'|[\u2600-\u26FF]'            # misc symbols
+    r'|[\u2700-\u27BF]'            # dingbats
+    r'|[\uFE0F]'                   # variation selector
+    r')+'
+)
 
 def _add_furigana_to_japanese(text: str) -> str:
-    """给日语文本中的汉字注音。跳过 [表情]、[图片] 等功能性标签。"""
+    """给日语文本中的汉字注音。跳过 [表情]、[图片] 等功能性标签，保留 emoji。"""
     if not text: return text
     # 跳过特定的标签段落
     pattern = r'(\[表情\][^\s/]+|\[图片\]\([^)]+\)\([\s\S]*?\)|\[recall\])'
@@ -40,36 +52,63 @@ def _add_furigana_to_japanese(text: str) -> str:
             # tag 保持原样
             out += part
         else:
-            # 普通文本进行分词和注音
-            result = kks.convert(part)
-            for item in result:
-                orig = item['orig']
-                hira = item['hira']
-                
-                # 如果不含汉字，直接追加
-                if not re.search(r'[\u4e00-\u9faf]', orig):
-                    out += orig
+            # 用占位符替换 emoji，避免 pykakasi 误处理
+            emoji_map = {}
+            def replace_emoji(match):
+                emoji_key = f"__EMOJI_{len(emoji_map)}__"
+                emoji_map[emoji_key] = match.group(0)
+                return emoji_key
+            
+            part_with_placeholders = re.sub(EMOJI_SPLIT_RE, replace_emoji, part)
+            
+            # 按换行拆分再注音
+            line_parts = re.split(r'(\r\n|\n|\r)', part_with_placeholders)
+            for line_part in line_parts:
+                if not line_part or line_part in ("\r\n", "\n", "\r"):
+                    out += line_part
                     continue
                 
-                # 去除末尾相同的假名 (如 '思い' 和 'おもい'，去掉 'い')
-                suf = ''
-                while orig and hira and orig[-1] == hira[-1]:
-                    suf = orig[-1] + suf
-                    orig = orig[:-1]
-                    hira = hira[:-1]
+                # 普通文本进行分词和注音
+                result = kks.convert(line_part)
+                # 安全回退
+                joined_orig = "".join((it.get("orig") or "") for it in result)
+                if joined_orig and joined_orig != line_part and not re.search(r'[\u3040-\u30ff\u4e00-\u9faf]', line_part):
+                    out += line_part
+                    continue
                 
-                # 去除开头相同的假名 (一般较少，但也处理)
-                pre = ''
-                while orig and hira and orig[0] == hira[0]:
-                    pre += orig[0]
-                    orig = orig[1:]
-                    hira = hira[1:]
-                
-                # 如果中间有汉字，加 <ruby> 注音
-                if orig and hira:
-                    out += f"{pre}<ruby>{orig}<rt>{hira}</rt></ruby>{suf}"
-                else:
-                    out += pre + suf
+                for item in result:
+                    orig = item['orig']
+                    hira = item['hira']
+                    
+                    # 如果不含汉字，直接追加
+                    if not re.search(r'[\u4e00-\u9faf]', orig):
+                        out += orig
+                        continue
+                    
+                    # 去除末尾相同的假名
+                    suf = ''
+                    while orig and hira and orig[-1] == hira[-1]:
+                        suf = orig[-1] + suf
+                        orig = orig[:-1]
+                        hira = hira[:-1]
+                    
+                    # 去除开头相同的假名
+                    pre = ''
+                    while orig and hira and orig[0] == hira[0]:
+                        pre += orig[0]
+                        orig = orig[1:]
+                        hira = hira[1:]
+                    
+                    # 如果中间有汉字，加 <ruby> 注音
+                    if orig and hira:
+                        out += f"{pre}<ruby>{orig}<rt>{hira}</rt></ruby>{suf}"
+                    else:
+                        out += pre + suf
+            
+            # 【新增】把 emoji 占位符替换回原始 emoji
+            for emoji_key, emoji_char in emoji_map.items():
+                out = out.replace(emoji_key, emoji_char)
+    
     return out
 
 load_dotenv()  # 从 .env 读取环境变量
@@ -78,7 +117,9 @@ GEMINI_KEY = os.getenv("GEMINI_API_KEY", "")
 USE_OPENROUTER = os.getenv("USE_OPENROUTER", "false").lower() == "true"
 OPENROUTER_KEY = os.getenv("OPENROUTER_KEY", "")
 # 新增下面这行，来读取我们配置的 API 地址
-OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://oa.api2d.net/v1")
+# 【新增】读取旧的中转商地址
+OPENROUTER_BASE_URL_OLD = os.getenv("OPENROUTER_BASE_URL_OLD", "https://vg.v1api.cc/v1")
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 
@@ -1564,8 +1605,7 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
 
     print(f"--- [Debug] 正在为 [{char_id}] 构建 Prompt，路径: {prompts_dir} ---") # <--- 加这行调试
 
-    # --- 1. 静态 Markdown 文件 (人设、用户、格式) ---
-    # 姓名、年龄来自 characters.json，人设文件中不包含
+    # ========== 新顺序：1. 角色人设 ==========
     char_name = get_char_name(char_id)
     char_age = get_char_age(char_id)
     name_age_prefix = ""
@@ -1577,57 +1617,18 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
             parts.append(f"年齢：{char_age}歳")
         name_age_prefix = "\n".join(parts) + "\n\n"
 
-    static_files = [
-        ("1_base_persona.md", "【Role / キャラクター設定】"),
-        ("3_user_persona.md", "【User / ユーザー情報】"),
-        ("8_format.md", "【System Rules / 出力ルール】")
-    ]
-    for filename, title in static_files:
-        try:
-            path = os.path.join(prompts_dir, filename) # <--- 使用动态目录
-            if os.path.exists(path):
-                with open(path, "r", encoding="utf-8-sig") as f:
-                    content = f.read().strip()
-                    if content:
-                        # 仅对人设文件注入姓名和年龄前缀
-                        if filename == "1_base_persona.md" and name_age_prefix:
-                            content = name_age_prefix + content
-                        prompt_parts.append(f"{title}\n{content}")
-        except Exception: pass
-
-    # --- 2. 关系设定 (JSON) ---
     try:
-        path = os.path.join(prompts_dir, "2_relationship.json")
+        path = os.path.join(prompts_dir, "1_base_persona.md")
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8-sig") as f:
-                rel_data = json.load(f)
-                user_rel = rel_data.get(current_user_name)
-                if user_rel:
-                    # 【修改】拼装文本改成日语
-                    rel_str = (f"対話相手：{current_user_name}\n"
-                           f"関係性：{user_rel.get('role', '不明')}\n"
-                           f"関係度：{user_rel.get('score', 1)}\n"
-                           f"詳細：{user_rel.get('description', '')}")
-                prompt_parts.append(f"【Relationship / 関係設定】\n{rel_str}")
+                content = f.read().strip()
+                if content:
+                    if name_age_prefix:
+                        content = name_age_prefix + content
+                    prompt_parts.append(f"【Role / キャラクター設定】\n{content}")
     except Exception: pass
 
-    # --- 4. 长期记忆 (JSON - 按周/月，RAI 筛选) ---
-    # include_long_memory=False 时不加入长期记忆（如主动发朋友圈）
-    if include_long_memory:
-        try:
-            path = os.path.join(prompts_dir, "4_memory_long.json")
-            if os.path.exists(path):
-                with open(path, "r", encoding="utf-8-sig") as f:
-                    long_mem = json.load(f)
-                    if long_mem:
-                        selected = select_relevant_long_memory(long_mem, recent_messages, user_latest_input=user_latest_input)
-                        if selected:
-                            mem_list = [f"- {k}: {v}" for k, v in selected]
-                            prompt_parts.append(f"【Long-term Memory / 長期記憶】\n" + "\n".join(mem_list))
-        except Exception:
-            pass
-
-    # 3. 【全局通用】读取用户档案 (从 configs 读)，姓名和年龄单独注入
+    # ========== 新顺序：2. 用户人设 ==========
     try:
         user_name = get_current_username()
         user_age = get_user_age()
@@ -1662,46 +1663,62 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
             prompt_parts.append(f"【User / ユーザー情報】\n{user_prefix.strip()}")
     except: pass
 
-    # 4. 【全局通用】读取格式规则 (从 configs 读)，仅当 include_global_format 为 True 时加入
-    if include_global_format:
+    # ========== 新顺序：3. 关系设定 ==========
+    try:
+        path = os.path.join(prompts_dir, "2_relationship.json")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8-sig") as f:
+                rel_data = json.load(f)
+                user_rel = rel_data.get(current_user_name)
+                if user_rel:
+                    # 【修改】拼装文本改成日语
+                    rel_str = (f"対話相手：{current_user_name}\n"
+                           f"関係性：{user_rel.get('role', '不明')}\n"
+                           f"関係度：{user_rel.get('score', 1)}\n"
+                           f"詳細：{user_rel.get('description', '')}")
+                    # 【修正】append 必须在 if 内部，避免 rel_str 未定义错误
+                    prompt_parts.append(f"【Relationship / 関係設定】\n{rel_str}")
+    except Exception: pass
+
+    # ========== 新顺序：4. 长期记忆 ==========
+    # include_long_memory=False 时不加入长期记忆（如主动发朋友圈）
+    if include_long_memory:
         try:
-            user_id = get_current_user_id()
-            if user_id:
-                cfg_dir = os.path.join(USERS_ROOT, str(user_id), "configs")
-                path = os.path.join(cfg_dir, "global_format.md")
-            else:
-                path = os.path.join(CONFIG_DIR, "global_format.md")
+            path = os.path.join(prompts_dir, "4_memory_long.json")
             if os.path.exists(path):
-                with open(path, "r", encoding="utf-8") as f:
-                    prompt_parts.append(f"【System Rules / 出力ルール】\n{f.read().strip()}")
+                with open(path, "r", encoding="utf-8-sig") as f:
+                    long_mem = json.load(f)
+                    if long_mem:
+                        selected = select_relevant_long_memory(long_mem, recent_messages, user_latest_input=user_latest_input)
+                        if selected:
+                            mem_list = [f"- {k}: {v}" for k, v in selected]
+                            prompt_parts.append(f"【Long-term Memory / 長期記憶】\n" + "\n".join(mem_list))
         except Exception:
             pass
-        # 表情格式说明：只能用固定描述列表（来自 sticker_descriptions_sorted.txt），系统按「名称包含描述」匹配
-        desc_list = "、".join(_get_sticker_allowed_descriptions())
-        prompt_parts.append(
-            "【Sticker / 表情】\n"
-            "在分段回复中若要发送表情，请**仅使用**以下描述之一，格式为 [表情]描述：\n"
-            f"{desc_list}\n"
-            "系统会按「表情名称包含该描述」匹配表情库并随机展示一张（同一描述可对应多张图）。勿使用列表外的词，否则将原文显示。"
-        )
 
-    # --- 5. 中期记忆 (JSON - 按天，最近7天) ---
+    # ========== 新顺序：5. 中期记忆 ==========
     try:
         path = os.path.join(prompts_dir, "5_memory_medium.json")
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8-sig") as f:
                 med_mem = json.load(f)
-                recent_list = []
-                # 倒推7天
+                # 倒推7天，收集内容
+                summary_texts = []
                 for i in range(7, 0, -1):
                     day_key = (now - timedelta(days=i)).strftime("%Y-%m-%d")
                     if day_key in med_mem:
-                        recent_list.append(f"- {day_key}: {med_mem[day_key]}")
-                if recent_list:
-                    prompt_parts.append(f"【Medium-term Memory / 最近一週間の出来事】\n" + "\n".join(recent_list))
+                        summary_texts.append(str(med_mem[day_key]))
+                if summary_texts:
+                    # 合并为一段，限制总长度（如200字以内）
+                    combined = " ".join(summary_texts)
+                    # 截断为200字以内（可调整）
+                    max_len = 200
+                    if len(combined) > max_len:
+                        combined = combined[:max_len] + "..."
+                    prompt_parts.append(f"【Medium-term Memory / 最近一週間の出来事】\n{combined}")
     except Exception: pass
 
-    # --- 6. 短期记忆 (JSON - 当天事件) ---
+    # ========== 新顺序：6. 短期记忆 ==========
     try:
         path = os.path.join(prompts_dir, "6_memory_short.json")
         if os.path.exists(path):
@@ -1735,7 +1752,7 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
                     prompt_parts.append(f"【Short-term Memory / 最近の出来事】{combined_events_str}")
     except Exception: pass
 
-    # --- 7. 近期安排 (JSON - 仅限未来7天) ---
+    # ========== 新顺序：7. 计划 ==========
     try:
         path = os.path.join(prompts_dir, "7_schedule.json")
         if os.path.exists(path):
@@ -1757,7 +1774,30 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
                     prompt_parts.append(f"【Schedule / 今後の予定】\n" + "\n".join(future_plans))
     except Exception: pass
 
-    # --- 8. 实时时间注入 ---
+    # ========== 新顺序：8. 系统设定+表情 ==========
+    if include_global_format:
+        try:
+            user_id = get_current_user_id()
+            if user_id:
+                cfg_dir = os.path.join(USERS_ROOT, str(user_id), "configs")
+                path = os.path.join(cfg_dir, "global_format.md")
+            else:
+                path = os.path.join(CONFIG_DIR, "global_format.md")
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    prompt_parts.append(f"【System Rules / 出力ルール】\n{f.read().strip()}")
+        except Exception:
+            pass
+        # 表情格式说明：只能用固定描述列表（来自 sticker_descriptions_sorted.txt），系统按「名称包含描述」匹配
+        desc_list = "、".join(_get_sticker_allowed_descriptions())
+        prompt_parts.append(
+            "【Sticker / 表情】\n"
+            "在分段回复中若要发送表情，请**仅使用**以下描述之一，格式为 [表情]描述：\n"
+            f"{desc_list}\n"
+            "系统会按「表情名称包含该描述」匹配表情库并随机展示一张（同一描述可对应多张图）。勿使用列表外的词，否则将原文显示。"
+        )
+
+    # ========== 新顺序：9. 今日时间 ==========
     # 格式示例: 2025-11-29 Saturday
 
     # 简单的星期几映射
@@ -1769,7 +1809,7 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
     # 【修改】说明文字改成日语
     prompt_parts.append(f"【Current Date / 現在の日付】\n今日は: {current_date_str}\n(以下の会話履歴には時間 [HH:MM] のみが含まれています。現在の日付に基づいて理解してください)")
 
-    # --- 【新增】语言控制 ---
+    # ========== 新顺序：10. 上下文（语言控制） ==========
     lang = get_ai_language()
     if lang == "zh":
         # 强力指令：即使人设是日文，也要用中文回复
@@ -2739,13 +2779,14 @@ def get_moments():
     for post in raw:
         char_id = post.get("char_id", "")
         comments_ok = []
-        for c in post.get("comments", []):
+        for src_idx, c in enumerate(post.get("comments", [])):
             try:
                 ts = datetime.strptime(c["timestamp"], "%Y-%m-%d %H:%M:%S")
                 if ts <= now:
                     reply_to_id = c.get("reply_to")
                     reply_to_remark = remarks.get(reply_to_id, reply_to_id or "") if reply_to_id else ""
                     comments_ok.append({
+                        "comment_index": src_idx,
                         "commenter_id": c.get("commenter_id", ""),
                         "content": c.get("content", ""),
                         "timestamp": c.get("timestamp", ""),
@@ -2865,20 +2906,93 @@ def moments_comment():
     raw[idx] = post
     safe_save_json(moments_path, raw)
 
-    # 用户评论后，由该条朋友圈的作者（角色）生成一条回复
-    author_char_id = char_id
-    post_content = post.get("content", "")
-    reply_text = _generate_moment_reply_to_user(author_char_id, post_content, content)
-    if reply_text:
-        comments = post.get("comments", [])
-        comments.append({"commenter_id": author_char_id, "content": reply_text, "timestamp": now, "reply_to": "user"})
-        post["comments"] = comments
-        raw[idx] = post
-        safe_save_json(moments_path, raw)
-        ctx = f"用户评论了你的朋友圈：「{content}」。你的回复：「{reply_text}」。"
-        append_moment_event_to_short_memory(author_char_id, ctx)
+    # 仅当评论的不是用户自己的朋友圈时，才由作者生成回复和记忆
+    if char_id != "user":
+        author_char_id = char_id
+        post_content = post.get("content", "")
+        reply_text = _generate_moment_reply_to_user(author_char_id, post_content, content)
+        if reply_text:
+            comments = post.get("comments", [])
+            comments.append({"commenter_id": author_char_id, "content": reply_text, "timestamp": now, "reply_to": "user"})
+            post["comments"] = comments
+            raw[idx] = post
+            safe_save_json(moments_path, raw)
+            ctx = f"用户评论了你的朋友圈：「{content}」。你的回复：「{reply_text}」。"
+            append_moment_event_to_short_memory(author_char_id, ctx)
 
     return jsonify({"status": "success", "comment": {"commenter_id": "user", "content": content, "timestamp": now}})
+
+
+@app.route("/api/moments/comment/regenerate", methods=["POST"])
+def moments_comment_regenerate():
+    """
+    重新生成某条评论内容（时间戳保持不变）。
+    body: { char_id, timestamp, comment_index }
+    """
+    data = request.get_json() or {}
+    char_id = data.get("char_id")
+    timestamp_str = data.get("timestamp")
+    comment_index = data.get("comment_index")
+    try:
+        comment_index = int(comment_index)
+    except Exception:
+        return jsonify({"error": "comment_index 无效"}), 400
+
+    if not char_id or not timestamp_str:
+        return jsonify({"error": "缺少 char_id 或 timestamp"}), 400
+
+    moments_path, _ = get_moments_paths()
+    if not os.path.exists(moments_path):
+        return jsonify({"error": "暂无朋友圈数据"}), 404
+    try:
+        with open(moments_path, "r", encoding="utf-8-sig") as f:
+            raw = json.load(f)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    idx, post = _find_moment_post(raw, char_id, timestamp_str)
+    if idx is None:
+        return jsonify({"error": "未找到该条朋友圈"}), 404
+
+    comments = post.get("comments", [])
+    if comment_index < 0 or comment_index >= len(comments):
+        return jsonify({"error": "评论索引不存在"}), 404
+
+    old_comment = comments[comment_index]
+    commenter_id = old_comment.get("commenter_id")
+    if not commenter_id or commenter_id == "user":
+        return jsonify({"error": "该评论不支持重生成"}), 400
+
+    post_author_id = post.get("char_id", "")
+    post_content = post.get("content", "")
+    old_ts = old_comment.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    reply_to = old_comment.get("reply_to")
+
+    new_text = None
+    # 若是“作者回复用户评论”，优先使用专用回复函数
+    if reply_to == "user":
+        user_comment_text = ""
+        for i in range(comment_index - 1, -1, -1):
+            prev = comments[i]
+            if prev.get("commenter_id") == "user":
+                user_comment_text = prev.get("content", "")
+                break
+        new_text = _generate_moment_reply_to_user(commenter_id, post_content, user_comment_text or "谢谢你的评论")
+    else:
+        new_text = _generate_moment_comment(commenter_id, post_author_id, post_content)
+
+    if not new_text:
+        return jsonify({"error": "重生成失败"}), 500
+
+    # 仅替换内容，保持原时间不变
+    old_comment["content"] = new_text
+    old_comment["timestamp"] = old_ts
+    comments[comment_index] = old_comment
+    post["comments"] = comments
+    raw[idx] = post
+    safe_save_json(moments_path, raw)
+
+    return jsonify({"status": "success"})
 
 
 def _generate_likes_comments_for_user_moment(post_ts_str, post_content):
@@ -2891,9 +3005,14 @@ def _generate_likes_comments_for_user_moment(post_ts_str, post_content):
     end_dt = post_dt + timedelta(hours=24)
 
     def random_ts_in_24h():
-        delta_sec = random.randint(0, 24 * 3600)
-        t = post_dt + timedelta(seconds=delta_sec)
-        return t.strftime("%Y-%m-%d %H:%M:%S")
+        """生成24小时内的随机时间戳，避免在23:00~7:00之间（深睡眠时间）"""
+        while True:
+            delta_sec = random.randint(0, 24 * 3600)
+            t = post_dt + timedelta(seconds=delta_sec)
+            hour = t.hour
+            # 避开23:00~7:00的时间段
+            if not (hour >= 23 or hour < 7):
+                return t.strftime("%Y-%m-%d %H:%M:%S")
 
     likers = []
     comments = []
@@ -2907,8 +3026,7 @@ def _generate_likes_comments_for_user_moment(post_ts_str, post_content):
         return likers, comments
 
     for char_id, info in chars_config.items():
-        if info.get("deep_sleep", False):
-            continue
+        # 移除深睡眠检查，即使在深睡眠状态也可以点赞和评论（但时间不在深睡眠时段）
         intimacy = max(0, min(100, int(info.get("intimacy", 60))))
         p_like = intimacy / 100.0
         p_comment = (intimacy / 100.0) * 0.6
@@ -3473,6 +3591,37 @@ def chat(char_id):
             # 容错：原样添加
             messages.append({"role": row['role'], "content": row['content']})
 
+    # --- 【新增】在用户最新消息后添加系统提示 ---
+    # 检查最后一条消息是否是用户消息
+    if messages and messages[-1]["role"] == "user":
+        lang = get_ai_language()
+        hour = now.hour
+        time_str = now.strftime('%H:%M')
+
+        # 计算时间段
+        if 5 <= hour < 11: period = "早上" if lang == "zh" else "朝"
+        elif 11 <= hour < 13: period = "中午" if lang == "zh" else "昼"
+        elif 13 <= hour < 18: period = "下午" if lang == "zh" else "午後"
+        elif 18 <= hour < 23: period = "晚上" if lang == "zh" else "夜"
+        else: period = "深夜" if lang == "zh" else "深夜"
+
+        if lang == "zh":
+            system_hint = (
+                f"（系统提示：现在是{period} {time_str}。）\n"
+                f"（用户发来了一条消息。请你根据当前时间、之前的聊天内容，回复用户的消息。）\n"
+                f"（要求：自然、简短，不要重复上一句话。）\n"
+                f"（无特殊说明时用斜线表示换行和句号。）"
+            )
+        else:
+            system_hint = (
+                f"（システム通知：現在は{period} {time_str}です。）\n"
+                f"（ユーザーからメッセージが来ました。時間帯と会話履歴を踏まえて回信してください。）\n"
+                f"（要件：自然で簡潔に。直前の発言を繰り返さないこと。）\n"
+                f"（特に指定がない場合、改行と句点はスラッシュで表します。）"
+            )
+
+        messages.append({"role": "system", "content": system_hint})
+
     # 1. 获取当前配置
     route, current_model = get_model_config("chat") # 任务类型是 chat
 
@@ -3591,19 +3740,54 @@ def regenerate_message(char_id):
         # 检查发给 AI 的最后一条消息是谁说的
         if len(messages) > 1: # 排除掉只有 System Prompt 的情况
             last_msg_role = messages[-1]['role']
+            lang = get_ai_language()
+            hour = now.hour
+            time_str = now.strftime('%H:%M')
 
-            # 如果上一条依然是 assistant (说明是连续回复)，补一条假的 User 消息
-            if last_msg_role == 'assistant' or last_msg_role == 'model':
-                lang = get_ai_language()
+            # 计算时间段
+            if 5 <= hour < 11: period = "早上" if lang == "zh" else "朝"
+            elif 11 <= hour < 13: period = "中午" if lang == "zh" else "昼"
+            elif 13 <= hour < 18: period = "下午" if lang == "zh" else "午後"
+            elif 18 <= hour < 23: period = "晚上" if lang == "zh" else "夜"
+            else: period = "深夜" if lang == "zh" else "深夜"
 
-                # 构造引导词 (不存数据库，仅用于诱导 AI)
+            # 情况1: 最后一条是用户消息（正常重新生成）
+            if last_msg_role == 'user':
                 if lang == "zh":
-                    fake_prompt = "(继续说)"
+                    system_hint = (
+                        f"（系统提示：现在是{period} {time_str}。）\n"
+                        f"（用户发来了一条消息。请你根据当前时间、之前的聊天内容，回复用户的消息。）\n"
+                        f"（要求：自然、简短，不要重复上一句话。）\n"
+                        f"（无特殊说明时用斜线表示换行和句号。）"
+                    )
                 else:
-                    fake_prompt = "(続き)"
+                    system_hint = (
+                        f"（システム通知：現在は{period} {time_str}です。）\n"
+                        f"（ユーザーからメッセージが来ました。時間帯と会話履歴を踏まえて回信してください。）\n"
+                        f"（要件：自然で簡潔に。直前の発言を繰り返さないこと。）\n"
+                        f"（特に指定がない場合、改行と句点はスラッシュで表します。）"
+                    )
+                messages.append({"role": "system", "content": system_hint})
+                print(f"--- [Regenerate] 最后一条是用户消息，添加普通系统提示 ---")
 
-                print(f"--- [Regenerate] 检测到连续对话，插入隐形引导: {fake_prompt} ---")
-                messages.append({"role": "user", "content": fake_prompt})
+            # 情况2: 最后一条是AI消息（连续回复，用主动消息风格触发）
+            elif last_msg_role == 'assistant' or last_msg_role == 'model':
+                if lang == "zh":
+                    trigger_msg = (
+                        f"（系统提示：现在是{period} {time_str}。）\n"
+                        f"（请你根据当前时间、之前的聊天内容，**主动**向用户发起一个新的话题。）\n"
+                        f"（要求：自然、简短，不要重复上一句话。）\n"
+                        f"（无特殊说明时用斜线表示换行和句号。）"
+                    )
+                else:
+                    trigger_msg = (
+                        f"（システム通知：現在は{period} {time_str}です。）\n"
+                        f"（現在の時間帯やこれまでの会話を踏まえて、**自発的に**新しい話題を振ってください。）\n"
+                        f"（要件：自然で簡潔に。直前の発言を繰り返さないこと。）\n"
+                        f"（特に指定がない場合、改行と句点はスラッシュで表します。）"
+                    )
+                print(f"--- [Regenerate] 检测到连续对话，插入主动消息触发提示 ---")
+                messages.append({"role": "user", "content": trigger_msg})
         # ===========================================================
 
         # 7. 调用 AI
@@ -3656,6 +3840,8 @@ def group_chat(group_id):
     data = request.json
     user_msg = data.get("message", "").strip()
     if not user_msg: return jsonify({"error": "empty"}), 400
+    # 获取 user_id 用于后续 relay
+    user_id = get_current_user_id()
 
     # --- 群聊前自动同步：总结群内各角色单聊 + 本群群聊短期记忆 ---
     memory_sync_warning = None
@@ -3872,7 +4058,7 @@ def group_chat(group_id):
 
         try:
             if route == "relay":
-                reply_text = call_openrouter(messages, char_id=speaker_id, model_name=current_model)
+                reply_text = call_openrouter(messages, char_id=speaker_id, model_name=current_model, user_id=user_id)
             else:
                 reply_text = call_gemini(messages, char_id=speaker_id, model_name=current_model)
 
@@ -4086,21 +4272,65 @@ def edit_group_message(group_id, msg_id):
 # --- 【新增】API 设置接口（多用户：每人一份 api_settings.json） ---
 API_CONFIG_FILE = os.path.join(BASE_DIR, "configs", "api_settings.json")  # 仅用于未登录或早期兼容
 
+def _ensure_selected_models_in_options(config: dict, default_config: dict = None) -> dict:
+    """
+    保证 routes[*].models 中已配置的模型一定出现在 model_options[*] 里，
+    避免前端下拉框找不到已保存值后回退到其他模型。
+    """
+    if not isinstance(config, dict):
+        return config
+
+    routes = config.get("routes") or {}
+    if not isinstance(routes, dict):
+        routes = {}
+        config["routes"] = routes
+
+    model_options = config.get("model_options")
+    if not isinstance(model_options, dict):
+        model_options = {}
+        config["model_options"] = model_options
+
+    default_options = (default_config or {}).get("model_options", {}) if isinstance(default_config, dict) else {}
+    model_keys = ("chat", "moments", "gen_persona", "summary", "vision", "translation")
+
+    for route_key, route_data in routes.items():
+        existing = model_options.get(route_key)
+        if isinstance(existing, list):
+            options = existing
+        else:
+            options = list(default_options.get(route_key, []))
+            model_options[route_key] = options
+
+        models = (route_data or {}).get("models", {}) if isinstance(route_data, dict) else {}
+        if not isinstance(models, dict):
+            continue
+
+        for mk in model_keys:
+            mv = models.get(mk)
+            if not isinstance(mv, str):
+                continue
+            mv = mv.strip()
+            if mv and mv not in options:
+                options.append(mv)
+
+    return config
+
 @app.route("/api/system_config", methods=["GET", "POST"])
 def handle_system_config():
     # 在 handle_system_config 函数里
 
     # 初始化默认配置 (增加了 model_options 字段)
     default_config = {
-        "active_route": "gemini",
+        "active_route": "relay",
         "routes": {
             "gemini": {
                 "name": "线路一：Gemini 直连",
-                "models": {"chat": "gemini-2.5-pro", "moments": "gemini-2.5-pro", "gen_persona": "gemini-3-pro-preview", "summary": "gemini-2.5-pro", "vision": "gemini-2.5-pro", "translation": "gemini-1.5-flash-8b"}
+                "models": {"chat": "gemini-2.5-pro", "moments": "gemini-2.5-pro", "gen_persona": "gemini-3.1-pro-preview", "summary": "gemini-2.5-flash", "vision": "gemini-2.5-pro", "translation": "gemini-2.5-flash-lite"}
             },
             "relay": {
                 "name": "线路二：国内中转",
-                "models": {"chat": "gpt-3.5-turbo", "moments": "gpt-3.5-turbo", "gen_persona": "gpt-3.5-turbo", "summary": "gpt-3.5-turbo", "vision": "gpt-4o", "translation": "gpt-3.5-turbo-0125"}
+                "relay_provider": "new",
+                "models": {"chat": "gemini-2.5-flash", "moments": "gemini-2.5-flash", "gen_persona": "gemini-3.1-pro", "summary": "gemini-2.0-flash", "vision": "gpt-4o", "translation": "gpt-4o-mini"}
             }
         },
         # 【新增】可用的模型列表 (把以前前端写死的搬到这里)
@@ -4110,15 +4340,18 @@ def handle_system_config():
                 'gemini-3-flash-preview',
                 'gemini-2.5-pro',
                 'gemini-2.5-flash-lite',
-                'gemini-1.5-flash',
+                'gemini-2.5-flash',
+                'gemini-3.1-pro-preview',
                 'gemini-1.5-flash-8b'
             ],
             'relay': [
-                'gpt-3.5-turbo',
-                'deepseek-ai/DeepSeek-R1',
+                'gemini-3.1-pro',
+                'gemini-2.5-pro',
+                'gemini-2.5-flash',
+                'gpt-4o',
                 'gpt-3.5-turbo-0125',
-                'deepseek-ai/DeepSeek-V3',
-                'gpt-4o'
+                'gemini-2.0-flash',
+                'gpt-4o-mini'
             ]
         }
     }
@@ -4139,30 +4372,41 @@ def handle_system_config():
         try:
             with open(cfg_file, "r", encoding="utf-8") as f:
                 config = json.load(f)
-            # 兼容旧配置：若某线路未配置新功能（moments、vision、translation），则补齐默认值
+            # 兼容旧配置补齐默认值
             for route_key, route_data in config.get("routes", {}).items():
                 models = route_data.get("models", {})
+                
+                # 动态获取当前线路的基础 chat 模型，如果是缺失则默认为相应线路的兜底
+                base_chat = models.get("chat", "gemini-2.5-pro" if route_key == "gemini" else "gpt-3.5-turbo")
+                
                 if "moments" not in models:
-                    models["moments"] = models.get("chat", "gemini-2.5-pro")
+                    models["moments"] = base_chat
                 if "vision" not in models:
                     models["vision"] = "gemini-2.5-pro" if route_key == "gemini" else "gpt-4o"
                 if "translation" not in models:
                     models["translation"] = "gemini-1.5-flash-8b" if route_key == "gemini" else "gpt-3.5-turbo-0125"
                 if "summary" not in models:
-                    models["summary"] = models.get("chat", "gemini-2.5-pro")
+                    models["summary"] = base_chat
                 if "gen_persona" not in models:
-                    models["gen_persona"] = models.get("chat", "gemini-3-pro-preview")
+                    models["gen_persona"] = "gemini-3-pro-preview" if route_key == "gemini" else "gpt-3.5-turbo"
+                
+                if route_key == "relay" and "relay_provider" not in route_data:
+                    route_data["relay_provider"] = "new" # relay 线路缺失 provider 时默认用新中转商
             
-            # 合并 default_config 中新增的 model_options
             if "model_options" not in config:
                 config["model_options"] = default_config["model_options"]
+            # 如果之前保存的数据里 active_route 不存在，也要退回 relay
+            if "active_route" not in config:
+                config["active_route"] = "relay"
 
+            config = _ensure_selected_models_in_options(config, default_config)
             return jsonify(config)
         except:
             return jsonify(default_config)
 
     if request.method == "POST":
-        new_config = request.json
+        new_config = request.json or {}
+        new_config = _ensure_selected_models_in_options(new_config, default_config)
         cfg_file = user_api_cfg_file if user_api_cfg_file else API_CONFIG_FILE
         try:
             with open(cfg_file, "w", encoding="utf-8") as f:
@@ -4175,7 +4419,36 @@ def handle_system_config():
 
 # ---------------------- OpenRouter / Compatible API ----------------------
 
-def call_openrouter(messages, char_id="unknown", model_name="google/gemini-2.5-pro"):
+def get_relay_provider(user_id=None):
+    """
+    获取当前 relay 线路配置的中转商提供商。
+    返回值：'new' (新的中转商) 或 'old' (旧的中转商)
+    如果配置中未找到，默认返回 'old'
+    
+    参数：
+    - user_id: 可选，用于后台任务直接指定用户，避免 ContextVar 在多线程中无效的问题
+    """
+    if user_id is None:
+        user_id = get_current_user_id()
+    
+    if user_id:
+        user_cfg_dir = os.path.join(USERS_ROOT, str(user_id), "configs")
+        api_cfg_file = os.path.join(user_cfg_dir, "api_settings.json")
+    else:
+        api_cfg_file = API_CONFIG_FILE
+
+    if not os.path.exists(api_cfg_file):
+        return "old"  # 默认使用旧的中转商
+
+    try:
+        with open(api_cfg_file, "r", encoding="utf-8") as f:
+            config = json.load(f)
+        relay_config = config.get("routes", {}).get("relay", {})
+        return relay_config.get("relay_provider", "old")
+    except:
+        return "old"  # 读取失败时默认使用旧的中转商
+
+def call_openrouter(messages, char_id="unknown", model_name="gpt-3.5-turbo", user_id=None):
     import requests
 
     # 强制不走系统代理
@@ -4184,9 +4457,18 @@ def call_openrouter(messages, char_id="unknown", model_name="google/gemini-2.5-p
     # 【新增】打印日志
     log_full_prompt(f"OpenRouter ({model_name})", messages)
 
-    # 构造请求地址，我们现在用的是 .env 里配置的新地址
-    # 它会自动拼接成 "https://vg.v1api.cc/v1/chat/completions"
-    url = f"{OPENROUTER_BASE_URL}/chat/completions"
+    # 【新增】根据配置选择中转商（新 / 旧）
+    relay_provider = get_relay_provider(user_id)
+    if relay_provider == "old":
+        # 旧的中转商：使用 .env 中配置的旧地址
+        base_url = OPENROUTER_BASE_URL_OLD
+        print(f"--- [Debug] Using OLD relay provider: {base_url}")
+    else:
+        # 新的中转商：使用 .env 配置的新地址
+        base_url = OPENROUTER_BASE_URL
+        print(f"--- [Debug] Using NEW relay provider: {base_url}")
+
+    url = f"{base_url}/chat/completions"
 
     headers = {
         "Authorization": f"Bearer {get_effective_openrouter_key()}",  # 优先使用用户配置的 Key
@@ -4212,7 +4494,15 @@ def call_openrouter(messages, char_id="unknown", model_name="google/gemini-2.5-p
         if r.status_code != 200:
             return f"[ERROR] API call failed with status {r.status_code}: {r.text}"
 
-        result = r.json()
+            # 上面已经 return，不会执行到这里，只是为了结构清晰
+        try:
+            result = r.json()
+        except Exception as parse_err:
+            # 新的中转服务商如果返回的是 HTML/纯文本，这里会解析失败
+            print(f"[ERROR] Failed to parse JSON response: {parse_err}")
+            print("Raw response text (first 2000 chars):")
+            print(r.text[:2000])
+            return f"[ERROR] API 返回的数据不是 JSON：{parse_err}"
 
         # --- 【新增】Token 计费记录 (DeepSeek/OpenAI 格式) ---
         if 'usage' in result:
@@ -4231,14 +4521,21 @@ def call_openrouter(messages, char_id="unknown", model_name="google/gemini-2.5-p
             print(result) # 打印出来看看是为什么
             return "[API无回复] 可能是内容被过滤或服务繁忙。"
 
-        # 一切正常，提取内容
-        content = result["choices"][0]["message"]["content"]
+        # 一切正常，提取内容（使用安全的字典访问）
+        try:
+            content = result["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as e:
+            print(f"⚠️ [Parse Error] 无法从响应中提取 message content: {e}")
+            print(f"响应结构: {result}")
+            return f"[ERROR] 无法解析 API 响应: {e}"
 
         # 记录日志
         log_full_prompt(f"OpenRouter ({model_name})", messages, response_text=content)
 
         return content
     except Exception as e:
+        import traceback
+        print(f"[ERROR] API 调用异常: {e}\n{traceback.format_exc()}")
         return f"[ERROR] API request failed: {e}"
 
 # ---------------------- Gemini ----------------------
@@ -4313,13 +4610,18 @@ def call_gemini(messages, char_id="unknown", model_name="gemini-2.5-pro"):
 
         candidate = result['candidates'][0]
 
-        # 尝试获取文本
+        # 尝试获取文本（使用安全的字典访问）
         text = ""
-        if 'content' in candidate and 'parts' in candidate['content']:
-            text = candidate['content']['parts'][0]['text']
-        else:
-            finish_reason = candidate.get('finishReason', 'UNKNOWN')
-            text = f"[未生成文本] 原因: {finish_reason}"
+        try:
+            if 'content' in candidate and 'parts' in candidate['content']:
+                text = candidate['content']['parts'][0]['text']
+            else:
+                finish_reason = candidate.get('finishReason', 'UNKNOWN')
+                text = f"[未生成文本] 原因: {finish_reason}"
+        except (KeyError, IndexError, TypeError) as e:
+            print(f"⚠️ [Gemini Parse Error] 无法从候选中提取文本: {e}")
+            print(f"候选结构: {candidate}")
+            return f"[Gemini Error] 无法解析响应: {e}"
 
         # --- 【修改】调用日志时，把 token_usage 传进去 ---
         log_full_prompt(f"Gemini Interaction ({model_name})", messages, response_text=text, usage=token_usage)
@@ -4328,16 +4630,19 @@ def call_gemini(messages, char_id="unknown", model_name="gemini-2.5-pro"):
 
     except Exception as e:
         log_full_prompt(f"Gemini ERROR ({model_name})", messages, response_text=str(e))
-        raise e
+        # 【修正】返回错误字符串而不是 raise，确保异常被 trigger_active_chat 捕获并正确处理
+        return f"[Gemini Error] {str(e)}"
 
-def get_model_config(task_type="chat"):
+def get_model_config(task_type="chat", user_id=None):
     """
     根据配置文件，获取当前应该用的 路由方式 和 模型名称
     task_type: 'chat' | 'moments' | 'gen_persona' | 'summary'
-    朋友圈(moments) 默认与 chat 使用相同线路与模型。
     """
+    # 如果没有显式传入 user_id，才退回使用上下文获取
+    if user_id is None:
+        user_id = get_current_user_id()
+
     # 多用户：优先读取 users/<user_id>/configs/api_settings.json
-    user_id = get_current_user_id()
     if user_id:
         user_cfg_dir = os.path.join(USERS_ROOT, str(user_id), "configs")
         api_cfg_file = os.path.join(user_cfg_dir, "api_settings.json")
@@ -4346,7 +4651,7 @@ def get_model_config(task_type="chat"):
 
     if not os.path.exists(api_cfg_file):
         # 默认兜底
-        return "gemini", "gemini-2.5-pro"
+        return "relay", "gpt-3.5-turbo"
 
     try:
         with open(api_cfg_file, "r", encoding="utf-8") as f:
@@ -4356,9 +4661,9 @@ def get_model_config(task_type="chat"):
         models = config.get("routes", {}).get(route, {}).get("models", {})
         # 朋友圈未配置时与 chat 相同
         if task_type == "moments" and "moments" not in models:
-            model_name = models.get("chat", "gemini-2.5-pro")
+            model_name = models.get("chat", "gpt-3.5-turbo")
         else:
-            model_name = models.get(task_type, "gemini-2.5-pro")
+            model_name = models.get(task_type, "gpt-3.5-turbo")
 
         return route, model_name
     except:
@@ -5709,14 +6014,33 @@ def upload_char_avatar(char_id):
             if not os.path.exists(char_dir):
                 os.makedirs(char_dir, exist_ok=True)
 
-            # 2. 统一重命名为 avatar.png (或者保留原扩展名)
-            ext = os.path.splitext(file.filename)[1]
-            if not ext: ext = ".png"
-            filename = f"avatar{ext}"
-            file_path = os.path.join(char_dir, filename)
+            # 删除旧的头像文件（所有格式）
+            for old_avatar in ("avatar.png", "avatar.jpg", "avatar.jpeg", "avatar.webp", "avatar.gif"):
+                old_path = os.path.join(char_dir, old_avatar)
+                if os.path.exists(old_path):
+                    try:
+                        os.remove(old_path)
+                    except Exception as e:
+                        print(f"[CharAvatar] 删除旧头像失败: {e}")
 
-            # 保存文件 (覆盖旧的)
-            file.save(file_path)
+            # 统一保存为 avatar.png
+            file_path = os.path.join(char_dir, "avatar.png")
+            
+            # 使用PIL打开图片，转换为PNG格式并保存
+            try:
+                img = Image.open(file.stream)
+                # 如果是RGBA模式（带透明度），保留透明度；否则转换为RGB
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    img_converted = img.convert('RGBA')
+                else:
+                    img_converted = img.convert('RGB')
+                # 保存为PNG
+                img_converted.save(file_path, 'PNG')
+            except Exception as e:
+                print(f"[CharAvatar] PIL转换失败，直接保存: {e}")
+                # 如果PIL转换失败，直接保存原始文件
+                file.seek(0)
+                file.save(file_path)
 
             # 3. 更新 characters.json 里的路径（per-user）
             cfg_file = _get_characters_config_file()
@@ -5726,7 +6050,7 @@ def upload_char_avatar(char_id):
             # 生成新的访问 URL
             # 加上时间戳 ?v=... 是为了强制浏览器刷新缓存，立刻看到新头像
             timestamp = int(time.time())
-            new_url = f"/char_assets/{char_id}/{filename}?v={timestamp}"
+            new_url = f"/char_assets/{char_id}/avatar.png?v={timestamp}"
 
             all_config[char_id]["avatar"] = new_url
 
@@ -5762,12 +6086,34 @@ def upload_group_avatar(group_id):
             if not os.path.exists(target_group_dir):
                 os.makedirs(target_group_dir)
 
-            # 2. 统一重命名为 avatar.png
+            # 删除旧的头像文件（所有格式）
+            for old_avatar in ("avatar.png", "avatar.jpg", "avatar.jpeg", "avatar.webp", "avatar.gif"):
+                old_path = os.path.join(target_group_dir, old_avatar)
+                if os.path.exists(old_path):
+                    try:
+                        os.remove(old_path)
+                    except Exception as e:
+                        print(f"[GroupAvatar] 删除旧头像失败: {e}")
+
+            # 2. 统一保存为 avatar.png
             filename = "avatar.png"
             file_path = os.path.join(target_group_dir, filename)
 
-            # 保存文件
-            file.save(file_path)
+            # 使用PIL打开图片，转换为PNG格式并保存
+            try:
+                img = Image.open(file.stream)
+                # 如果是RGBA模式（带透明度），保留透明度；否则转换为RGB
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    img_converted = img.convert('RGBA')
+                else:
+                    img_converted = img.convert('RGB')
+                # 保存为PNG
+                img_converted.save(file_path, 'PNG')
+            except Exception as e:
+                print(f"[GroupAvatar] PIL转换失败，直接保存: {e}")
+                # 如果PIL转换失败，直接保存原始文件
+                file.seek(0)
+                file.save(file_path)
 
             # 3. 更新 groups.json 配置
             if os.path.exists(GROUPS_CONFIG_FILE):
@@ -5811,10 +6157,34 @@ def upload_user_avatar():
             # 保存到当前用户目录：users/<user_id>/avatar.png
             user_dir = os.path.join(USERS_ROOT, str(user_id))
             os.makedirs(user_dir, exist_ok=True)
-            ext = os.path.splitext(file.filename)[1].lower() or ".png"
-            save_path = os.path.join(user_dir, f"avatar{ext}")
-
-            file.save(save_path)
+            
+            # 删除旧的头像文件（所有格式）
+            for old_avatar in ("avatar.png", "avatar.jpg", "avatar.jpeg", "avatar.webp", "avatar.gif"):
+                old_path = os.path.join(user_dir, old_avatar)
+                if os.path.exists(old_path):
+                    try:
+                        os.remove(old_path)
+                    except Exception as e:
+                        print(f"[UserAvatar] 删除旧头像失败: {e}")
+            
+            # 读取上传的图片，转换为PNG格式并保存
+            save_path = os.path.join(user_dir, "avatar.png")
+            
+            # 使用PIL打开图片，统一转换为PNG（确保格式一致）
+            try:
+                img = Image.open(file.stream)
+                # 如果是RGBA模式（带透明度），保留透明度；否则转换为RGB
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    img_converted = img.convert('RGBA')
+                else:
+                    img_converted = img.convert('RGB')
+                # 保存为PNG
+                img_converted.save(save_path, 'PNG')
+            except Exception as e:
+                print(f"[UserAvatar] PIL转换失败，直接保存: {e}")
+                # 如果PIL转换失败，直接保存原始文件
+                file.seek(0)
+                file.save(save_path)
 
             # 添加时间戳参数，防止浏览器缓存旧图片
             timestamp = int(time.time())
@@ -5838,19 +6208,18 @@ def upload_user_avatar():
 def user_avatar():
     """
     按当前登录用户返回头像图片：
-    - 优先读取 users/<user_id>/avatar.* 文件
-    - 如果不存在，则退回默认的 static/avatar_user.png
+    - 优先读取 users/<user_id>/avatar.png 文件（统一PNG格式）
+    - 如果不存在，则退回默认的 static/default_avatar.png
     """
     user_id = get_current_user_id()
     base_dir = os.path.dirname(os.path.abspath(__file__))
 
     if user_id:
         user_dir = os.path.join(USERS_ROOT, str(user_id))
-        # 支持常见扩展名
-        for name in ("avatar.png", "avatar.jpg", "avatar.jpeg", "avatar.webp"):
-            candidate = os.path.join(user_dir, name)
-            if os.path.exists(candidate):
-                return send_from_directory(user_dir, name)
+        # 直接查找avatar.png（统一格式）
+        candidate = os.path.join(user_dir, "avatar.png")
+        if os.path.exists(candidate):
+            return send_from_directory(user_dir, "avatar.png")
 
     # 未登录或用户没有自定义头像时，返回全局默认头像
     return send_from_directory(os.path.join(base_dir, "static"), "default_avatar.png")
@@ -6592,14 +6961,15 @@ def log_full_prompt(service_name, messages, response_text=None, usage=None):
     # 打印到黑框框
     print(final_log)
 
-    # 保存到文件（仅当已有 logs 目录时，不自动创建根目录 logs）
+    # 保存到文件（强制创建 logs 目录以便保存调试日志）
     try:
         log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
-        if os.path.exists(log_dir):
-            log_file = os.path.join(log_dir, "api.log")
-            with open(log_file, "a", encoding="utf-8") as f:
-                f.write(final_log)
-    except Exception:
+        os.makedirs(log_dir, exist_ok=True) # 【修正】强制创建 logs 目录，否则主动消息日志不保存
+        log_file = os.path.join(log_dir, "api.log")
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(final_log)
+    except Exception as e:
+        print(f"FAILED TO WRITE API LOG: {e}")
         pass
 
 def _get_usage_log_file() -> str:
@@ -6737,7 +7107,15 @@ def _weighted_sample_no_replacement(candidates, k):
 
 
 def _generate_moment_comment(commenter_id, post_author_id, post_content):
-    """让 commenter_id 角色对 post_content 生成一条简短评论。"""
+    """让 commenter_id 角色对 post_content 生成一条简短评论。
+    流程：总结短期记忆 -> 生成评论 -> 记录到短期记忆
+    """
+    # 生成前：同步该角色的短期记忆
+    try:
+        sync_memory_before_moments(commenter_id)
+    except Exception as e:
+        print(f"   ⚠️ [Moment Comment] 记忆同步失败 {commenter_id}: {e}，继续生成")
+    
     recent_messages = [post_content]
     sys_prompt = build_system_prompt(commenter_id, recent_messages=recent_messages)
 
@@ -6794,6 +7172,23 @@ def _generate_moment_comment(commenter_id, post_author_id, post_content):
             text = text.strip().strip('"\'')
             if len(text) > 100:
                 text = text[:100]
+            
+            # 生成后：将评论记录到短期记忆
+            author_remark = post_author_id
+            try:
+                cfg_file = _get_characters_config_file()
+                if os.path.exists(cfg_file):
+                    with open(cfg_file, "r", encoding="utf-8") as f:
+                        all_chars = json.load(f)
+                        if isinstance(all_chars, dict):
+                            a_info = all_chars.get(post_author_id, {})
+                            author_remark = (a_info.get("remark") or a_info.get("name") or post_author_id)
+            except Exception:
+                pass
+            
+            ctx = f"评论了{author_remark}的朋友圈：「{text}」。"
+            append_moment_event_to_short_memory(commenter_id, ctx)
+            
             return text
     except Exception as e:
         print(f"   [Moments] 评论生成失败 {commenter_id}: {e}")
@@ -6801,7 +7196,15 @@ def _generate_moment_comment(commenter_id, post_author_id, post_content):
 
 
 def _generate_moment_reply_to_user(author_char_id, post_content, user_comment):
-    """让朋友圈作者（角色）对用户的评论生成一条简短回复。"""
+    """让朋友圈作者（角色）对用户的评论生成一条简短回复。
+    流程：总结短期记忆 -> 生成回复 -> 记录到短期记忆
+    """
+    # 生成前：同步该角色的短期记忆
+    try:
+        sync_memory_before_moments(author_char_id)
+    except Exception as e:
+        print(f"   ⚠️ [Moment Reply] 记忆同步失败 {author_char_id}: {e}，继续生成")
+    
     recent_messages = [post_content, user_comment]
     sys_prompt = build_system_prompt(author_char_id, include_global_format=False, recent_messages=recent_messages)
     lang = get_ai_language()
@@ -6831,6 +7234,11 @@ def _generate_moment_reply_to_user(author_char_id, post_content, user_comment):
             text = text.strip().strip('"\'')
             if len(text) > 100:
                 text = text[:100]
+            
+            # 生成后：将回复记录到短期记忆
+            ctx = f"用户评论了你的朋友圈：「{user_comment}」。你的回复：「{text}」。"
+            append_moment_event_to_short_memory(author_char_id, ctx)
+            
             return text
     except Exception as e:
         print(f"   [Moments] 角色回复评论失败 {author_char_id}: {e}")
@@ -6897,9 +7305,14 @@ def trigger_active_moments(char_id):
     end_dt = post_dt + timedelta(hours=24)
 
     def random_ts_in_24h():
-        delta_sec = random.randint(0, 24 * 3600)
-        t = post_dt + timedelta(seconds=delta_sec)
-        return t.strftime("%Y-%m-%d %H:%M:%S")
+        """生成24小时内的随机时间戳，避免在23:00~7:00之间（深睡眠时间）"""
+        while True:
+            delta_sec = random.randint(0, 24 * 3600)
+            t = post_dt + timedelta(seconds=delta_sec)
+            hour = t.hour
+            # 避开23:00~7:00的时间段
+            if not (hour >= 23 or hour < 7):
+                return t.strftime("%Y-%m-%d %H:%M:%S")
 
     likers_data = []
     if candidates:
@@ -6959,8 +7372,9 @@ def trigger_active_moments(char_id):
 
 
 # --- 【修正版】单人主动消息 (伪装成 User 消息触发) ---
-def trigger_active_chat(char_id):
+def trigger_active_chat(char_id, user_id=None):
     print(f"💓 [Active] 尝试触发 {char_id} 的主动消息...")
+    print(f"   后台用户ID: {user_id}, 当前用户ID: {get_current_user_id()}")
 
     db_path, _ = get_paths(char_id)
     if not os.path.exists(db_path): return False
@@ -6982,7 +7396,9 @@ def trigger_active_chat(char_id):
     conn.close()
 
     recent_texts = [r["content"] for r in history_rows] if history_rows else []
-    base_system_prompt = build_system_prompt(char_id, recent_messages=recent_texts)
+    # 【修正】提取用户最后一条消息，用于精准筛选长期记忆
+    user_last = history_rows[-1]["content"] if history_rows and history_rows[-1]["role"] == "user" else None
+    base_system_prompt = build_system_prompt(char_id, recent_messages=recent_texts, user_latest_input=user_last)
     messages = [{"role": "system", "content": base_system_prompt}]
 
     # 2. 填充历史 (带智能时间戳)
@@ -7021,13 +7437,15 @@ def trigger_active_chat(char_id):
         trigger_msg = (
             f"（系统提示：现在是{period} {time_str}。）\n"
             f"（用户已经很久没说话了。请你根据当前时间、之前的聊天内容，**主动**向用户发起一个新的话题。）\n"
-            f"（要求：自然、简短，不要重复上一句话。）"
+            f"（要求：自然、简短，不要重复上一句话。）\n"
+            f"（无特殊说明时用斜线表示换行和句号。）"
         )
     else:
         trigger_msg = (
             f"（システム通知：現在は{period} {time_str}です。）\n"
             f"（ユーザーからの返信が途絶えています。現在の時間帯やこれまでの会話を踏まえて、**自発的に**新しい話題を振ってください。）\n"
-            f"（要件：自然で簡潔に。直前の発言を繰り返さないこと。）"
+            f"（要件：自然で簡潔に。直前の発言を繰り返さないこと。）\n"
+            f"（特に指定がない場合、改行と句点はスラッシュで表します。）"
         )
 
     # 把它伪装成 User 发的消息
@@ -7039,9 +7457,14 @@ def trigger_active_chat(char_id):
         print(f"   -> [Active] Calling AI ({route}/{current_model})...")
 
         if route == "relay":
-            reply_text = call_openrouter(messages, char_id=char_id, model_name=current_model)
+            reply_text = call_openrouter(messages, char_id=char_id, model_name=current_model, user_id=user_id)
         else:
             reply_text = call_gemini(messages, char_id=char_id, model_name=current_model)
+
+        # 【修正】检查 API 是否返回错误
+        if isinstance(reply_text, str) and (reply_text.startswith("[ERROR]") or reply_text.startswith("[Gemini Error")):
+            print(f"💓 [Active] API 调用失败: {reply_text}")
+            return False
 
         # 清理
         timestamp_pattern = r'\[(?:(?:\d{2}-\d{2}\s+)?\d{1,2}:\d{2})\]\s*'
@@ -7087,12 +7510,18 @@ def trigger_active_chat(char_id):
         return True
 
     except Exception as e:
-        print(f"💓 [Active] 发送失败: {e}")
+        import traceback
+        error_msg = f"💓 [Active] 发送失败: {e}\n{traceback.format_exc()}"
+        print(error_msg)
         return False
 
 # --- 【修正版】群聊主动消息 (伪装成 User 指令) ---
-def trigger_group_active_chat(group_id):
+def trigger_group_active_chat(group_id, user_id=None):
     print(f"💓 [GroupActive] 尝试触发群 {group_id} 的主动消息...")
+
+    # 【强制保护】
+    if user_id is not None:
+        set_background_user(user_id)
 
     # 0. 群聊前同步各成员单聊 + 本群群聊记忆
     try:
@@ -7233,10 +7662,13 @@ def trigger_group_active_chat(group_id):
 
         # --- D. 调用 AI ---
         try:
-            route, current_model = get_model_config("chat")
+            # 【关键修复】将 user_id 显式传给配置获取函数
+            route, current_model = get_model_config("chat", user_id=user_id)
+            print(f"   -> [Active] Calling AI ({route}/{current_model})...")
 
             if route == "relay":
-                reply_text = call_openrouter(messages, char_id=speaker_id, model_name=current_model)
+                # 【关键修复】将 user_id 显式传给 call_openrouter 以便其判断中转商线路
+                reply_text = call_openrouter(messages, char_id=speaker_id, model_name=current_model, user_id=user_id)
             else:
                 reply_text = call_gemini(messages, char_id=speaker_id, model_name=current_model)
 
@@ -7279,7 +7711,7 @@ def trigger_group_active_chat(group_id):
                 # ✅ 邮件通知：传入 user_id 以读取对应用户的邮箱
                 email_title = f"【群聊】{group_name} 有新动态"
                 email_body = f"请前去查收"
-                send_email_notification(email_title, email_body, user_id=get_current_user_id())
+                send_email_notification(email_title, email_body, user_id=user_id)
 
                 notification_sent = True
 
@@ -7296,6 +7728,53 @@ def trigger_group_active_chat(group_id):
 # ========================================================
 # 识图与上传接口 (Vision & Upload)
 # ========================================================
+def _compress_chat_image_to_jpg(src_path: str, dst_path: str, max_edge: int = 1024, max_bytes: int = 500 * 1024):
+    """
+    压缩聊天图片：
+    1) 长边 <= max_edge
+    2) 文件体积 <= max_bytes（优先调 JPEG 质量，不够再继续降分辨率）
+    """
+    with Image.open(src_path) as img:
+        img = ImageOps.exif_transpose(img)
+        if img.mode not in ("RGB", "L"):
+            # 含透明通道时，先铺白底再转 RGB
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            if "A" in img.getbands():
+                bg.paste(img, mask=img.split()[-1])
+            else:
+                bg.paste(img)
+            img = bg
+        elif img.mode == "L":
+            img = img.convert("RGB")
+
+        # 首先限制长边
+        img.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+
+        work_img = img
+        # 最多缩放 8 轮，避免极端死循环
+        for _ in range(8):
+            for q in (88, 82, 76, 70, 64, 58, 52, 46, 40):
+                buf = io.BytesIO()
+                work_img.save(buf, format="JPEG", quality=q, optimize=True, progressive=True)
+                size = buf.tell()
+                if size <= max_bytes:
+                    with open(dst_path, "wb") as f:
+                        f.write(buf.getvalue())
+                    return
+            # 质量已经很低仍超限，进一步缩小分辨率再试
+            w, h = work_img.size
+            if max(w, h) <= 480:
+                # 已经很小了，直接落盘最低质量版本
+                with open(dst_path, "wb") as f:
+                    f.write(buf.getvalue())
+                return
+            work_img = work_img.resize((int(w * 0.85), int(h * 0.85)), Image.Resampling.LANCZOS)
+
+        # 理论兜底
+        with open(dst_path, "wb") as f:
+            f.write(buf.getvalue())
+
+
 @app.route("/api/vision/upload", methods=["POST"])
 def vision_upload():
     """接收用户发送的图片，保存并调用配置的识图模型获取描述，返回给前端"""
@@ -7314,9 +7793,7 @@ def vision_upload():
     img_dir = os.path.join(USERS_ROOT, str(user_id), "chat_images")
     os.makedirs(img_dir, exist_ok=True)
 
-    ext = (os.path.splitext(file.filename)[1] or "").lower()
-    if ext not in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
-        ext = ".jpg"
+    ext = ".jpg"
     base_name = uuid.uuid4().hex
     filename = base_name + ext
     filepath = os.path.join(img_dir, filename)
@@ -7326,7 +7803,47 @@ def vision_upload():
         n += 1
         filename = f"{base_name}_{n}{ext}"
         filepath = os.path.join(img_dir, filename)
-    file.save(filepath)
+    # 先保存原图临时文件，再压缩为 jpg
+    tmp_raw_path = os.path.join(img_dir, f"{base_name}_raw_upload")
+    file.save(tmp_raw_path)
+    try:
+        _compress_chat_image_to_jpg(tmp_raw_path, filepath, max_edge=1024, max_bytes=500 * 1024)
+    finally:
+        try:
+            if os.path.exists(tmp_raw_path):
+                os.remove(tmp_raw_path)
+        except Exception:
+            pass
+
+    # 同步保存一份到 static/uploads，供模型通过公网 URL 拉取（不再传 base64）
+    static_upload_dir = os.path.join(BASE_DIR, "static", "uploads")
+    os.makedirs(static_upload_dir, exist_ok=True)
+    public_filename = filename
+    public_file_path = os.path.join(static_upload_dir, public_filename)
+    m = 0
+    while os.path.exists(public_file_path):
+        m += 1
+        public_filename = f"{base_name}_{m}.jpg"
+        public_file_path = os.path.join(static_upload_dir, public_filename)
+    shutil.copy2(filepath, public_file_path)
+
+    def _public_base_url() -> str:
+        # 可通过环境变量显式指定公网域名（允许填完整页面 URL，如 https://xxx/profile）
+        configured = (os.getenv("PUBLIC_BASE_URL", "") or os.getenv("SITE_URL", "")).strip()
+        if configured:
+            parsed = urlparse(configured)
+            if parsed.scheme and parsed.netloc:
+                return f"{parsed.scheme}://{parsed.netloc}"
+            return configured.rstrip("/")
+
+        # 反向代理场景优先使用转发头
+        forwarded_proto = (request.headers.get("X-Forwarded-Proto") or request.scheme or "https").split(",")[0].strip()
+        forwarded_host = (request.headers.get("X-Forwarded-Host") or request.headers.get("Host") or "").split(",")[0].strip()
+        if forwarded_host:
+            return f"{forwarded_proto}://{forwarded_host}"
+        return request.host_url.rstrip("/")
+
+    public_image_url = f"{_public_base_url()}/static/uploads/{public_filename}"
 
     # 调用识图模型
     route, current_model = get_model_config("vision")
@@ -7336,32 +7853,47 @@ def vision_upload():
     description = ""
     try:
         if route == "relay":
-            # OpenRouter 格式 (OpenAI compatible vision)
-            import base64
-            with open(filepath, "rb") as f:
-                b64_data = base64.b64encode(f.read()).decode('utf-8')
-                
-            mime_type = "image/jpeg"
-            if ext.lower() == ".png": mime_type = "image/png"
-            elif ext.lower() == ".webp": mime_type = "image/webp"
-
+            # OpenRouter 格式 (OpenAI compatible vision)：直接传公网 URL
             messages = [{
                 "role": "user",
                 "content": [
                     {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64_data}"}}
+                    {"type": "image_url", "image_url": {"url": public_image_url}}
                 ]
             }]
             description = call_openrouter(messages, char_id=None, model_name=current_model)
         else:
-            # Gemini 原生 SDK 识图
-            import google.generativeai as genai
-            import PIL.Image
-            genai.configure(api_key=GEMINI_KEY)
-            model = genai.GenerativeModel(current_model)
-            img = PIL.Image.open(filepath)
-            response = model.generate_content([prompt, img])
-            description = response.text
+            # Gemini：通过 generateContent 传 file_data.file_uri（公网 URL），不传 base64
+            import requests
+            base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
+            url = f"{base_url}/v1beta/models/{current_model}:generateContent?key={get_effective_gemini_key()}"
+            payload = {
+                "contents": [{
+                    "role": "user",
+                    "parts": [
+                        {"text": prompt},
+                        {"file_data": {"mime_type": "image/jpeg", "file_uri": public_image_url}}
+                    ]
+                }],
+                "generationConfig": {"temperature": 0.4, "maxOutputTokens": 1024},
+                "safetySettings": [
+                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+                ]
+            }
+            r = requests.post(url, json=payload, timeout=100)
+            if r.status_code != 200:
+                raise RuntimeError(f"[Gemini Vision Error {r.status_code}] {r.text}")
+            result = r.json()
+            parts = (((result.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+            description = ""
+            for p in parts:
+                t = p.get("text")
+                if t:
+                    description += t
+            description = description.strip()
 
     except Exception as e:
         print(f"   [Vision] Error: {e}")
@@ -7389,18 +7921,150 @@ def get_user_chat_image(filename):
 
 @app.route("/api/translate", methods=["POST"])
 def translate_text():
-    data = request.json
+    data = request.json or {}
     text = data.get("text", "")
     context = data.get("context", "")
     direction = data.get("direction", "ja_to_zh")
+    message_id = data.get("message_id")
+    if message_id is not None:
+        try:
+            message_id = int(message_id)
+        except (TypeError, ValueError):
+            message_id = None
+    char_id = data.get("char_id")
+    group_id = data.get("group_id")
+    scene_hint = ""
+    user_name = _load_user_settings().get("current_user_name", "用户")
+
+    def _load_chars_cfg_local() -> dict:
+        cfg = _get_characters_config_file()
+        if not os.path.exists(cfg):
+            return {}
+        try:
+            with open(cfg, "r", encoding="utf-8") as f:
+                d = json.load(f)
+                return d if isinstance(d, dict) else {}
+        except Exception:
+            return {}
+
+    chars_cfg_local = _load_chars_cfg_local()
+
+    def _char_name_only(cid: str) -> str:
+        if not cid:
+            return "对方"
+        info = chars_cfg_local.get(cid, {}) if isinstance(chars_cfg_local, dict) else {}
+        # 按用户要求：使用姓名（name），不使用 remark
+        return info.get("name") or cid
+
+    def _relation_with_user_from_graph(cid: str, uname: str) -> str:
+        if not cid:
+            return ""
+        try:
+            _, prompts_dir = get_paths(cid)
+            rel_file = os.path.join(prompts_dir, "2_relationship.json")
+            if not os.path.exists(rel_file):
+                return ""
+            with open(rel_file, "r", encoding="utf-8-sig") as f:
+                rel_data = json.load(f)
+            if not isinstance(rel_data, dict):
+                return ""
+            user_rel = rel_data.get(uname, {})
+            if isinstance(user_rel, dict):
+                return str(user_rel.get("role", "") or "").strip()
+            return ""
+        except Exception:
+            return ""
+
+    # 若提供 message_id + char_id 或 group_id，则从数据库读取当前条与上文 20 条作为上下文
+    if message_id is not None and (char_id or group_id):
+        try:
+            if group_id:
+                group_dir = get_group_dir(group_id)
+                db_path = os.path.join(group_dir, "chat.db")
+            else:
+                db_path, _ = get_paths(char_id)
+            if not os.path.exists(db_path):
+                return jsonify({"error": "数据库不存在"}), 400
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, role, content FROM messages WHERE id = ?", (message_id,))
+            row = cursor.fetchone()
+            if not row:
+                conn.close()
+                return jsonify({"error": "消息不存在"}), 404
+            text = (row["content"] or "").strip()
+            # 上文 5 条（不包含当前条）：按 id 升序
+            cursor.execute(
+                "SELECT id, role, content FROM messages WHERE id < ? ORDER BY id DESC LIMIT 5",
+                (message_id,),
+            )
+            prev_rows = cursor.fetchall()
+            conn.close()
+            prev_rows = list(reversed(prev_rows))
+            context_parts = []
+            for r in prev_rows:
+                if r["role"] == "user":
+                    role_label = f"用户:{user_name}"
+                else:
+                    assistant_name = _char_name_only(r["role"])
+                    role_label = f"助手:{assistant_name}"
+                context_parts.append(f"[{role_label}] {r['content']}")
+            context = "\n".join(context_parts)
+
+            # 组装简单背景：双方名字 + 关系
+            counterpart_name = "对方"
+            relationship = "聊天对象"
+            try:
+                if group_id:
+                    speaker_role = row["role"]
+                    if speaker_role != "user":
+                        counterpart_name = _char_name_only(speaker_role)
+                        relationship = _relation_with_user_from_graph(speaker_role, user_name) or "未知"
+                    else:
+                        counterpart_name = user_name
+                        relationship = "用户本人"
+                else:
+                    counterpart_name = _char_name_only(char_id)
+                    relationship = _relation_with_user_from_graph(char_id, user_name) or "未知"
+            except Exception:
+                pass
+
+            scene_hint = f"【背景】双方姓名：{user_name} 与 {counterpart_name}。双方关系：{relationship}。"
+        except Exception as e:
+            print(f"Translation DB read Error: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    # 无 message_id 场景也补充简单背景（例如输入框中译日）
+    if not scene_hint and (char_id or group_id):
+        try:
+            counterpart_name = "对方"
+            relationship = "聊天对象"
+            if group_id:
+                groups_cfg = {}
+                groups_cfg_file = _get_groups_config_file()
+                if os.path.exists(groups_cfg_file):
+                    with open(groups_cfg_file, "r", encoding="utf-8") as f:
+                        groups_cfg = json.load(f)
+                g_info = groups_cfg.get(group_id, {}) if isinstance(groups_cfg, dict) else {}
+                group_name = g_info.get("name", group_id)
+                counterpart_name = group_name
+                relationship = "群聊场景"
+            else:
+                counterpart_name = _char_name_only(char_id)
+                relationship = _relation_with_user_from_graph(char_id, user_name) or "未知"
+            scene_hint = f"【背景】双方姓名：{user_name} 与 {counterpart_name}。双方关系：{relationship}。"
+        except Exception:
+            pass
 
     if not text:
         return jsonify({"error": "No text provided"}), 400
 
+    bg_prefix = (scene_hint + "\n") if scene_hint else ""
     if direction == "zh_to_ja":
-        prompt = f"请将以下中文翻译成日语。仅输出翻译后的日语，不要带有任何解释或多余符号。\n\n[上下文参考]\n{context}\n\n[需要翻译的原句]\n{text}"
+        prompt = f"{bg_prefix}请将以下中文翻译成日语。仅输出翻译后的日语，不要带有任何解释或多余符号。\n\n[上下文参考]\n{context}\n\n[需要翻译的原句]\n{text}"
     else:
-        prompt = f"请将以下日语翻译成中文。仅输出翻译后的中文，不要带有任何解释或多余符号。\n\n[上下文参考]\n{context}\n\n[需要翻译的原句]\n{text}"
+        prompt = f"{bg_prefix}请将以下日语翻译成中文。仅输出翻译后的中文，不要带有任何解释或多余符号。\n\n[上下文参考]\n{context}\n\n[需要翻译的原句]\n{text}"
 
     messages = [{"role": "user", "content": prompt}]
 
@@ -7415,6 +8079,19 @@ def translate_text():
     except Exception as e:
         print(f"Translation Error: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/furigana", methods=["POST"])
+def furigana_text():
+    data = request.json or {}
+    text = str(data.get("text", "") or "")
+    if not text:
+        return jsonify({"result": ""})
+    try:
+        return jsonify({"result": _add_furigana_to_japanese(text)})
+    except Exception as e:
+        print(f"Furigana Error: {e}")
+        return jsonify({"result": text})
 
 # ---------------------- 启动 ----------------------
 

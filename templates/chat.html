@@ -805,7 +805,7 @@
 
 <!-- 【新增】翻译输入框 (仅在日语模式下显示) -->
 <div id="translation-input-container" style="display: none; padding: 6px 15px; background: #fff8e1; border-top: 1px solid #ffe082; align-items: center; gap: 8px;">
-  <textarea id="transInput" placeholder="输入中文，翻译为日语..." rows="1" style="flex: 1; border: 1px solid #ffd54f; border-radius: 18px; padding: 6px 12px; font-size: 13px; outline: none; resize: none; background: #fff;"></textarea>
+  <textarea id="transInput" placeholder="输入中文，翻译为日语..." rows="1" style="flex: 1; border: 1px solid #ffd54f; border-radius: 18px; box-sizing: border-box; padding: 5px 12px; font-size: 13px; line-height: 18px; height: 30px; min-height: 30px; outline: none; resize: none; background: #fff;"></textarea>
   <button id="transBtn" style="background: #ffca28; color: #fff; border: none; border-radius: 16px; padding: 6px 12px; font-size: 13px; font-weight: bold; cursor: pointer; flex-shrink: 0;">翻译</button>
 </div>
 
@@ -1053,6 +1053,44 @@
     return out;
   }
 
+  async function getFuriganaDisplay(text) {
+    if (!text || aiLanguage !== 'ja') return text;
+    
+    // 【新增】提取 emoji，先注音再加回
+    // JavaScript emoji 正则：支持常见 emoji 范围
+    const emojiRegex = /[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\uFE0F]/gu;
+    const emojiMap = new Map();
+    let textWithoutEmoji = text;
+    let emojiCount = 0;
+    
+    // 用占位符替换 emoji
+    textWithoutEmoji = textWithoutEmoji.replace(emojiRegex, (match) => {
+      const placeholder = `__EMOJI_${emojiCount}__`;
+      emojiMap.set(placeholder, match);
+      emojiCount++;
+      return placeholder;
+    });
+    
+    try {
+      const r = await fetch('/api/furigana', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ text: textWithoutEmoji })
+      });
+      const data = await r.json();
+      let result = data && data.result ? data.result : textWithoutEmoji;
+      
+      // 【新增】把 emoji 加回来
+      for (const [placeholder, emoji] of emojiMap) {
+        result = result.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), emoji);
+      }
+      
+      return result;
+    } catch (e) {
+      return text;
+    }
+  }
+
   async function initUI() {
     try {
       // 根据模式请求不同接口
@@ -1166,6 +1204,14 @@
       // 根据语言模式显示翻译框
       if (aiLanguage === 'ja') {
         document.getElementById('translation-input-container').style.display = 'flex';
+        const transInputEl = document.getElementById('transInput');
+        if (transInputEl) {
+          // 之前可能在 display:none 状态被计算过高度，这里显示后强制重算
+          transInputEl.style.height = 'auto';
+          const h = Math.max(30, Math.min(transInputEl.scrollHeight, 120));
+          transInputEl.style.height = `${h}px`;
+          transInputEl.style.overflowY = (transInputEl.scrollHeight > 120) ? 'auto' : 'hidden';
+        }
       } else {
         document.getElementById('translation-input-container').style.display = 'none';
       }
@@ -1253,9 +1299,10 @@
     }
   }
 
-  function renderMessageGroup({ id, content, role, timestamp }, mode = 'append') {
+  function renderMessageGroup({ id, content, role, timestamp, rawContent }, mode = 'append') {
     const isAssistant = role !== 'user';
     const fullText = content != null ? String(content) : '';
+    const originalRawText = rawContent != null ? String(rawContent) : fullText;
     const { tickles, rest } = extractTicklesFromContent(fullText);
 
     // 分段：按 " / " 分割，且保证 [图片](地址)(描述) 整段不被打断（描述中可能含 /），并且不分割 HTML 标签内部的 / (如 </ruby>)
@@ -1342,7 +1389,7 @@
     if (tickles.length > 0 && !hasContentBubbles) group.classList.add('tickle-only');
     group.dataset.timestamp = date.toISOString();
     group.dataset.id = id;
-    group.dataset.originalContent = fullText;
+    group.dataset.originalContent = originalRawText;
 
     // 【新增】把说话人的 ID 存进去 (如果是用户则是 'user'，如果是群聊则是 'isagi' 等)
     group.dataset.sender = role;
@@ -1556,7 +1603,8 @@
           copyBtn.className = 'action-btn';
           copyBtn.innerHTML = `<img src="${copyIconPath}" style="width:14px;height:14px;opacity:0.6;">`;
           copyBtn.onclick = () => {
-            var textToCopy = group.dataset.resolvedFulltext || fullText;
+            var textToCopy = group.dataset.originalContent || group.dataset.resolvedFulltext || fullText;
+            textToCopy = stripRubyTags(textToCopy);
             if (navigator.clipboard && window.isSecureContext) {
               navigator.clipboard.writeText(textToCopy).then(() => showCopySuccess(copyBtn, copyIconPath)).catch(() => fallbackCopyTextToClipboard(textToCopy, copyBtn, copyIconPath));
             } else {
@@ -1564,6 +1612,29 @@
             }
           };
           controls.appendChild(timestampEl);
+
+          // 翻译按钮（表情/图片分支也可支持，当整条组消息里有文字时）
+          let translateBtn = null;
+          const fullMessageText = (group.dataset.originalContent || group.dataset.resolvedFulltext || fullText || wrapper.dataset.fulltext || '').trim();
+          const contentWithoutMedia = fullMessageText
+            .replace(/\[表情\][\s\S]*?(?=\s*\/\s*|$)/g, '')
+            .replace(/\[图片\]\([^\)]+\)(\([^\)]*\))?/g, '')
+            .replace(/\[图片\]/g, '')
+            .replace(/\[表情\]/g, '')
+            .trim();
+          const hasTextContent = contentWithoutMedia.replace(/[\s\/]+/g, '') !== '';
+          if (aiLanguage === 'ja' && hasTextContent) {
+            translateBtn = document.createElement('button');
+            translateBtn.className = 'action-btn';
+            translateBtn.title = '翻译';
+            translateBtn.innerHTML = '<span style="font-size: 10px; font-weight: bold;">文</span>';
+            translateBtn.onclick = () => {
+              const dynamicId = parseInt(group.dataset.id, 10);
+              translateMessage(wrapper, Number.isNaN(dynamicId) ? id : dynamicId, group);
+            };
+          }
+          if (translateBtn) controls.appendChild(translateBtn);
+
           if (isSticker) controls.appendChild(likeBtn);
           if (id) { controls.appendChild(editBtn); controls.appendChild(delBtn); }
           controls.appendChild(copyBtn);
@@ -1594,12 +1665,23 @@
         
         // 翻译按钮
         let translateBtn = null;
-        if (aiLanguage === 'ja') {
+        const fullMessageText = (group.dataset.originalContent || group.dataset.resolvedFulltext || fullText || wrapper.dataset.fulltext || '').trim();
+        const contentWithoutMedia = fullMessageText
+          .replace(/\[表情\][\s\S]*?(?=\s*\/\s*|$)/g, '')
+          .replace(/\[图片\]\([^\)]+\)(\([^\)]*\))?/g, '')
+          .replace(/\[图片\]/g, '')
+          .replace(/\[表情\]/g, '')
+          .trim();
+        const hasTextContent = contentWithoutMedia.replace(/[\s\/]+/g, '') !== '';
+        if (aiLanguage === 'ja' && hasTextContent) {
           translateBtn = document.createElement('button');
           translateBtn.className = 'action-btn';
           translateBtn.title = '翻译';
           translateBtn.innerHTML = '<span style="font-size: 10px; font-weight: bold;">文</span>';
-          translateBtn.onclick = () => translateMessage(wrapper, id, text);
+          translateBtn.onclick = () => {
+            const dynamicId = parseInt(group.dataset.id, 10);
+            translateMessage(wrapper, Number.isNaN(dynamicId) ? id : dynamicId, group);
+          };
         }
 
         const timestampEl = document.createElement('div');
@@ -1618,7 +1700,7 @@
         copyBtn.className = 'action-btn';
         copyBtn.innerHTML = `<img src="${copyIconPath}" style="width:14px;height:14px;opacity:0.6;">`;
         copyBtn.onclick = () => {
-          var textToCopy = group.dataset.resolvedFulltext || fullText;
+          var textToCopy = group.dataset.originalContent || group.dataset.resolvedFulltext || fullText;
           textToCopy = stripRubyTags(textToCopy);
           if (navigator.clipboard && window.isSecureContext) {
             navigator.clipboard.writeText(textToCopy).then(() => showCopySuccess(copyBtn, copyIconPath)).catch(() => fallbackCopyTextToClipboard(textToCopy, copyBtn, copyIconPath));
@@ -1970,7 +2052,8 @@
       // 【关键】渲染用户气泡前，先检查是否需要加日期
       checkAndAppendDateSeparator(userMsgTime);
 
-      const userMsgObj = { content: originalText, role: 'user', timestamp: userMsgTime }
+      const displayText = await getFuriganaDisplay(originalText);
+      const userMsgObj = { content: displayText, rawContent: originalText, role: 'user', timestamp: userMsgTime }
       // 这里拿到返回的 DOM 元素
       const userBubbleElement = renderMessageGroup(userMsgObj, 'append');
       chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -2139,12 +2222,29 @@
     });
     btn.addEventListener('click', sendMessage);
 
+    // 输入框自适应高度（达到上限后内部滚动）
+    function autoResizeTextarea(el, maxHeightPx, minHeightPx) {
+      if (!el) return;
+      el.style.height = 'auto';
+      const next = Math.max(minHeightPx || 0, Math.min(el.scrollHeight, maxHeightPx));
+      el.style.height = `${next}px`;
+      el.style.overflowY = (el.scrollHeight > maxHeightPx) ? 'auto' : 'hidden';
+    }
+    const MESSAGE_INPUT_MAX_HEIGHT = 160;
+    const TRANS_INPUT_MAX_HEIGHT = 120;
+    const MESSAGE_INPUT_MIN_HEIGHT = 40;
+    const TRANS_INPUT_MIN_HEIGHT = 30;
+
     // ==============================
     // 翻译输入框事件
     // ==============================
     const transBtn = document.getElementById('transBtn');
     const transInput = document.getElementById('transInput');
     if (transBtn && transInput) {
+      transInput.addEventListener('input', () => autoResizeTextarea(transInput, TRANS_INPUT_MAX_HEIGHT, TRANS_INPUT_MIN_HEIGHT));
+      // 初始化一次
+      autoResizeTextarea(transInput, TRANS_INPUT_MAX_HEIGHT, TRANS_INPUT_MIN_HEIGHT);
+
       transBtn.addEventListener('click', async () => {
         const txt = transInput.value.trim();
         if (!txt) return;
@@ -2152,12 +2252,11 @@
         transBtn.innerText = '翻译中...';
         transBtn.disabled = true;
 
-        // 获取上下文（过滤掉注音的 rt 标签内容）
-        const allBubbles = Array.from(document.querySelectorAll('.message-bubble'));
-        const contextStr = allBubbles.slice(-5).map(b => {
-          const clone = b.cloneNode(true);
-          clone.querySelectorAll('rt').forEach(rt => rt.remove());
-          return clone.textContent.trim();
+        // 获取上下文（前 20 条气泡组，去注音）
+        const allGroups = Array.from(document.querySelectorAll('.message-group'));
+        const contextStr = allGroups.slice(-5).map(g => {
+          const raw = (g.dataset.resolvedFulltext || g.dataset.originalContent || "").trim();
+          return stripRubyTags(raw);
         }).filter(Boolean).join('\n');
 
         try {
@@ -2167,15 +2266,19 @@
             body: JSON.stringify({
               text: txt,
               context: contextStr,
-              direction: 'zh_to_ja'
+              direction: 'zh_to_ja',
+              char_id: isGroupMode ? null : currentId,
+              group_id: isGroupMode ? currentId : null
             })
           });
           const data = await res.json();
           if (data.result) {
             // 将翻译结果填入正式输入框
             input.value = data.result;
+            autoResizeTextarea(input, MESSAGE_INPUT_MAX_HEIGHT, MESSAGE_INPUT_MIN_HEIGHT);
             // 清空翻译框
             transInput.value = '';
+            autoResizeTextarea(transInput, TRANS_INPUT_MAX_HEIGHT, TRANS_INPUT_MIN_HEIGHT);
           } else {
             alert('翻译失败：' + (data.error || '未知错误'));
           }
@@ -2197,7 +2300,9 @@
       });
     }
     input.addEventListener('keypress', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
-    input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${input.scrollHeight}px`; });
+    input.addEventListener('input', () => autoResizeTextarea(input, MESSAGE_INPUT_MAX_HEIGHT, MESSAGE_INPUT_MIN_HEIGHT));
+    // 初始化一次
+    autoResizeTextarea(input, MESSAGE_INPUT_MAX_HEIGHT, MESSAGE_INPUT_MIN_HEIGHT);
 
     // --- 新增逻辑函数 ---
     let currentEditId = null;
@@ -2297,7 +2402,7 @@
         var groupEl = groupElement;
         if (!groupEl && id) groupEl = document.querySelector('.message-group[data-id="' + id + '"]');
       if (groupEl) {
-        fullContent = (groupEl.dataset.resolvedFulltext || groupEl.dataset.originalContent || fullContent).trim();
+        fullContent = (groupEl.dataset.originalContent || groupEl.dataset.resolvedFulltext || fullContent).trim();
         fullContent = stripRubyTags(fullContent);
         contentToShow = fullContent;
       }
@@ -2562,13 +2667,17 @@
           lastDateStr = currentDateStr;
         }
 
-        // 内容
-        const bubbles = group.querySelectorAll('.bubble');
-        let contentText = "";
-        bubbles.forEach((b, idx) => {
-          contentText += b.innerText.replace(/\n/g, " ");
-          if (idx < bubbles.length - 1) contentText += " / ";
-        });
+        // 内容：优先导出原始结构化文本（拍一拍/撤回/表情/图片），并去除注音标签
+        let contentText = (group.dataset.originalContent || group.dataset.resolvedFulltext || "").trim();
+        if (!contentText) {
+          const bubbles = group.querySelectorAll('.bubble');
+          contentText = "";
+          bubbles.forEach((b, idx) => {
+            contentText += b.innerText.replace(/\n/g, " ");
+            if (idx < bubbles.length - 1) contentText += " / ";
+          });
+        }
+        contentText = stripRubyTags(contentText);
 
         // 时间
         const hours = String(dateObj.getHours()).padStart(2, '0');
@@ -3455,33 +3564,9 @@
   }
 
   // ==============================
-  // 翻译消息功能
+  // 翻译消息功能（上下文由后端从数据库读取前 20 条）
   // ==============================
-  async function translateMessage(wrapper, id, text) {
-    // 获取上下文 (简单取前后几条消息文本，过滤掉 rt 标签的内容)
-    const allBubbles = Array.from(document.querySelectorAll('.message-bubble'));
-    const currentBubble = wrapper.querySelector('.message-bubble');
-    const currentIndex = allBubbles.indexOf(currentBubble);
-    
-    let contextStr = "";
-    if (currentIndex !== -1) {
-      const start = Math.max(0, currentIndex - 5);
-      const end = Math.min(allBubbles.length, currentIndex + 2);
-      contextStr = allBubbles.slice(start, end).map(b => {
-        const clone = b.cloneNode(true);
-        clone.querySelectorAll('rt').forEach(rt => rt.remove());
-        return clone.textContent.trim();
-      }).filter(Boolean).join('\n');
-    }
-
-    // 获取原始纯文本（去除可能已经存在的翻译或注音）
-    // 从后端传来的 text 可能包含 <ruby> 等 HTML 标签
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = text;
-    tempDiv.querySelectorAll('rt').forEach(rt => rt.remove());
-    const originalText = tempDiv.textContent.trim();
-
-    // 创建一个显示翻译结果的地方，如果已有则不重复创建
+  async function translateMessage(wrapper, id, group) {
     let transDiv = wrapper.querySelector('.translation-result');
     if (!transDiv) {
       transDiv = document.createElement('div');
@@ -3489,18 +3574,35 @@
       transDiv.style.cssText = 'margin-top: 8px; font-size: 13px; color: #555; background: rgba(0,0,0,0.05); padding: 6px 10px; border-radius: 6px; border-left: 3px solid #666;';
       wrapper.appendChild(transDiv);
     }
-    
     transDiv.textContent = '正在翻译...';
+    const msgId = parseInt(group.dataset.id || id, 10);
+    const payload = { direction: 'ja_to_zh' };
+    if (!Number.isNaN(msgId) && msgId > 0) {
+      payload.message_id = msgId;
+      if (isGroupMode) payload.group_id = currentId;
+      else payload.char_id = currentId;
+    } else {
+      // 新发送且尚未拿到 message_id 时兜底：用前端文本临时翻译
+      const allGroups = Array.from(document.querySelectorAll('.message-group'));
+      const currentIndex = allGroups.indexOf(group);
+      const start = Math.max(0, currentIndex - 5);
+      const contextGroups = currentIndex > 0 ? allGroups.slice(start, currentIndex) : [];
+      const contextStr = contextGroups.map(g => {
+        const raw = (g.dataset.resolvedFulltext || g.dataset.originalContent || "").trim();
+        return stripRubyTags(raw);
+      }).filter(Boolean).join('\n');
+      const rawText = (group.dataset.originalContent || group.dataset.resolvedFulltext || wrapper.dataset.fulltext || "").trim();
+      payload.text = stripRubyTags(rawText);
+      payload.context = contextStr;
+      if (isGroupMode) payload.group_id = currentId;
+      else payload.char_id = currentId;
+    }
 
     try {
       const res = await fetch('/api/translate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: originalText,
-          context: contextStr,
-          direction: 'ja_to_zh'
-        })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (data.result) {

@@ -497,11 +497,10 @@ def _process_single_user_active_messaging(user_id):
             emotion = info.get("emotion", 0.5)
             p_final = p_time * emotion
             dice = random.random()
-
             print(f"   > 用户 {user_id} [{char_id}] 距上次 {int(minutes_diff)}分, 情绪 {emotion}, 概率 {p_final:.2f}, 骰子 {dice:.2f}")
 
             if dice < p_final:
-                trigger_active_chat(char_id)
+                trigger_active_chat(char_id, user_id=user_id)
 
         groups_config = get_groups_config_for_current_user()
         for group_id, info in groups_config.items():
@@ -533,7 +532,8 @@ def _process_single_user_active_messaging(user_id):
             print(f"   > [群:{group_id}] 距上次 {int(minutes_diff)}分, 概率 {p_final:.2f}, 骰子 {dice:.2f}")
 
             if dice < p_final:
-                trigger_group_active_chat(group_id)
+                # 【修正】群聊主动消息也必须传递 user_id，否则无法读取 API Key 和用户配置
+                trigger_group_active_chat(group_id, user_id=user_id)
 
     except Exception as e:
         print(f"❌ 用户 {user_id} 心跳检测出错: {e}")

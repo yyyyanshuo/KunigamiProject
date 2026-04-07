@@ -8,3 +8,5 @@ urllib3
 pywebpush
 janome
 jieba
+pykakasi
+pillow
