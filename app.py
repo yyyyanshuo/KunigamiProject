@@ -3,7 +3,7 @@ import time
 import re
 import json
 import sqlite3 # 导入 sqlite3 库
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from flask import Flask, request, jsonify, send_from_directory, render_template, session, redirect, url_for # <--- 加上这个
 from dotenv import load_dotenv
 import urllib3
@@ -1028,10 +1028,11 @@ def get_group_dir(group_id: str) -> str:
 
 def get_char_name(char_id):
     """从 characters.json 获取角色姓名，默认用 char_id"""
-    if not os.path.exists(CONFIG_FILE):
+    config_file = _get_characters_config_file()
+    if not os.path.exists(config_file):
         return char_id
     try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+        with open(config_file, "r", encoding="utf-8") as f:
             data = json.load(f)
             return data.get(char_id, {}).get("name", char_id)
     except:
@@ -1039,10 +1040,11 @@ def get_char_name(char_id):
 
 def get_char_age(char_id):
     """从 characters.json 获取角色年龄，默认 None 表示未设置"""
-    if not os.path.exists(CONFIG_FILE):
+    config_file = _get_characters_config_file()
+    if not os.path.exists(config_file):
         return None
     try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+        with open(config_file, "r", encoding="utf-8") as f:
             data = json.load(f)
             age = data.get(char_id, {}).get("age")
             return int(age) if age is not None else None
@@ -1577,6 +1579,559 @@ def get_short_memory_text_for_rai(char_id, include_yesterday=True):
         return ["\n".join(lines)]
     except Exception:
         return []
+
+
+def should_use_prompt_v2(char_id=None) -> bool:
+    """系统全局采用 System Prompt v2 版本。
+    
+    v2 特点：
+    - 4层时间线聚合（长期 + 中期 + 短期 + 最近消息）
+    - 更高效的上下文组织
+    - 更好的词元利用率
+    """
+    return True
+
+
+# ===================== 【新增】System Prompt v2：时间线聚合版本 =====================
+
+def parse_week_key_to_dates(week_key: str) -> tuple:
+    """解析长期记忆的周期 key (YYYY-MM-WeekN 或 YYYY-MM) 为 (start_date, end_date)。
+    
+    返回: (start_date, end_date) 都是 datetime.date 对象，end_date 为该周/该月最后一天。
+    【重要修改】WeekN 的最后一天应为该周的周日（维持时间线逻辑一致性）。
+    """
+    try:
+        from datetime import date, timedelta
+        import calendar
+        if '-Week' in week_key:
+            parts = week_key.split('-Week')
+            ym_str = parts[0]
+            week_num = int(parts[1])
+            year, month = map(int, ym_str.split('-'))
+            
+            # 计算该月 1 号
+            first_day_of_month = date(year, month, 1)
+            # 计算 1 号是周几 (0=Mon, 6=Sun)
+            first_weekday = first_day_of_month.weekday()
+            
+            # 第一周的周日日期: 1号 + (6 - first_weekday)
+            first_sunday = first_day_of_month + timedelta(days=(6 - first_weekday))
+            
+            # 第 N 周的周日
+            target_sunday = first_sunday + timedelta(weeks=(week_num - 1))
+            
+            # 确保不跨月 (如果是最后一周，取月底和周日的最小值)
+            _, last_day_num = calendar.monthrange(year, month)
+            last_day_of_month = date(year, month, last_day_num)
+            
+            end_date = min(target_sunday, last_day_of_month)
+            # start_date 简单设为周日往前 6 天
+            start_date = end_date - timedelta(days=6)
+            if start_date.month != month:
+                start_date = first_day_of_month
+                
+            return (start_date, end_date)
+        else:
+            # 处理 YYYY-MM 格式
+            year, month = map(int, week_key.split('-'))
+            _, last_day = calendar.monthrange(year, month)
+            return (date(year, month, 1), date(year, month, last_day))
+    except Exception:
+        return None
+
+
+def extract_long_memory_with_timeline_ts(char_id, recent_messages=None, user_latest_input=None) -> list:
+    """提取长期记忆，为每条计算排序用的时间戳（该周最后一天的23:59）。
+    
+    返回: [(content_text, last_date, datetime_23_59)]
+    """
+    _, prompts_dir = get_paths(char_id)
+    long_mem_path = os.path.join(prompts_dir, "4_memory_long.json")
+    
+    print(f"[DEBUG] extract_long_memory: 文件路径 = {long_mem_path}")
+    print(f"[DEBUG] extract_long_memory: 文件存在 = {os.path.exists(long_mem_path)}")
+    
+    result = []
+    if not os.path.exists(long_mem_path):
+        print(f"[DEBUG] extract_long_memory: 4_memory_long.json 不存在")
+        return result
+    
+    try:
+        with open(long_mem_path, "r", encoding="utf-8-sig") as f:
+            long_mem = json.load(f) or {}
+        print(f"[DEBUG] extract_long_memory: 读取到 {len(long_mem)} 条原始长期记忆")
+    except Exception as e:
+        print(f"[DEBUG] extract_long_memory: 读取文件失败 - {e}")
+        return result
+    
+    # 使用既有的筛选函数获取相关长期记忆
+    selected = select_relevant_long_memory(long_mem, recent_messages, user_latest_input=user_latest_input)
+    print(f"[DEBUG] extract_long_memory: 筛选后得到 {len(selected)} 条有效记忆")
+    if not selected:
+        print(f"[DEBUG] extract_long_memory: 筛选结果为空")
+        return result
+    
+    # 为每条记忆计算时间戳
+    for week_key, content in selected:
+        date_range = parse_week_key_to_dates(week_key)
+        print(f"[DEBUG] extract_long_memory: week_key={week_key}, date_range={date_range}")
+        if date_range:
+            _, last_date = date_range
+            # 该周最后一天的23:59
+            ts_23_59 = datetime.combine(last_date, time(23, 59))
+            result.append((content, last_date, ts_23_59))
+            print(f"[DEBUG] extract_long_memory: 添加事件 - {ts_23_59.strftime('%Y-%m-%d %H:%M')}")
+    
+    print(f"[DEBUG] extract_long_memory: 最终返回 {len(result)} 条事件")
+    return result
+
+
+def extract_medium_memory_with_timeline_ts(char_id) -> list:
+    """提取中期记忆，为每条计算排序用的时间戳（该天的23:59）。
+    
+    返回: [(content_with_date_label, date_obj, datetime_23_59)]
+    """
+    _, prompts_dir = get_paths(char_id)
+    medium_mem_path = os.path.join(prompts_dir, "5_memory_medium.json")
+    
+    print(f"[DEBUG] extract_medium_memory: 文件路径 = {medium_mem_path}")
+    print(f"[DEBUG] extract_medium_memory: 文件存在 = {os.path.exists(medium_mem_path)}")
+    
+    result = []
+    if not os.path.exists(medium_mem_path):
+        print(f"[DEBUG] extract_medium_memory: 5_memory_medium.json 不存在")
+        return result
+    
+    try:
+        with open(medium_mem_path, "r", encoding="utf-8-sig") as f:
+            med_mem = json.load(f) or {}
+        print(f"[DEBUG] extract_medium_memory: 读取到 {len(med_mem)} 条原始中期记忆")
+    except Exception as e:
+        print(f"[DEBUG] extract_medium_memory: 读取文件失败 - {e}")
+        return result
+    
+    # 倒推7天读取中期记忆
+    now = datetime.now()
+    for i in range(7, 0, -1):
+        day_date = (now - timedelta(days=i)).date()
+        day_key = day_date.strftime("%Y-%m-%d")
+        
+        if day_key in med_mem:
+            content = str(med_mem[day_key]).strip()
+            print(f"[DEBUG] extract_medium_memory: 找到 {day_key} 的记忆 - {content[:50]}")
+            if content:
+                # 该天的23:59作为排序时间戳
+                ts_23_59 = datetime.combine(day_date, time(23, 59))
+                result.append((content, day_date, ts_23_59))
+        else:
+            print(f"[DEBUG] extract_medium_memory: {day_key} 没有记忆")
+    
+    print(f"[DEBUG] extract_medium_memory: 最终返回 {len(result)} 条事件")
+    return result
+
+
+def extract_short_memory_with_timeline_ts(char_id) -> list:
+    """提取短期记忆，每条事件作为一个独立个体参与排序。
+    
+    返回: [(content_with_label, base_date, datetime_ts)]
+    """
+    _, prompts_dir = get_paths(char_id)
+    short_mem_path = os.path.join(prompts_dir, "6_memory_short.json")
+    
+    print(f"[DEBUG] extract_short_memory: 文件路径 = {short_mem_path}")
+    
+    result = []
+    if not os.path.exists(short_mem_path):
+        return result
+    
+    try:
+        with open(short_mem_path, "r", encoding="utf-8-sig") as f:
+            short_mem = json.load(f) or {}
+    except Exception as e:
+        print(f"[DEBUG] extract_short_memory: 读取失败 - {e}")
+        return result
+    
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    
+    # 包含今天和昨天（凌晨4点前）
+    dates_to_load = [today_str]
+    if now.hour < 4:
+        yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+        dates_to_load.insert(0, yesterday_str)
+    
+    for date_key in dates_to_load:
+        day_data = short_mem.get(date_key)
+        if not day_data:
+            continue
+        
+        events = []
+        if isinstance(day_data, list):
+            events = day_data
+        elif isinstance(day_data, dict):
+            events = day_data.get("events", [])
+        
+        if events:
+            date_obj = datetime.strptime(date_key, "%Y-%m-%d").date()
+            for e in events:
+                time_part = e.get("time", "")
+                event_text = e.get("event", "")
+                
+                if not event_text:
+                    continue
+                
+                # 为每条事件单独生成内容和时间戳
+                if time_part:
+                    try:
+                        h, m = map(int, time_part.split(':'))
+                        ts = datetime.combine(date_obj, time(h, m))
+                    except Exception:
+                        ts = datetime.combine(date_obj, time(0, 0))
+                    content_display = f"[{date_key} {time_part}] {event_text}"
+                else:
+                    ts = datetime.combine(date_obj, time(0, 0))
+                    content_display = f"[{date_key}] {event_text}"
+                
+                result.append((content_display, date_obj, ts))
+    
+    print(f"[DEBUG] extract_short_memory: 最终返回 {len(result)} 条独立事件")
+    return result
+
+
+def extract_recent_messages_with_labels(char_id, limit=20) -> list:
+    """提取最近消息，为每条标注角色和时间戳。
+    
+    返回: [(role, content_with_label, datetime_ts)]
+    """
+    db_path = get_char_db_path(char_id)
+    result = []
+    
+    print(f"[DEBUG] extract_recent_messages: DB路径 = {db_path}")
+    print(f"[DEBUG] extract_recent_messages: DB存在 = {os.path.exists(db_path)}")
+    
+    if not os.path.exists(db_path):
+        print(f"[DEBUG] extract_recent_messages: 数据库不存在")
+        return result
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # 获取最近的消息（不限日期）
+        cursor.execute(
+            "SELECT role, content, timestamp FROM messages ORDER BY id DESC LIMIT ?",
+            (limit,)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        
+        print(f"[DEBUG] extract_recent_messages: 查询到 {len(rows)} 条消息")
+        
+        # 逆序处理，使其按时间升序排列
+        for i, row in enumerate(reversed(rows)):
+            role = row["role"]
+            content = row["content"]
+            ts_str = row["timestamp"]
+            
+            print(f"[DEBUG] extract_recent_messages: [{i}] role={role}, content={content[:50]}, ts={ts_str}")
+            
+            try:
+                msg_dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+            except Exception as e:
+                print(f"[DEBUG] extract_recent_messages: 时间戳解析失败 - {e}")
+                msg_dt = datetime.now()
+            
+            # 构建显示标签
+            role_label = "user" if role == "user" else "你"
+            time_label = msg_dt.strftime("%H:%M")
+            content_display = f"[{time_label}] 【{role_label}】{content}"
+            
+            result.append((role, content_display, msg_dt))
+    except Exception as e:
+        print(f"[DEBUG] extract_recent_messages: 数据库操作失败 - {e}")
+        import traceback
+        print(traceback.format_exc())
+    
+    print(f"[DEBUG] extract_recent_messages: 最终返回 {len(result)} 条消息")
+    return result
+
+
+def build_timeline_section(timeline_events) -> str:
+    """构建格式化的时间线文本。
+    
+    timeline_events: [(layer_type, content_display, timestamp_dt)]
+    layer_type: "long_memory" | "medium_memory" | "short_memory" | "message"
+    
+    返回: 按timestamp升序排列的时间线Prompt文本
+    """
+    if not timeline_events:
+        return ""
+    
+    # 按时间戳排序
+    sorted_events = sorted(timeline_events, key=lambda x: x[2])
+    
+    lines = []
+    for layer_type, content, ts_dt in sorted_events:
+        ts_str = ts_dt.strftime("%Y-%m-%d %H:%M")
+        layer_label = ""
+        
+        if layer_type == "long_memory":
+            layer_label = "【长期记忆】"
+        elif layer_type == "medium_memory":
+            layer_label = "【中期记忆】"
+        elif layer_type == "short_memory":
+            layer_label = "【短期记忆】"
+            # 短期记忆可能已包含日期标签，但统一加上时间头
+            lines.append(f"[{ts_str}] {layer_label}{content}")
+            continue
+        elif layer_type == "message":
+            # 消息已包含标签
+            lines.append(content)
+            continue
+        else:
+            layer_label = "【事件】"
+        
+        # 简化日期显示
+        lines.append(f"[{ts_str}] {layer_label}{content[:500]}")  # 截断过长内容
+    
+    timeline_text = "\n".join(lines)
+    return f"【时间线 / タイムライン】\n{timeline_text}"
+
+
+def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=None, user_latest_input=None):
+    """【新版】System Prompt（6个组件+时间线聚合）。
+    
+    组件：
+    1. 角色人设
+    2. 用户人设
+    3. 关系设定
+    4. 日程表
+    5. 系统规则
+    6. 时间线（长期记忆+中期记忆+短期记忆+最近消息）
+    """
+    prompt_parts = []
+    
+    # 路径准备
+    _, prompts_dir = get_paths(char_id)
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    
+    # ===== 【1】角色人设 =====
+    char_name = get_char_name(char_id)
+    char_age = get_char_age(char_id)
+    name_age_prefix = ""
+    if char_name or char_age is not None:
+        parts = []
+        if char_name:
+            parts.append(f"名前：{char_name}")
+        if char_age is not None:
+            parts.append(f"年齢：{char_age}歳")
+        name_age_prefix = "\n".join(parts) + "\n\n"
+
+    path = os.path.join(prompts_dir, "1_base_persona.md")
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                content = f.read().strip()
+                if content:
+                    if name_age_prefix:
+                        content = name_age_prefix + content
+                    prompt_parts.append(f"【キャラクター / 角色人设】\n{content}")
+        except Exception:
+            pass
+    
+    # ===== 【2】用户人设 =====
+    try:
+        user_name = get_current_username()
+        user_age = get_user_age()
+        user_prefix = ""
+        if user_name or user_age is not None:
+            parts = []
+            if user_name:
+                parts.append(f"名前：{user_name}")
+            if user_age is not None:
+                parts.append(f"年齢：{user_age}歳")
+            user_prefix = "\n".join(parts) + "\n\n"
+            
+        if include_global_format:
+            # 优先从用户配置读取，其次从全局配置读取
+            user_persona_file = None
+            # 先尝试用户目录
+            uid = get_current_user_id()
+            if uid:
+                user_dir = os.path.join(BASE_DIR, "users", str(uid), "configs")
+                potential_file = os.path.join(user_dir, "global_user_persona.md")
+                if os.path.exists(potential_file):
+                    user_persona_file = potential_file
+            # 再试全局目录
+            if not user_persona_file:
+                global_dir = os.path.join(BASE_DIR, "configs")
+                potential_file = os.path.join(global_dir, "global_user_persona.md")
+                if os.path.exists(potential_file):
+                    user_persona_file = potential_file
+            
+            if user_persona_file:
+                with open(user_persona_file, "r", encoding="utf-8-sig") as f:
+                    content = f.read().strip()
+                    if user_prefix:
+                        content = user_prefix + content
+                    if content:
+                        prompt_parts.append(f"【ユーザー / 用户人设】\n{content}")
+            elif user_prefix.strip():
+                prompt_parts.append(f"【ユーザー / 用户人设】\n{user_prefix.strip()}")
+    except:
+        pass
+    
+    # ===== 【3】关系设定 =====
+    try:
+        current_user_name = get_current_username()
+        path = os.path.join(prompts_dir, "2_relationship.json")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                rel_data = json.load(f) or {}
+            
+            # 优先查找当前用户名匹配的关系
+            user_rel = rel_data.get(current_user_name)
+            if user_rel:
+                rel_str = (f"対话相手：{current_user_name}\n"
+                       f"関係性：{user_rel.get('role', '不明')}\n"
+                       f"関係度：{user_rel.get('score', 1)}\n"
+                       f"詳細：{user_rel.get('description', '')}")
+                prompt_parts.append(f"【関係 / 关系】\n{rel_str}")
+            elif rel_data:
+                # 如果没找到特定匹配，且是在群聊或没有明确匹配时，展示列表（原有逻辑）
+                rel_lines = []
+                for name, info in rel_data.items():
+                    role = info.get('role', '未知')
+                    desc = info.get('description', '特になし')
+                    score = info.get('score', 1)
+                    rel_lines.append(f"- {name}: {role} (关系度:{score}) {desc}")
+                if rel_lines:
+                    rel_text = "\n".join(rel_lines)
+                    prompt_parts.append(f"【関係 / 关系】\n{rel_text}")
+    except Exception:
+        pass
+    
+    # ===== 【4】日程表 =====
+    path = os.path.join(prompts_dir, "7_schedule.json")
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                schedule = json.load(f) or {}
+            if schedule:
+                # 过滤为近7天的日程
+                today = now.date()
+                future_end = today + timedelta(days=7)
+                filtered_schedule = {}
+                for date_str, event in sorted(schedule.items()):
+                    try:
+                        event_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                        if today <= event_date <= future_end:
+                            filtered_schedule[date_str] = event
+                    except ValueError:
+                        pass
+                
+                if filtered_schedule:
+                    sched_text = "- " + "\n- ".join([f"{k}: {v}" for k, v in filtered_schedule.items()])
+                    prompt_parts.append(f"【スケジュール / 日程表】\n{sched_text}")
+        except Exception:
+            pass
+    
+    # ===== 【5】系统规则 =====
+    if include_global_format:
+        global_dir = os.path.join(BASE_DIR, "configs")
+        global_format_file = os.path.join(global_dir, "global_format.md")
+        if os.path.exists(global_format_file):
+            try:
+                with open(global_format_file, "r", encoding="utf-8-sig") as f:
+                    content = f.read().strip()
+                    if content:
+                        prompt_parts.append(f"【システムルール / 系统规则】\n{content}")
+            except Exception:
+                pass
+    
+    # ===== 【6】时间线 =====
+    timeline_events = []
+    
+    # 收集长期记忆事件
+    long_mem_events = extract_long_memory_with_timeline_ts(char_id, recent_messages, user_latest_input)
+    print(f"[DEBUG v2] extract_long_memory_with_timeline_ts() 返回 {len(long_mem_events)} 条事件")
+    for i, (content, _, ts) in enumerate(long_mem_events):
+        print(f"  [{i}] {ts.strftime('%Y-%m-%d %H:%M')} - 长期记忆: {content[:100]}")
+        timeline_events.append(("long_memory", content, ts))
+    
+    # 收集中期记忆事件
+    med_mem_events = extract_medium_memory_with_timeline_ts(char_id)
+    print(f"[DEBUG v2] extract_medium_memory_with_timeline_ts() 返回 {len(med_mem_events)} 条事件")
+    for i, (content, _, ts) in enumerate(med_mem_events):
+        print(f"  [{i}] {ts.strftime('%Y-%m-%d %H:%M')} - 中期记忆: {content[:100]}")
+        timeline_events.append(("medium_memory", content, ts))
+    
+    # 收集短期记忆事件
+    short_mem_events = extract_short_memory_with_timeline_ts(char_id)
+    print(f"[DEBUG v2] extract_short_memory_with_timeline_ts() 返回 {len(short_mem_events)} 条事件")
+    for i, (content, _, ts) in enumerate(short_mem_events):
+        print(f"  [{i}] {ts.strftime('%Y-%m-%d %H:%M')} - 短期记忆: {content[:100]}")
+        timeline_events.append(("short_memory", content, ts))
+    
+    # 收集最近消息
+    msg_events = extract_recent_messages_with_labels(char_id, limit=20)
+    print(f"[DEBUG v2] extract_recent_messages_with_labels() 返回 {len(msg_events)} 条事件")
+    for i, (_, content, ts) in enumerate(msg_events):
+        print(f"  [{i}] {ts.strftime('%Y-%m-%d %H:%M')} - 消息: {content[:100]}")
+        timeline_events.append(("message", content, ts))
+    
+    print(f"[DEBUG v2] 时间线总计: {len(timeline_events)} 条事件")
+    
+    # 构建时间线文本
+    if timeline_events:
+        timeline_text = build_timeline_section(timeline_events)
+        prompt_parts.append(timeline_text)
+    else:
+        print(f"[DEBUG v2] WARNING: timeline_events 为空！")
+    
+    # ===== 【当前时间】=====
+    now = datetime.now()
+    hour = now.hour
+    if 5 <= hour < 11:
+        period = "朝 (morning)"
+    elif 11 <= hour < 13:
+        period = "昼 (noon)"
+    elif 13 <= hour < 18:
+        period = "午後 (afternoon)"
+    elif 18 <= hour < 23:
+        period = "夜 (night)"
+    else:
+        period = "深夜 (late night)"
+    
+    time_info = f"現在は {now.strftime('%Y-%m-%d %H:%M')} （{period}）です。"
+    prompt_parts.append(f"【現在時刻】\n{time_info}")
+    
+    # ===== 【身份提示】=====
+    char_name = get_char_name(char_id)
+    if char_name:
+        prompt_parts.append(f"【あなたの正体】\nあなたは {char_name} です。")
+    
+    return "\n\n".join(prompt_parts)
+
+
+def build_messages_for_chat_v2(char_id, user_input, recent_messages=None) -> list:
+    """【新版】为聊天构建消息列表（仅System + 最新User消息）。
+    
+    返回: [
+        {"role": "system", "content": system_prompt_v2},
+        {"role": "user", "content": user_latest_message}
+    ]
+    """
+    system_prompt = build_system_prompt_v2(char_id, include_global_format=True, recent_messages=recent_messages)
+    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_input}
+    ]
+    
+    return messages
 
 
 def build_system_prompt(char_id, include_global_format=True, recent_messages=None, user_latest_input=None, include_long_memory=True):
@@ -3547,82 +4102,41 @@ def chat(char_id):
     history_rows = [dict(row) for row in cursor.fetchall()][::-1]
     conn.close()
 
-    recent_texts = [r["content"] for r in history_rows] if history_rows else []
-    user_latest = history_rows[-1]["content"] if history_rows and history_rows[-1]["role"] == "user" else None
-    system_prompt = build_system_prompt(char_id, recent_messages=recent_texts, user_latest_input=user_latest)
-
-    # 7. 构建消息历史
-    messages = [{"role": "system", "content": system_prompt}]
-
-    # --- 【关键修改】判断时间跨度 ---
+    # ===== 【全局采用 v2】使用 System Prompt v2 =====
+    print(f"--- [Chat] char_id: {char_id}, using System Prompt v2 ---")
+    
+    # ===== 【v2版本】使用新的时间线聚合系统提示 =====
+    messages = build_messages_for_chat_v2(char_id, user_msg_raw, recent_messages=[r["content"] for r in history_rows])
+        
+        # 添加系统提示时间信息
     now = datetime.now()
-    show_full_date = False # 默认不显示日期，只显示时间
-
-    if history_rows:
-        try:
-            # 1. 获取第一条历史记录的时间 (最早的一条)
-            first_msg_ts_str = history_rows[0]['timestamp']
-            first_dt = datetime.strptime(first_msg_ts_str, '%Y-%m-%d %H:%M:%S')
-
-            # 2. 比较：最早一条的日期 vs 现在(最新一条)的日期
-            # 如果日期不同 (比如昨天聊的 vs 今天聊的)，则开启“日期显示模式”
-            if first_dt.date() != now.date():
-                show_full_date = True
-        except:
-            # 如果解析出错，为了保险起见，保持默认或者开启
-            pass
-
-    # --- 循环处理历史消息 ---
-    for row in history_rows:
-        try:
-            dt_object = datetime.strptime(row['timestamp'], '%Y-%m-%d %H:%M:%S')
-
-            if show_full_date:
-                # 跨天模式：显示 [12-25 14:30]
-                formatted_timestamp = dt_object.strftime('[%m-%d %H:%M]')
-            else:
-                # 同天模式：只显示 [14:30]
-                formatted_timestamp = dt_object.strftime('[%H:%M]')
-
-            content_for_ai = _sticker_content_for_ai(row['content'])
-            formatted_content = f"{formatted_timestamp} {content_for_ai}"
-            messages.append({"role": row['role'], "content": formatted_content})
-        except:
-            # 容错：原样添加
-            messages.append({"role": row['role'], "content": row['content']})
-
-    # --- 【新增】在用户最新消息后添加系统提示 ---
-    # 检查最后一条消息是否是用户消息
-    if messages and messages[-1]["role"] == "user":
-        lang = get_ai_language()
-        hour = now.hour
-        time_str = now.strftime('%H:%M')
-
-        # 计算时间段
-        if 5 <= hour < 11: period = "早上" if lang == "zh" else "朝"
-        elif 11 <= hour < 13: period = "中午" if lang == "zh" else "昼"
-        elif 13 <= hour < 18: period = "下午" if lang == "zh" else "午後"
-        elif 18 <= hour < 23: period = "晚上" if lang == "zh" else "夜"
-        else: period = "深夜" if lang == "zh" else "深夜"
-
-        if lang == "zh":
-            system_hint = (
-                f"（系统提示：现在是{period} {time_str}。）\n"
-                f"（用户发来了一条消息。请你根据当前时间、之前的聊天内容，回复用户的消息。）\n"
-                f"（要求：自然、简短，不要重复上一句话。）\n"
-                f"（无特殊说明时用斜线表示换行和句号。）"
-            )
-        else:
-            system_hint = (
-                f"（システム通知：現在は{period} {time_str}です。）\n"
-                f"（ユーザーからメッセージが来ました。時間帯と会話履歴を踏まえて回信してください。）\n"
-                f"（要件：自然で簡潔に。直前の発言を繰り返さないこと。）\n"
-                f"（特に指定がない場合、改行と句点はスラッシュで表します。）"
-            )
-
-        messages.append({"role": "system", "content": system_hint})
-
-    # 1. 获取当前配置
+    lang = get_ai_language()
+    hour = now.hour
+        
+    if 5 <= hour < 11: period = "早上" if lang == "zh" else "朝"
+    elif 11 <= hour < 13: period = "中午" if lang == "zh" else "昼"
+    elif 13 <= hour < 18: period = "下午" if lang == "zh" else "午後"
+    elif 18 <= hour < 23: period = "晚上" if lang == "zh" else "夜"
+    else: period = "深夜" if lang == "zh" else "深夜"
+        
+    if lang == "zh":
+        system_hint = (
+            f"（系统提示：现在是{period} {now.strftime('%H:%M')}。）\n"
+            f"（用户发来了一条消息。请根据时间线中的上下文，回复用户的消息。）\n"
+            f"（要求：自然、简短，不要重复上一句话。）\n"
+            f"（无特殊说明时用斜线表示换行和句号。）"
+        )
+    else:
+        system_hint = (
+            f"（システム通知：現在は{period} {now.strftime('%H:%M')}です。）\n"
+            f"（ユーザーからメッセージが来ました。タイムライン内容を踏まえて回信してください。）\n"
+            f"（要件：自然で簡潔に。直前の発言を繰り返さないこと。）\n"
+            f"（特に指定がない場合、改行と句点はスラッシュで表します。）"
+        )
+        
+    messages.append({"role": "system", "content": system_hint})
+    
+    # 获取当前配置
     route, current_model = get_model_config("chat") # 任务类型是 chat
 
     print(f"--- [Dispatch] Route: {route}, Model: {current_model} ---")
@@ -3677,6 +4191,156 @@ def chat(char_id):
         print(f"Chat Error: {e}")
         return jsonify({"error": str(e)}), 500
 
+
+# ===================== 【新增】System Prompt v2 测试路由 =====================
+
+@app.route("/api/<char_id>/chat_v2", methods=["POST"])
+def chat_v2(char_id):
+    """【测试版】使用新的时间线聚合System Prompt v2版本的聊天接口。"""
+    # 1. 路径准备
+    db_path, prompts_dir = get_paths(char_id)
+    if not os.path.exists(db_path):
+        init_char_db(char_id)
+
+    # 2. 获取用户输入
+    data = request.json or {}
+    user_msg_raw = data.get("message", "").strip()
+    if not user_msg_raw:
+        return jsonify({"error": "empty message"}), 400
+
+    # 3. 检查深睡眠状态
+    is_deep_sleep = False
+    cfg_file = _get_characters_config_file()
+    try:
+        if os.path.exists(cfg_file):
+            with open(cfg_file, "r", encoding="utf-8") as f:
+                all_config = json.load(f)
+            char_info = all_config.get(char_id, {})
+            is_deep_sleep = char_info.get("deep_sleep", False)
+    except:
+        pass
+
+    # 4. 存入用户消息
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    now = datetime.now()
+    user_ts = now.strftime('%Y-%m-%d %H:%M:%S')
+    cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", ("user", user_msg_raw, user_ts))
+    user_msg_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+
+    # 5. 检查深睡眠
+    if is_deep_sleep:
+        print(f"--- [Deep Sleep v2] {char_id} 正在熟睡，不回复消息 ---")
+        return jsonify({
+            "replies": [],
+            "id": None,
+            "user_id": user_msg_id
+        })
+
+    # 6. 同步记忆
+    memory_sync_warning = None
+    try:
+        ok, err = sync_memory_before_single_chat(char_id)
+        if not ok:
+            memory_sync_warning = f"记忆同步失败：{err}，本次对话可能缺少部分群聊上下文"
+            print(f"   ⚠️ {memory_sync_warning}")
+    except Exception as e:
+        memory_sync_warning = f"记忆同步失败：{e}，本次对话可能缺少部分群聊上下文"
+        print(f"   ⚠️ {memory_sync_warning}")
+
+    # ===== 【v2核心】使用新的时间线聚合系统提示 =====
+    # 读取最近消息用于RAI过滤
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT role, content FROM messages ORDER BY timestamp DESC LIMIT 21")
+    recent_messages_rows = [dict(row) for row in cursor.fetchall()][::-1]
+    conn.close()
+    recent_texts = [r["content"] for r in recent_messages_rows] if recent_messages_rows else []
+
+    # 构建v2版消息（只包含system + 最新user）
+    messages = build_messages_for_chat_v2(char_id, user_msg_raw, recent_messages=recent_texts)
+
+    # 添加时间提示
+    lang = get_ai_language()
+    hour = now.hour
+    time_str = now.strftime('%H:%M')
+
+    if 5 <= hour < 11: period = "早上" if lang == "zh" else "朝"
+    elif 11 <= hour < 13: period = "中午" if lang == "zh" else "昼"
+    elif 13 <= hour < 18: period = "下午" if lang == "zh" else "午後"
+    elif 18 <= hour < 23: period = "晚上" if lang == "zh" else "夜"
+    else: period = "深夜" if lang == "zh" else "深夜"
+
+    if lang == "zh":
+        system_hint = (
+            f"（系统提示：现在是{period} {time_str}。）\n"
+            f"（用户发来了一条消息。请根据时间线中的上下文，自然地回复用户。）\n"
+            f"（要求：简短、自然，不要重复上一句话。）\n"
+            f"（无特殊说明时用斜线表示换行和句号。）"
+        )
+    else:
+        system_hint = (
+            f"（システム通知：現在は{period} {time_str}です。）\n"
+            f"（ユーザーからメッセージが来ました。タイムラインを踏まえて回信してください。）\n"
+            f"（要件：簡潔で自然。直前の発言を繰り返さないこと。）\n"
+            f"（特に指定がない場合、改行と句点はスラッシュで表します。）"
+        )
+
+    messages.append({"role": "system", "content": system_hint})
+
+    # 7. 调用AI
+    route, current_model = get_model_config("chat")
+    print(f"--- [Chat v2] char_id: {char_id}, route: {route}, model: {current_model} ---")
+
+    try:
+        if route == "relay":
+            reply_text_raw = call_openrouter(messages, char_id=char_id, model_name=current_model)
+        else:
+            reply_text_raw = call_gemini(messages, char_id=char_id, model_name=current_model)
+
+        # 清理回复
+        timestamp_pattern = r'\[(?:(?:\d{2}-\d{2}\s+)?\d{1,2}:\d{2})\]\s*'
+        cleaned_reply = re.sub(timestamp_pattern, '', reply_text_raw).strip()
+        cleaned_reply = _strip_consecutive_tickle(cleaned_reply)
+        cleaned_reply = _sticker_content_from_ai(cleaned_reply)
+
+        # 存入AI回复
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        ai_ts = (now + timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M:%S')
+        cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", ("assistant", cleaned_reply, ai_ts))
+        ai_msg_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+
+        # 尝试记录到短期记忆
+        try:
+            today = now.strftime("%Y-%m-%d")
+            time_label = now.strftime("%H:%M")
+            ctx = f"(user) {user_msg_raw[:100]} (ai) {cleaned_reply[:100]}"
+            append_short_memory_event(char_id, ctx, today, time_label)
+        except Exception as e:
+            print(f"   ⚠️ 无法记录短期记忆: {e}")
+
+        resp = {
+            "replies": [{"content": cleaned_reply, "id": ai_msg_id}],
+            "id": ai_msg_id,
+            "user_id": user_msg_id,
+            "model": current_model
+        }
+        if memory_sync_warning:
+            resp["memory_sync_warning"] = memory_sync_warning
+
+        return jsonify(resp)
+
+    except Exception as e:
+        print(f"Chat v2 Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # --- 【修正版】重新生成接口 (自动补全 User 引导) ---
 @app.route("/api/<char_id>/regenerate", methods=["POST"])
 def regenerate_message(char_id):
@@ -3712,29 +4376,27 @@ def regenerate_message(char_id):
 
         recent_texts = [r["content"] for r in history_rows] if history_rows else []
         user_latest = next((r["content"] for r in reversed(history_rows) if r["role"] == "user"), None)
-        system_prompt = build_system_prompt(char_id, recent_messages=recent_texts, user_latest_input=user_latest)
+        
+        # 【全局采用 v2】
+        print(f"--- [Regenerate] char_id: {char_id}, using System Prompt v2 ---")
+        system_prompt = build_system_prompt_v2(char_id, recent_messages=recent_texts, user_latest_input=user_latest)
         messages = [{"role": "system", "content": system_prompt}]
 
         # 5. 构建上下文（history_rows 已在上方读取）
-
-        # 6. 构建上下文
-        show_full_date = False
         now = datetime.now()
-        if history_rows:
-            try:
-                first_ts = datetime.strptime(history_rows[0]['timestamp'], '%Y-%m-%d %H:%M:%S')
-                if first_ts.date() != now.date(): show_full_date = True
-            except: pass
 
-        for row in history_rows:
+        # 【全局采用 v2】仅添加最后一条消息（通常是用户消息）
+        if history_rows and history_rows[-1]['role'] == 'user':
+            last_row = history_rows[-1]
             try:
-                dt_obj = datetime.strptime(row['timestamp'], '%Y-%m-%d %H:%M:%S')
-                ts_str = dt_obj.strftime('[%m-%d %H:%M]') if show_full_date else dt_obj.strftime('[%H:%M]')
-                content_for_ai = _sticker_content_for_ai(row['content'])
+                dt_obj = datetime.strptime(last_row['timestamp'], '%Y-%m-%d %H:%M:%S')
+                ts_str = dt_obj.strftime('[%m-%d %H:%M]')
+                content_for_ai = _sticker_content_for_ai(last_row['content'])
                 formatted_content = f"{ts_str} {content_for_ai}"
-                messages.append({"role": row['role'], "content": formatted_content})
+                messages.append({"role": "user", "content": formatted_content})
             except:
-                messages.append({"role": row['role'], "content": row['content']})
+                messages.append({"role": "user", "content": last_row['content']})
+        print(f"--- [Regenerate v2] 添加最后 1 条消息作为触发 ---")
 
         # ================= 【核心新增】智能补位逻辑 =================
         # 检查发给 AI 的最后一条消息是谁说的
@@ -3753,22 +4415,21 @@ def regenerate_message(char_id):
 
             # 情况1: 最后一条是用户消息（正常重新生成）
             if last_msg_role == 'user':
+                # 【全局采用 v2】v2已包含完整时间线，保持简洁的提示
                 if lang == "zh":
                     system_hint = (
                         f"（系统提示：现在是{period} {time_str}。）\n"
-                        f"（用户发来了一条消息。请你根据当前时间、之前的聊天内容，回复用户的消息。）\n"
-                        f"（要求：自然、简短，不要重复上一句话。）\n"
-                        f"（无特殊说明时用斜线表示换行和句号。）"
+                        f"（请根据系统时间线，回复用户的消息。）\n"
+                        f"（要求：自然、简短。）"
                     )
                 else:
                     system_hint = (
                         f"（システム通知：現在は{period} {time_str}です。）\n"
-                        f"（ユーザーからメッセージが来ました。時間帯と会話履歴を踏まえて回信してください。）\n"
-                        f"（要件：自然で簡潔に。直前の発言を繰り返さないこと。）\n"
-                        f"（特に指定がない場合、改行と句点はスラッシュで表します。）"
+                        f"（タイムラインを踏まえて、ユーザーに返信してください。）\n"
+                        f"（要件：自然で簡潔に。）"
                     )
                 messages.append({"role": "system", "content": system_hint})
-                print(f"--- [Regenerate] 最后一条是用户消息，添加普通系统提示 ---")
+                print(f"--- [Regenerate] 最后一条是用户消息，添加简洁系统提示 ---")
 
             # 情况2: 最后一条是AI消息（连续回复，用主动消息风格触发）
             elif last_msg_role == 'assistant' or last_msg_role == 'model':
@@ -4004,7 +4665,10 @@ def group_chat(group_id):
 
         recent_texts = [r["content"] for r in history_rows] if history_rows else []
         user_latest = history_rows[-1]["content"] if history_rows and history_rows[-1]["role"] == "user" else None
-        sys_prompt = build_system_prompt(speaker_id, recent_messages=recent_texts, user_latest_input=user_latest)
+        
+        # 【全局采用 v2】直接使用v2系统提示
+        sys_prompt = build_system_prompt_v2(speaker_id, include_global_format=True, recent_messages=recent_texts, user_latest_input=user_latest)
+        
         other_members = [m for m in all_members if m != speaker_id]
         rel_prompt = build_group_relationship_prompt(speaker_id, other_members)
 
@@ -4322,6 +4986,7 @@ def handle_system_config():
     # 初始化默认配置 (增加了 model_options 字段)
     default_config = {
         "active_route": "relay",
+        "enable_system_prompt_v2": True,  # 【新增】默认启用 v2
         "routes": {
             "gemini": {
                 "name": "线路一：Gemini 直连",
@@ -4415,6 +5080,116 @@ def handle_system_config():
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
+# --- 【新增】一键切换 System Prompt v1/v2 ---
+@app.route("/api/toggle_prompt_v2", methods=["POST"])
+def toggle_prompt_v2():
+    """
+    一键切换 System Prompt v1/v2 版本。
+    请求体：{"enable_v2": true/false} 或 {} （为空则自动切换）
+    """
+    user_id = get_current_user_id()
+    
+    # 获取配置文件路径
+    if user_id:
+        user_cfg_dir = os.path.join(USERS_ROOT, str(user_id), "configs")
+        os.makedirs(user_cfg_dir, exist_ok=True)
+        api_cfg_file = os.path.join(user_cfg_dir, "api_settings.json")
+    else:
+        api_cfg_file = API_CONFIG_FILE
+    
+    try:
+        # 读取现有配置
+        if os.path.exists(api_cfg_file):
+            with open(api_cfg_file, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        else:
+            config = {}
+        
+        # 获取请求数据
+        data = request.get_json() or {}
+        
+        # 决定新状态
+        if "enable_v2" in data:
+            # 显式指定
+            new_status = bool(data["enable_v2"])
+        else:
+            # 自动切换
+            current = config.get("enable_system_prompt_v2", False)
+            new_status = not current
+        
+        # 更新配置
+        config["enable_system_prompt_v2"] = new_status
+        
+        # 保存
+        os.makedirs(os.path.dirname(api_cfg_file), exist_ok=True)
+        with open(api_cfg_file, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        
+        return jsonify({
+            "status": "success",
+            "v2_enabled": new_status,
+            "version": "v2 (时间线聚合版)" if new_status else "v1 (原始版本)",
+            "message": f"已切换到 {'v2' if new_status else 'v1'} 版本"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --- 【新增】查看当前 System Prompt 版本状态 ---
+@app.route("/api/prompt_version_status", methods=["GET"])
+def get_prompt_version_status():
+    """
+    查看当前使用的 System Prompt 版本。
+    可选参数: char_id （查询特定角色的配置）
+    """
+    user_id = get_current_user_id()
+    char_id = request.args.get("char_id")
+    
+    # 获取配置文件路径
+    if user_id:
+        user_cfg_dir = os.path.join(USERS_ROOT, str(user_id), "configs")
+        api_cfg_file = os.path.join(user_cfg_dir, "api_settings.json")
+    else:
+        api_cfg_file = API_CONFIG_FILE
+    
+    try:
+        # 读取全局配置
+        if os.path.exists(api_cfg_file):
+            with open(api_cfg_file, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        else:
+            config = {}
+        
+        # 全局配置
+        global_v2_enabled = config.get("enable_system_prompt_v2", False)
+        
+        # 检查是否有角色级别的配置（可选）
+        char_v2_enabled = None
+        if char_id:
+            try:
+                char_cfg_path = os.path.join(BASE_DIR, "configs", "characters.json")
+                if os.path.exists(char_cfg_path):
+                    with open(char_cfg_path, "r", encoding="utf-8") as f:
+                        all_chars = json.load(f) or {}
+                    char_info = all_chars.get(char_id, {})
+                    if "use_prompt_v2" in char_info:
+                        char_v2_enabled = char_info["use_prompt_v2"]
+            except:
+                pass
+        
+        # 最终状态：角色级 > 全局
+        final_v2_enabled = char_v2_enabled if char_v2_enabled is not None else global_v2_enabled
+        
+        return jsonify({
+            "status": "success",
+            "global_v2_enabled": global_v2_enabled,
+            "char_id": char_id,
+            "char_v2_enabled": char_v2_enabled,
+            "final_v2_enabled": final_v2_enabled,
+            "version": "v2 (时间线聚合版)" if final_v2_enabled else "v1 (原始版本)"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # 这是在 app.py 文件中的 call_openrouter 函数
 
 # ---------------------- OpenRouter / Compatible API ----------------------
@@ -4450,61 +5225,98 @@ def get_relay_provider(user_id=None):
 
 def call_openrouter(messages, char_id="unknown", model_name="gpt-3.5-turbo", user_id=None):
     import requests
+    import random
+    import os
+    import traceback
 
-    # 强制不走系统代理
-    no_proxy = {"http": None, "https": None}
+    # 🛡️ 1. 准备顶级浏览器伪装 User-Agent 库 (破解 Cloudflare 403 的核心)
+    user_agents = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0"
+    ]
 
-    # 【新增】打印日志
+    # 【日志】打印发送前的 Prompt
     log_full_prompt(f"OpenRouter ({model_name})", messages)
 
-    # 【新增】根据配置选择中转商（新 / 旧）
+    # 2. 根据配置选择中转商
     relay_provider = get_relay_provider(user_id)
     if relay_provider == "old":
-        # 旧的中转商：使用 .env 中配置的旧地址
         base_url = OPENROUTER_BASE_URL_OLD
         print(f"--- [Debug] Using OLD relay provider: {base_url}")
     else:
-        # 新的中转商：使用 .env 配置的新地址
         base_url = OPENROUTER_BASE_URL
         print(f"--- [Debug] Using NEW relay provider: {base_url}")
 
     url = f"{base_url}/chat/completions"
 
+    # 🛡️ 3. 组装极其逼真的伪装 Headers
     headers = {
-        "Authorization": f"Bearer {get_effective_openrouter_key()}",  # 优先使用用户配置的 Key
-        "Content-Type": "application/json"
+        "Authorization": f"Bearer {get_effective_openrouter_key()}",
+        "Content-Type": "application/json",
+        "User-Agent": random.choice(user_agents),  # 随机切换浏览器标识
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Referer": "https://kunigami-project-api.online/",
+        "Origin": "https://kunigami-project-api.online",
+        "Connection": "keep-alive",
+        "Cache-Control": "no-cache"
     }
 
-    # 重要：这里的 'model' 名称需要根据你的 API 服务商文档来填写
-    # 他们支持哪些模型，你就填哪个。例如 "gpt-3.5-turbo", "gpt-4", "claude-3-opus" 等
-    # 如果不确定，"gpt-3.5-turbo" 通常是最安全的选择。
+    # 4. 构造 Payload
+    # 聚合所有 system 消息
+    final_messages = []
+    system_contents = []
+    for m in messages:
+        if m.get('role') == 'system':
+            system_contents.append(m.get('content', ''))
+        else:
+            final_messages.append(m)
+    
+    if system_contents:
+        # 将多个 system 消息合并为一个，放在最前面
+        merged_system = {"role": "system", "content": "\n\n".join(system_contents)}
+        final_messages.insert(0, merged_system)
+
     payload = {
-        "model": model_name, # 【修改】这里用传入的 model_name
-        "messages": messages,
+        "model": model_name,
+        "messages": final_messages,
         "temperature": 1,
-        "max_tokens": 10240
+        "max_tokens": 4096
     }
 
-    print(f"--- [Debug] Calling Compatible API at: {url}")  # 增加一个调试日志
-    print(f"--- [Debug] Using model: {payload['model']}")  # 增加一个调试日志
+    print(f"--- [Debug] Calling Compatible API at: {url}")
+    print(f"--- [Debug] Using model: {payload['model']}")
 
     try:
+        # 发起请求
         r = requests.post(url, json=payload, headers=headers, timeout=100)
-        # 打印出服务端的原始报错信息，方便调试
-        if r.status_code != 200:
-            return f"[ERROR] API call failed with status {r.status_code}: {r.text}"
 
-            # 上面已经 return，不会执行到这里，只是为了结构清晰
+        # 🛡️ 5. 核心修改：如果是 403 或 525 拦截，绝对不能把 HTML 源码传回前端
+        if r.status_code != 200:
+            # 详细报错内容打印到服务器终端，方便你排查
+            print(f"🔥 [API 异常报告] URL: {url} | 状态码: {r.status_code}")
+            print(f"🔥 返回内容预览 (前500字): {r.text[:500]}")
+            
+            if r.status_code == 403:
+                return "（系统提示：当前网络波动，AI 暂时被防火墙拦截，请换个话题或稍后再试。）"
+            elif r.status_code == 525:
+                return "（系统提示：中转服务器连接异常(SSL)，请稍后再试或联系管理员。）"
+            elif r.status_code == 429:
+                return "（系统提示：请求过于频繁，AI 累了，请休息一分钟再聊哦。）"
+            else:
+                return f"（系统提示：服务连接异常，错误码: {r.status_code}）"
+
+        # 🛡️ 6. 核心修改：解析 JSON 异常处理（防 HTML 脏数据透传）
         try:
             result = r.json()
         except Exception as parse_err:
-            # 新的中转服务商如果返回的是 HTML/纯文本，这里会解析失败
-            print(f"[ERROR] Failed to parse JSON response: {parse_err}")
-            print("Raw response text (first 2000 chars):")
-            print(r.text[:2000])
-            return f"[ERROR] API 返回的数据不是 JSON：{parse_err}"
+            print(f"[ERROR] JSON解析失败，收到了非 JSON 脏数据: {parse_err}")
+            print(f"Raw response text: {r.text[:1000]}")
+            return "（系统提示：AI 返回了无法解析的异常信号，请重试。）"
 
-        # --- 【新增】Token 计费记录 (DeepSeek/OpenAI 格式) ---
+        # 7. Token 计费记录
         if 'usage' in result:
             usage = result['usage']
             record_token_usage(
@@ -4515,60 +5327,72 @@ def call_openrouter(messages, char_id="unknown", model_name="gpt-3.5-turbo", use
                 usage.get('total_tokens', 0)
             )
 
-        # --- 【关键修复】检查 choices 列表是否为空 ---
+        # 8. 检查 choices 列表是否为空
         if "choices" not in result or len(result["choices"]) == 0:
-            print(f"⚠️ [Empty Response] API 返回了空列表。完整响应如下：")
-            print(result) # 打印出来看看是为什么
-            return "[API无回复] 可能是内容被过滤或服务繁忙。"
+            print(f"⚠️ [Empty Response] API 返回了空列表。")
+            return "（系统提示：AI 暂时陷入了沉思，请换个话题试试。）"
 
-        # 一切正常，提取内容（使用安全的字典访问）
+        # 9. 一切正常，提取内容
         try:
             content = result["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as e:
-            print(f"⚠️ [Parse Error] 无法从响应中提取 message content: {e}")
-            print(f"响应结构: {result}")
-            return f"[ERROR] 无法解析 API 响应: {e}"
+            print(f"⚠️ [Parse Error] 无法解析响应结构: {e}")
+            return "（系统提示：数据结构解析失败，请重试。）"
 
-        # 记录日志
+        # 记录成功日志
         log_full_prompt(f"OpenRouter ({model_name})", messages, response_text=content)
 
         return content
-    except Exception as e:
-        import traceback
-        print(f"[ERROR] API 调用异常: {e}\n{traceback.format_exc()}")
-        return f"[ERROR] API request failed: {e}"
 
-# ---------------------- Gemini ----------------------
-# 修改 call_gemini 定义
-def call_gemini(messages, char_id="unknown", model_name="gemini-2.5-pro"):
+    except requests.exceptions.Timeout:
+        return "（系统提示：连接 AI 服务器超时，对方思考得太久了，请稍后重试。）"
+    except Exception as e:
+        print(f"[ERROR] API 调用异常: {e}\n{traceback.format_exc()}")
+        return "（系统提示：网络链路不稳定，请稍后再试。）"
+    
+def call_gemini(messages, char_id="unknown", model_name="gemini-2.0-flash"):
     """
-    Google 官方直连 (配合 Cloudflare Worker) - 增强版
+    Google 官方直连 (配合 Cloudflare Worker) - 深度加固版
     """
     import requests
     import json
+    import random
+    import os
 
-    # 1. 动态获取 Cloudflare 地址
+    # 1. 动态获取地址与密钥
     base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
-    url = f"{base_url}/v1beta/models/{model_name}:generateContent?key={get_effective_gemini_key()}"
+    api_key = get_effective_gemini_key()
+    url = f"{base_url}/v1beta/models/{model_name}:generateContent?key={api_key}"
 
     # 2. 转换消息格式
     gemini_contents = []
-    system_instruction = None
+    system_parts = []
+    
     for msg in messages:
         if msg['role'] == 'system':
-            system_instruction = {"parts": [{"text": msg['content']}]}
+            system_parts.append(msg['content'])
         else:
             role = 'model' if msg['role'] == 'assistant' else 'user'
             gemini_contents.append({"role": role, "parts": [{"text": msg['content']}]})
 
-    # 3. 构造 Payload (加入关键的安全设置！)
+    # 聚合所有 system 消息为一个 systemInstruction
+    system_instruction = None
+    if system_parts:
+        system_instruction = {"parts": [{"text": "\n\n".join(system_parts)}]}
+
+    # 3. 构造请求头 (加入浏览器伪装，防止被代理层拦截)
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+    }
+
+    # 4. 构造 Payload (关掉安全审查)
     payload = {
         "contents": gemini_contents,
         "generationConfig": {
             "temperature": 1,
-            "maxOutputTokens": 10000
+            "maxOutputTokens": 4096 # 建议从 10000 调低到 4096，更稳定
         },
-        # 【关键修改】把 4 个维度的审查全部关掉 (BLOCK_NONE)
         "safetySettings": [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -4576,22 +5400,35 @@ def call_gemini(messages, char_id="unknown", model_name="gemini-2.5-pro"):
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
         ]
     }
-
     if system_instruction:
         payload["systemInstruction"] = system_instruction
 
     try:
         # 发送请求
-        r = requests.post(url, json=payload, timeout=100)
+        r = requests.post(url, json=payload, headers=headers, timeout=100)
 
+        # 🛡️ 核心修改：拦截非 200 状态码 (防止 HTML 进入数据库)
         if r.status_code != 200:
-            return f"[Gemini Error {r.status_code}] {r.text}"
+            print(f"🔥 [Gemini 官方异常] 状态码: {r.status_code}")
+            print(f"🔥 报错预览: {r.text[:500]}")
+            
+            if r.status_code == 400:
+                return "（系统提示：请求格式不正确，或是由于模型不支持此区域。）"
+            elif r.status_code == 429:
+                return "（系统提示：官方接口频率达到上限，请稍等一分钟再试。）"
+            elif r.status_code == 403:
+                return "（系统提示：访问被拒绝，请检查 API Key 是否有效。）"
+            else:
+                return f"（系统提示：AI 暂时无法连接，错误码: {r.status_code}）"
 
-        result = r.json()
+        # 🛡️ 核心修改：捕获 JSON 解析错误
+        try:
+            result = r.json()
+        except Exception as parse_err:
+            print(f"🔥 [Gemini JSON 失败] {parse_err}")
+            return "（系统提示：接收到了异常信号，请重试。）"
 
-        # --- 【新增】提取 Token 数据 ---
-        # Google 的格式通常叫 usageMetadata
-        # --- 【新增】记录 Token ---
+        # 5. 提取 Token 数据
         token_usage = result.get('usageMetadata', {})
         if token_usage:
             record_token_usage(
@@ -4599,39 +5436,38 @@ def call_gemini(messages, char_id="unknown", model_name="gemini-2.5-pro"):
                 model_name,
                 token_usage.get('promptTokenCount', 0),
                 token_usage.get('candidatesTokenCount', 0),
-                # 【新增】直接提取 totalTokenCount
                 token_usage.get('totalTokenCount', 0)
             )
-        # ------------------------
 
-        # 解析回复
+        # 6. 解析回复内容
         if 'candidates' not in result or not result['candidates']:
-            return "[Error] No candidates returned."
+            return "（AI 陷入了沉默，没有给出回复。）"
 
         candidate = result['candidates'][0]
-
-        # 尝试获取文本（使用安全的字典访问）
         text = ""
+        
+        # 尝试获取文本
         try:
             if 'content' in candidate and 'parts' in candidate['content']:
                 text = candidate['content']['parts'][0]['text']
             else:
+                # 获取结束原因（比如被安全策略拦截，虽然我们设了 BLOCK_NONE，但有时仍会触发）
                 finish_reason = candidate.get('finishReason', 'UNKNOWN')
-                text = f"[未生成文本] 原因: {finish_reason}"
+                text = f"（由于系统限制，AI 无法生成此段对话。原因: {finish_reason}）"
         except (KeyError, IndexError, TypeError) as e:
-            print(f"⚠️ [Gemini Parse Error] 无法从候选中提取文本: {e}")
-            print(f"候选结构: {candidate}")
-            return f"[Gemini Error] 无法解析响应: {e}"
+            print(f"⚠️ [Gemini 解析错误]: {e}")
+            return "（系统提示：回复解析失败。）"
 
-        # --- 【修改】调用日志时，把 token_usage 传进去 ---
+        # 7. 记录完整日志
         log_full_prompt(f"Gemini Interaction ({model_name})", messages, response_text=text, usage=token_usage)
 
         return text
 
+    except requests.exceptions.Timeout:
+        return "（系统提示：AI 思考太久啦，连接超时，请重试。）"
     except Exception as e:
-        log_full_prompt(f"Gemini ERROR ({model_name})", messages, response_text=str(e))
-        # 【修正】返回错误字符串而不是 raise，确保异常被 trigger_active_chat 捕获并正确处理
-        return f"[Gemini Error] {str(e)}"
+        print(f"🔥 [Gemini 未知异常]: {e}")
+        return "（系统提示：网络连接波动，请稍后再试。）"
 
 def get_model_config(task_type="chat", user_id=None):
     """
@@ -7398,7 +8234,9 @@ def trigger_active_chat(char_id, user_id=None):
     recent_texts = [r["content"] for r in history_rows] if history_rows else []
     # 【修正】提取用户最后一条消息，用于精准筛选长期记忆
     user_last = history_rows[-1]["content"] if history_rows and history_rows[-1]["role"] == "user" else None
-    base_system_prompt = build_system_prompt(char_id, recent_messages=recent_texts, user_latest_input=user_last)
+    
+    # 【全局采用 v2】直接使用v2系统提示
+    base_system_prompt = build_system_prompt_v2(char_id, recent_messages=recent_texts, user_latest_input=user_last)
     messages = [{"role": "system", "content": base_system_prompt}]
 
     # 2. 填充历史 (带智能时间戳)

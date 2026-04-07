@@ -6,8 +6,16 @@
 版本遵循[语义化版本](https://semver.org/spec/v2.0.0.html)。
 
 ## [Unreleased] - 未发布
-### Added (新增)
-- (等待后续开发新增功能...)
+### Fixed (修复)
+- **系统提示词 v2 重构与修复**:
+  - 修复了 `build_timeline_section` 中的 `UnboundLocalError` 变量作用域错误。
+  - 修复了 `call_gemini` 和 `call_openrouter` 中 `system` 消息被后续内容覆盖导致人设丢失的重大缺陷。
+  - 修复了 `get_char_name` 和 `get_char_age` 在多用户模式下无法正确读取 `/users/{uid}/configs/` 路径的问题。
+- **记忆系统优化**:
+  - **短期记忆粒度重构**: 将原本按天打包的短期记忆拆分为独立事件，实现与历史消息、朋友圈记录的精准时间线交叉排序。
+  - **长期记忆时间算法修正**: 重构 `parse_week_key_to_dates`，将 `WeekN` 的排序基准点修正为该周真实的**周日 23:59**（或月底），显著提升了时间线的逻辑严密性。
+- **群聊系统增强**:
+  - 修复了群聊接口 `group_chat` 未能正确包含全局格式规范（Global Format）的问题。
 
 ## [2.6.0] - 2026-03-16
 ### Added (新增)
