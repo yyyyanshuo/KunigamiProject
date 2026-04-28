@@ -3,8 +3,8 @@ import time
 import re
 import json
 import sqlite3 # 导入 sqlite3 库
-from datetime import datetime, timedelta, time
-from flask import Flask, request, jsonify, send_from_directory, render_template, session, redirect, url_for # <--- 加上这个
+from datetime import datetime, timedelta, time as dt_time
+from flask import Flask, request, jsonify, send_from_directory, send_file, render_template, session, redirect, url_for # <--- 加上这个
 from dotenv import load_dotenv
 import urllib3
 from apscheduler.schedulers.background import BackgroundScheduler # 新增
@@ -1678,7 +1678,7 @@ def extract_long_memory_with_timeline_ts(char_id, recent_messages=None, user_lat
         if date_range:
             _, last_date = date_range
             # 该周最后一天的23:59
-            ts_23_59 = datetime.combine(last_date, time(23, 59))
+            ts_23_59 = datetime.combine(last_date, dt_time(23, 59))
             result.append((content, last_date, ts_23_59))
             print(f"[DEBUG] extract_long_memory: 添加事件 - {ts_23_59.strftime('%Y-%m-%d %H:%M')}")
     
@@ -1721,7 +1721,7 @@ def extract_medium_memory_with_timeline_ts(char_id) -> list:
             print(f"[DEBUG] extract_medium_memory: 找到 {day_key} 的记忆 - {content[:50]}")
             if content:
                 # 该天的23:59作为排序时间戳
-                ts_23_59 = datetime.combine(day_date, time(23, 59))
+                ts_23_59 = datetime.combine(day_date, dt_time(23, 59))
                 result.append((content, day_date, ts_23_59))
         else:
             print(f"[DEBUG] extract_medium_memory: {day_key} 没有记忆")
@@ -1784,18 +1784,66 @@ def extract_short_memory_with_timeline_ts(char_id) -> list:
                 if time_part:
                     try:
                         h, m = map(int, time_part.split(':'))
-                        ts = datetime.combine(date_obj, time(h, m))
+                        ts = datetime.combine(date_obj, dt_time(h, m))
                     except Exception:
-                        ts = datetime.combine(date_obj, time(0, 0))
+                        ts = datetime.combine(date_obj, dt_time(0, 0))
                     content_display = f"[{date_key} {time_part}] {event_text}"
                 else:
-                    ts = datetime.combine(date_obj, time(0, 0))
+                    ts = datetime.combine(date_obj, dt_time(0, 0))
                     content_display = f"[{date_key}] {event_text}"
                 
                 result.append((content_display, date_obj, ts))
     
     print(f"[DEBUG] extract_short_memory: 最终返回 {len(result)} 条独立事件")
     return result
+
+
+def append_short_memory_event(char_id, event_content, date_str, time_str):
+    """往 6_memory_short.json 中追加一条短期记忆。"""
+    try:
+        _, prompts_dir = get_paths(char_id)
+        short_mem_path = os.path.join(prompts_dir, "6_memory_short.json")
+        
+        # 1. 加载现有数据
+        current_data = {}
+        if os.path.exists(short_mem_path):
+            with open(short_mem_path, "r", encoding="utf-8-sig") as f:
+                try: 
+                    current_data = json.load(f) or {}
+                except: 
+                    pass
+        
+        # 2. 格式化数据结构 (兼容 list/dict)
+        day_data = current_data.get(date_str, {})
+        existing_events = []
+        last_id = 0
+        
+        if isinstance(day_data, list):
+            existing_events = day_data
+        elif isinstance(day_data, dict):
+            existing_events = day_data.get("events", [])
+            last_id = day_data.get("last_id", 0)
+        
+        # 3. 追加新事件 (去重: 如果同一时间有相同的内容，则不添加)
+        is_duplicate = any(e.get("time") == time_str and e.get("event") == event_content for e in existing_events)
+        if not is_duplicate:
+            existing_events.append({
+                "time": time_str,
+                "event": event_content
+            })
+            # 按时间排序
+            existing_events.sort(key=lambda x: x.get("time", ""))
+            
+            # 4. 写回文件
+            current_data[date_str] = {"events": existing_events, "last_id": last_id}
+            with open(short_mem_path, "w", encoding="utf-8") as f:
+                json.dump(current_data, f, ensure_ascii=False, indent=2)
+            print(f"[DEBUG] append_short_memory: 已保存事件到 {char_id} 的短期记忆")
+        else:
+            print(f"[DEBUG] append_short_memory: 事件重复，跳过写入")
+            
+    except Exception as e:
+        print(f"[DEBUG] append_short_memory Error: {e}")
 
 
 def extract_recent_messages_with_labels(char_id, limit=20) -> list:
@@ -2109,10 +2157,26 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
     prompt_parts.append(f"【現在時刻】\n{time_info}")
     
     # ===== 【身份提示】=====
-    char_name = get_char_name(char_id)
     if char_name:
         prompt_parts.append(f"【あなたの正体】\nあなたは {char_name} です。")
     
+    # ===== 【语言控制】=====
+    lang = get_ai_language()
+    if lang == "zh":
+        lang_instruction = (
+            "\n\n【Language Control / 语言控制】\n"
+            "请注意：无论上述设定使用何种语言，你**必须使用中文**进行回复。\n"
+            "在保留角色语气、口癖和性格特征的前提下，自然地转化为中文表达。"
+        )
+        prompt_parts.append(lang_instruction)
+    elif lang == "ja":
+        lang_instruction = (
+            "\n\n【Language Control / 言語制御】\n"
+            "ご注意：設定やユーザーの入力に関わらず、あなたは**必ず日本語**で返答してください。\n"
+            "キャラクターの性格や口調を維持したまま、自然な日本語で表現してください。"
+        )
+        prompt_parts.append(lang_instruction)
+
     return "\n\n".join(prompt_parts)
 
 
@@ -2362,7 +2426,7 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
     current_date_str = now.strftime('%Y-%m-%d %A')
 
     # 【修改】说明文字改成日语
-    prompt_parts.append(f"【Current Date / 現在の日付】\n今日は: {current_date_str}\n(以下の会話履歴には時間 [HH:MM] のみが含まれています。現在の日付に基づいて理解してください)")
+    prompt_parts.append(f"【Current Date / 現在の日付】\n今日は: {current_date_str}\n(以下の会話履歴には時間 [HH:MM] のみが含まれています。现在の日付に基づいて理解してください)")
 
     # ========== 新顺序：10. 上下文（语言控制） ==========
     lang = get_ai_language()
@@ -2374,7 +2438,15 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
             "在保留角色语气、口癖和性格特征的前提下，自然地转化为中文表达。"
         )
         prompt_parts.append(lang_instruction)
-
+    elif lang == "ja":
+        # 强力指令：必须用日语回复
+        lang_instruction = (
+            "\n\n【Language Control / 言語制御】\n"
+            "ご注意：設定やユーザーの入力に関わらず、あなたは**必ず日本語**で返答してください。\n"
+            "キャラクターの性格や口調を維持したまま、自然な日本語で表現してください。"
+        )
+        prompt_parts.append(lang_instruction)
+    
     return "\n\n".join(prompt_parts)
 
 # --- 工具：构建群聊时的关系 Prompt (ID -> Name 映射版) ---
@@ -2943,7 +3015,9 @@ def require_login():
     # 定义不需要登录就能访问的白名单
     allowed_routes = [
         'login_page', 'login_api', 'register_page', 'register_api',  # 登录 / 注册相关
-        'static', 'manifest', 'service_worker', 'app_logo' # 静态资源 & PWA
+        'forgot_password_page', 'forgot_password_send_code', 'forgot_password_reset', # 忘记密码相关
+        'static', 'manifest', 'service_worker', 'app_logo', # 静态资源 & PWA
+        'handle_theme_settings' # 允许未登录时访问主题设置，防止登录页被加载屏卡死
     ]
 
     # 如果当前请求的 endpoint 不在白名单，且没有有效登录态，则跳转登录页
@@ -2962,6 +3036,12 @@ def register_page():
     if 'user_id' in session or 'logged_in' in session:
         return redirect('/')
     return render_template("register.html")
+
+@app.route("/forgot_password")
+def forgot_password_page():
+    if 'user_id' in session or 'logged_in' in session:
+        return redirect('/')
+    return render_template("forgot_password.html")
 
 
 @app.route("/api/register", methods=["POST"])
@@ -3019,6 +3099,235 @@ def register_api():
 # --- 登录 API（支持多用户 + 兼容旧单用户逻辑） ---
 @app.route("/api/login", methods=["POST"])
 def login_api():
+    data = request.json or {}
+    input_user = (data.get("username") or "").strip()
+    input_pass = data.get("password") or ""
+
+    # 1. 优先按邮箱在 users.db 里查找（新多用户逻辑）
+    if input_user and input_pass:
+        try:
+            conn = sqlite3.connect(USERS_DB)
+            cur = conn.cursor()
+            cur.execute("SELECT id, email, password_hash, display_name FROM users WHERE email = ?", (input_user.lower(),))
+            row = cur.fetchone()
+            conn.close()
+            if row and check_password_hash(row[2], input_pass):
+                user_id = row[0]
+                email = row[1]
+                display_name = row[3] or email
+
+                session['user_id'] = user_id
+                session['logged_in'] = True
+                session.permanent = True
+
+                device_id = _track_device_login(user_id, email=email, display_name=display_name)
+                resp = jsonify({"status": "success"})
+                resp.set_cookie("device_id", device_id, max_age=30 * 24 * 3600, httponly=True, samesite="Lax")
+                return resp
+        except Exception as e:
+            print(f"[Login] users.db 查询失败: {e}")
+
+    # 2. 向下兼容：如果没有在 users 表中找到，则读取旧的 user_settings.json
+    saved_user = "admin"
+    saved_pass = "123456"
+    user_data = {}
+    if os.path.exists(USER_SETTINGS_FILE):
+        try:
+            with open(USER_SETTINGS_FILE, "r", encoding="utf-8") as f:
+                user_data = json.load(f)
+                saved_user = user_data.get("current_user_name", "admin")
+                saved_pass = user_data.get("password", "123456")  # 旧逻辑中的明文密码
+        except Exception:
+            pass
+
+    if input_user == saved_user and input_pass == saved_pass:
+        # 如果老账号登录成功，则在 users.db 中自动迁移/创建一个默认用户记录
+        try:
+            conn = sqlite3.connect(USERS_DB)
+            cur = conn.cursor()
+            email = (user_data.get("email") or f"{saved_user}@local").lower()
+            cur.execute("SELECT id FROM users WHERE email = ?", (email,))
+            row = cur.fetchone()
+            if row:
+                user_id = row[0]
+            else:
+                from datetime import datetime
+                cur.execute(
+                    "INSERT INTO users (email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?)",
+                    (email, generate_password_hash(saved_pass), saved_user, datetime.now().isoformat())
+                )
+                user_id = cur.lastrowid
+                conn.commit()
+            conn.close()
+
+            session['user_id'] = user_id
+            session['logged_in'] = True
+            session.permanent = True
+
+            device_id = _track_device_login(user_id, email=email, display_name=saved_user)
+            resp = jsonify({"status": "success"})
+            resp.set_cookie("device_id", device_id, max_age=30 * 24 * 3600, httponly=True, samesite="Lax")
+            return resp
+        except Exception as e:
+            print(f"[Login] 旧账号迁移失败: {e}")
+            # 退回老的单用户登录标记
+            session['logged_in'] = True
+            session.permanent = True
+            return jsonify({"status": "success"})
+
+    return jsonify({"status": "error", "message": "用户名或密码错误"}), 401
+
+# --- 【新增】忘记密码相关接口 ---
+# 存储验证码的全局字典 (生产环境应使用 Redis 或带有过期时间的缓存)
+# 格式: { "email": {"code": "123456", "expire": timestamp} }
+reset_codes = {}
+
+@app.route("/api/forgot_password/send_code", methods=["POST"])
+def forgot_password_send_code():
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    
+    if not email or "@" not in email:
+        return jsonify({"status": "error", "message": "请输入有效的邮箱"}), 400
+
+    # 1. 检查用户是否存在
+    try:
+        conn = sqlite3.connect(USERS_DB)
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM users WHERE email = ?", (email,))
+        user = cur.fetchone()
+        conn.close()
+        
+        if not user:
+            return jsonify({"status": "error", "message": "该邮箱未注册", "error_type": "email"}), 404
+            
+        # 2. 生成验证码
+        import random
+        code = str(random.randint(100000, 999999))
+        
+        # 3. 记录验证码 (有效期 10 分钟)
+        reset_codes[email] = {
+            "code": code,
+            "expire": time.time() + 600
+        }
+        
+        # 4. 发送邮件 (异步)
+        subject = "Kunigami AI - 重置密码验证码"
+        content = f"您好！您正尝试为 Kunigami AI 账号重置密码。\n\n您的验证码是：{code}\n\n该验证码 10 分钟内有效。如果不是您本人操作，请忽略此邮件。"
+        
+        # 调试输出
+        print(f"DEBUG: Attempting to send reset code {code} to {email}")
+
+        # 直接利用已有的 send_email_notification
+        # 修改 receiver 获取逻辑，因为 reset 场景下无法依赖 _load_user_settings (未登录)
+        # 所以我们暂时需要一个通用的发送函数或调整 _send_email_thread
+        
+        # 为了兼容 _send_email_thread 的逻辑，我们临时修改它的行为或在这里通过 threading 发送
+        def _send_reset_email(addr, sub, body):
+            sender = os.getenv("MAIL_SENDER")
+            pwd = os.getenv("MAIL_PASSWORD")
+            host = os.getenv("MAIL_SERVER", "smtp.qq.com")
+            
+            # 【修复】新加坡服务器连接 Gmail/外部 SMTP 可能存在的端口连通性问题
+            # SMTP_SSL (465) 在某些云厂商会被拦截，尝试使用 SMTP + STARTTLS (587)
+            # 或者如果 465 报错，增加重试逻辑
+            port = int(os.getenv("MAIL_PORT", 465))
+            
+            if not sender or not pwd:
+                print("❌ [Reset] 配置缺失: MAIL_SENDER 或 MAIL_PASSWORD")
+                return
+            
+            try:
+                msg = MIMEText(body, 'plain', 'utf-8')
+                msg['From'] = formataddr(["Kunigami AI", sender])
+                msg['To'] = formataddr(["User", addr])
+                msg['Subject'] = Header(sub, 'utf-8')
+
+                if port == 465:
+                    server = smtplib.SMTP_SSL(host, port, timeout=10)
+                else:
+                    server = smtplib.SMTP(host, port, timeout=10)
+                    if port == 587:
+                        server.starttls()
+                
+                server.login(sender, pwd)
+                server.sendmail(sender, [addr], msg.as_string())
+                server.quit()
+                print(f"📧 [Reset] 成功发送验证码到 {addr}")
+            except Exception as e:
+                print(f"❌ [Reset] 验证码发送失败: {e}")
+                # 尝试备用方案：如果 465 失败且是 QQ/Foxmail，尝试 587 端口
+                if "Connection unexpectedly closed" in str(e) and port == 465:
+                    print("🔄 [Reset] 尝试使用 STARTTLS (587端口) 重试...")
+                    try:
+                        server = smtplib.SMTP(host, 587, timeout=10)
+                        server.starttls()
+                        server.login(sender, pwd)
+                        server.sendmail(sender, [addr], msg.as_string())
+                        server.quit()
+                        print(f"📧 [Reset] 通过 587 端口重试成功！")
+                    except Exception as e2:
+                        print(f"❌ [Reset] 587 端口重试也失败: {e2}")
+                
+        threading.Thread(target=_send_reset_email, args=(email, subject, content)).start()
+        
+        return jsonify({"status": "success", "message": "验证码已发送至您的邮箱"})
+        
+    except Exception as e:
+        print(f"[Reset] 数据库异常: {e}")
+        return jsonify({"status": "error", "message": "系统繁忙，请重试"}), 500
+
+@app.route("/api/forgot_password/reset", methods=["POST"])
+def forgot_password_reset():
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    code = (data.get("code") or "").strip()
+    new_password = data.get("password") or ""
+    
+    if not email or not code or not new_password:
+        return jsonify({"status": "error", "message": "请填写完整信息"}), 400
+
+    # 1. 验证码校验
+    record = reset_codes.get(email)
+    if not record:
+        return jsonify({"status": "error", "message": "验证码错误或已失效", "error_type": "code"}), 400
+        
+    if time.time() > record["expire"]:
+        del reset_codes[email]
+        return jsonify({"status": "error", "message": "验证码已过期，请重新发送", "error_type": "code"}), 400
+        
+    # 【修复】强制清理两端的空白字符，解决“需要加空格”或“复制带空格”的问题
+    target_code = str(record["code"]).strip()
+    input_code = str(code).strip()
+    
+    if target_code != input_code:
+        return jsonify({"status": "error", "message": "验证码输入错误", "error_type": "code"}), 400
+
+    # 2. 更新数据库
+    try:
+        conn = sqlite3.connect(USERS_DB)
+        cur = conn.cursor()
+        
+        # 先确认用户还在
+        cur.execute("SELECT id FROM users WHERE email = ?", (email,))
+        if not cur.fetchone():
+            conn.close()
+            return jsonify({"status": "error", "message": "找回失败：该邮箱账号不存在", "error_type": "email"}), 404
+            
+        # 更新密码
+        password_hash = generate_password_hash(new_password)
+        cur.execute("UPDATE users SET password_hash = ? WHERE email = ?", (password_hash, email))
+        conn.commit()
+        conn.close()
+        
+        # 成功后清除验证码
+        del reset_codes[email]
+        
+        return jsonify({"status": "success", "message": "密码重置成功"})
+        
+    except Exception as e:
+        print(f"[Reset] 更新密码失败: {e}")
+        return jsonify({"status": "error", "message": "系统错误，请联系管理员"}), 500
     data = request.json or {}
     input_user = (data.get("username") or "").strip()
     input_pass = data.get("password") or ""
@@ -3308,6 +3617,15 @@ def _get_moments_id_display():
         except: pass
     return avatars, remarks
 
+@app.route("/api/moments/characters", methods=["GET"])
+def get_moments_characters():
+    """获取所有有权发朋友圈的角色列表。用于前端筛选。"""
+    _, remarks = _get_moments_id_display()
+    # 移除 user，前端单独处理
+    if "user" in remarks:
+        remarks.pop("user")
+    return jsonify(remarks)
+
 @app.route("/api/moments", methods=["GET"])
 def get_moments():
     """朋友圈列表。数据格式：char_id, content, timestamp, liker_ids, comments (commenter_id, content, timestamp)。评论时间大于当前时间的不返回。"""
@@ -3319,6 +3637,8 @@ def get_moments():
         page = 1
     if page < 1: page = 1
     page_size = 10
+
+    filter_char_id = request.args.get("filter_char_id", "all")
 
     avatars, remarks = _get_moments_id_display()
     moments = []
@@ -3333,6 +3653,13 @@ def get_moments():
         return jsonify(moments)
     for post in raw:
         char_id = post.get("char_id", "")
+        # 角色筛选逻辑
+        if filter_char_id != "all":
+            if filter_char_id == "user":
+                if char_id != "user": continue
+            elif char_id != filter_char_id:
+                continue
+        
         comments_ok = []
         for src_idx, c in enumerate(post.get("comments", [])):
             try:
@@ -3472,7 +3799,8 @@ def moments_comment():
             post["comments"] = comments
             raw[idx] = post
             safe_save_json(moments_path, raw)
-            ctx = f"用户评论了你的朋友圈：「{content}」。你的回复：「{reply_text}」。"
+            # 在此处记录角色回复的记忆：包含朋友圈原贴、用户评论、角色回复
+            ctx = f"你在朋友圈发了内容：「{post_content}」。对于用户的评论「{content}」，你回复说：「{reply_text}」。"
             append_moment_event_to_short_memory(author_char_id, ctx)
 
     return jsonify({"status": "success", "comment": {"commenter_id": "user", "content": content, "timestamp": now}})
@@ -3580,20 +3908,41 @@ def _generate_likes_comments_for_user_moment(post_ts_str, post_content):
     except Exception:
         return likers, comments
 
+    # 解析 @ 提及的角色
+    mentioned_ids = []
+    # 获取备注名反查 ID 的映射
+    remark_to_id = { (info.get("remark") or info.get("name") or cid): cid for cid, info in chars_config.items() }
+    import re
+    at_matches = re.findall(r"@([^\s@]+)", post_content)
+    for name in at_matches:
+        if name in remark_to_id:
+            mentioned_ids.append(remark_to_id[name])
+        elif name in chars_config:
+            mentioned_ids.append(name)
+
     for char_id, info in chars_config.items():
-        # 移除深睡眠检查，即使在深睡眠状态也可以点赞和评论（但时间不在深睡眠时段）
+        # 如果是被 @ 的角色，必须生成评论，且时间与朋友圈相同
+        is_mentioned = char_id in mentioned_ids
+        
         intimacy = max(0, min(100, int(info.get("intimacy", 60))))
         p_like = intimacy / 100.0
         p_comment = (intimacy / 100.0) * 0.6
-        if random.random() < p_like:
-            likers.append({"liker_id": char_id, "timestamp": random_ts_in_24h()})
-        if random.random() < p_comment:
+        
+        should_comment = is_mentioned or (random.random() < p_comment)
+        should_like = is_mentioned or (random.random() < p_like)
+
+        if should_like:
+            ts = post_ts_str if is_mentioned else random_ts_in_24h()
+            likers.append({"liker_id": char_id, "timestamp": ts})
+            
+        if should_comment:
             comment_text = _generate_moment_comment(char_id, "user", post_content)
             if comment_text:
+                ts = post_ts_str if is_mentioned else random_ts_in_24h()
                 comments.append({
                     "commenter_id": char_id,
                     "content": comment_text,
-                    "timestamp": random_ts_in_24h()
+                    "timestamp": ts
                 })
     return likers, comments
 
@@ -3626,11 +3975,15 @@ def moments_user_post():
             raw = []
     raw.append(new_post)
     safe_save_json(moments_path, raw)
+
+    # 统一处理角色的短期记忆：在朋友圈保存后再依次记录，确保包含朋友圈内容
     for c in new_post.get("comments", []):
         cid = c.get("commenter_id")
         if cid and cid != "user":
-            ctx = f"用户发了一条朋友圈：「{(content or '')[:200]}」。你的评论：「{c.get('content', '')}」。"
+            # 格式：包含用户朋友圈内容 + 角色的评论内容
+            ctx = f"看到用户的朋友圈：「{content}」。你评论说：「{c.get('content', '')}」。"
             append_moment_event_to_short_memory(cid, ctx)
+            
     return jsonify({"status": "success", "timestamp": now})
 
 
@@ -3707,6 +4060,137 @@ def moments_regenerate():
         raw[idx] = post
         safe_save_json(moments_path, raw)
     return jsonify({"status": "success"})
+
+
+@app.route("/api/moments/delete", methods=["POST"])
+def moments_delete():
+    """彻底删除某条朋友圈。body: { char_id, timestamp }。"""
+    data = request.get_json() or {}
+    char_id = data.get("char_id")
+    timestamp_str = data.get("timestamp")
+    if not char_id or not timestamp_str:
+        return jsonify({"error": "缺少 char_id 或 timestamp"}), 400
+
+    moments_path, _ = get_moments_paths()
+    if not os.path.exists(moments_path):
+        return jsonify({"error": "暂无朋友圈数据"}), 404
+    try:
+        with open(moments_path, "r", encoding="utf-8-sig") as f:
+            raw = json.load(f)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    idx, post = _find_moment_post(raw, char_id, timestamp_str)
+    if idx is None:
+        return jsonify({"error": "未找到该条朋友圈"}), 404
+
+    # 执行物理删除
+    del raw[idx]
+    safe_save_json(moments_path, raw)
+    return jsonify({"status": "success"})
+
+
+@app.route("/api/moments/edit", methods=["POST"])
+def moments_edit():
+    """编辑朋友圈正文。body: { char_id, timestamp, new_content }。"""
+    data = request.get_json() or {}
+    char_id = data.get("char_id")
+    timestamp_str = data.get("timestamp")
+    new_content = (data.get("new_content") or "").strip()
+    if not char_id or not timestamp_str or not new_content:
+        return jsonify({"error": "缺少必要参数"}), 400
+
+    moments_path, _ = get_moments_paths()
+    if not os.path.exists(moments_path):
+        return jsonify({"error": "暂无数据"}), 404
+    try:
+        with open(moments_path, "r", encoding="utf-8-sig") as f:
+            raw = json.load(f)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    idx, post = _find_moment_post(raw, char_id, timestamp_str)
+    if idx is None:
+        return jsonify({"error": "未找到该条朋友圈"}), 404
+
+    post["content"] = new_content
+    raw[idx] = post
+    safe_save_json(moments_path, raw)
+    return jsonify({"status": "success"})
+
+
+@app.route("/api/moments/comment/delete", methods=["POST"])
+def moments_comment_delete():
+    """彻底删除某条评论。body: { char_id, timestamp, comment_index }。"""
+    data = request.get_json() or {}
+    char_id = data.get("char_id")
+    timestamp_str = data.get("timestamp")
+    comment_index = data.get("comment_index")
+    try:
+        comment_index = int(comment_index)
+    except:
+        return jsonify({"error": "无效的 comment_index"}), 400
+
+    moments_path, _ = get_moments_paths()
+    if not os.path.exists(moments_path):
+        return jsonify({"error": "暂无数据"}), 404
+    try:
+        with open(moments_path, "r", encoding="utf-8-sig") as f:
+            raw = json.load(f)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    idx, post = _find_moment_post(raw, char_id, timestamp_str)
+    if idx is None:
+        return jsonify({"error": "未找到朋友圈"}), 404
+
+    comments = post.get("comments", [])
+    if 0 <= comment_index < len(comments):
+        del comments[comment_index]
+        post["comments"] = comments
+        raw[idx] = post
+        safe_save_json(moments_path, raw)
+        return jsonify({"status": "success"})
+    return jsonify({"error": "评论未找到"}), 404
+
+
+@app.route("/api/moments/comment/edit", methods=["POST"])
+def moments_comment_edit():
+    """编辑某条评论。body: { char_id, timestamp, comment_index, new_content }。"""
+    data = request.get_json() or {}
+    char_id = data.get("char_id")
+    timestamp_str = data.get("timestamp")
+    comment_index = data.get("comment_index")
+    new_content = (data.get("new_content") or "").strip()
+    try:
+        comment_index = int(comment_index)
+    except:
+        return jsonify({"error": "无效的 id"}), 400
+
+    if not new_content:
+        return jsonify({"error": "内容不能为空"}), 400
+
+    moments_path, _ = get_moments_paths()
+    if not os.path.exists(moments_path):
+        return jsonify({"error": "暂无数据"}), 404
+    try:
+        with open(moments_path, "r", encoding="utf-8-sig") as f:
+            raw = json.load(f)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    idx, post = _find_moment_post(raw, char_id, timestamp_str)
+    if idx is None:
+        return jsonify({"error": "未找到"}), 404
+
+    comments = post.get("comments", [])
+    if 0 <= comment_index < len(comments):
+        comments[comment_index]["content"] = new_content
+        post["comments"] = comments
+        raw[idx] = post
+        safe_save_json(moments_path, raw)
+        return jsonify({"status": "success"})
+    return jsonify({"error": "评论未找到"}), 404
 
 
 # 2. 【新增】个人主页
@@ -5190,14 +5674,348 @@ def get_prompt_version_status():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ===================== 【新增】主题风格设置 API =====================
+
+# 预定义的主题颜色方案
+THEME_PRESETS = {
+    "pink": {
+        "name": "粉红",
+        "primary": "#ffb6b9",
+        "primary-dark": "#f09598",
+        "bg": "#f2f4f8",
+        "card-bg": "#ffffff"
+    },
+    "blue": {
+        "name": "蓝色",
+        "primary": "#a8d8ea",
+        "primary-dark": "#7dbfd3",
+        "bg": "#f0f4f8",
+        "card-bg": "#ffffff"
+    },
+    "purple": {
+        "name": "紫色",
+        "primary": "#c8a8d8",
+        "primary-dark": "#b390d3",
+        "bg": "#f5f0f8",
+        "card-bg": "#ffffff"
+    },
+    "green": {
+        "name": "绿色",
+        "primary": "#a8d8a8",
+        "primary-dark": "#90c890",
+        "bg": "#f0f8f0",
+        "card-bg": "#ffffff"
+    },
+    "orange": {
+        "name": "橙色",
+        "primary": "#ffb366",
+        "primary-dark": "#ff9944",
+        "bg": "#f8f4f0",
+        "card-bg": "#ffffff"
+    }
+}
+
+def _get_theme_config_file():
+    """获取当前用户的主题配置文件路径"""
+    user_id = get_current_user_id()
+    if user_id:
+        user_cfg_dir = os.path.join(USERS_ROOT, str(user_id), "configs")
+        os.makedirs(user_cfg_dir, exist_ok=True)
+        return os.path.join(user_cfg_dir, "theme_settings.json")
+    else:
+        cfg_dir = os.path.join(BASE_DIR, "configs")
+        os.makedirs(cfg_dir, exist_ok=True)
+        return os.path.join(cfg_dir, "theme_settings.json")
+
+@app.route("/api/theme/settings", methods=["GET", "POST"])
+def handle_theme_settings():
+    """获取或保存主题设置"""
+    theme_file = _get_theme_config_file()
+    default_theme = {
+        "preset": "pink",
+        "custom_colors": {},
+        "default_chat_bg": None,  # 默认聊天背景图片名称
+    }
+
+    if request.method == "GET":
+        if os.path.exists(theme_file):
+            try:
+                with open(theme_file, "r", encoding="utf-8") as f:
+                    settings = json.load(f)
+                # 移合并默认值
+                for key in default_theme:
+                    if key not in settings:
+                        settings[key] = default_theme[key]
+                return jsonify(settings)
+            except:
+                return jsonify(default_theme)
+        return jsonify(default_theme)
+
+    elif request.method == "POST":
+        try:
+            data = request.json or {}
+            theme_file_dir = os.path.dirname(theme_file)
+            os.makedirs(theme_file_dir, exist_ok=True)
+            
+            with open(theme_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            return jsonify({"status": "success"})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+@app.route("/api/theme/presets", methods=["GET"])
+def get_theme_presets():
+    """获取预定义的主题方案"""
+    return jsonify(THEME_PRESETS)
+
+@app.route("/api/theme/upload_bg", methods=["POST"])
+def upload_theme_background():
+    """上传默认聊天背景图"""
+    try:
+        user_id = get_current_user_id()
+        if user_id:
+            bg_dir = os.path.join(USERS_ROOT, str(user_id), "configs", "theme_backgrounds")
+        else:
+            bg_dir = os.path.join(BASE_DIR, "configs", "theme_backgrounds")
+        
+        os.makedirs(bg_dir, exist_ok=True)
+        
+        if "file" not in request.files:
+            return jsonify({"error": "No file provided"}), 400
+        
+        file = request.files["file"]
+        if file.filename == "":
+            return jsonify({"error": "No file selected"}), 400
+        
+        # 验证文件类型
+        allowed_ext = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in allowed_ext:
+            return jsonify({"error": "Image type not allowed"}), 400
+        
+        # 生成唯一文件名
+        import uuid
+        new_filename = f"default_bg_{uuid.uuid4().hex}{ext}"
+        file_path = os.path.join(bg_dir, new_filename)
+        file.save(file_path)
+        
+        return jsonify({
+            "status": "success",
+            "filename": new_filename,
+            "path": f"/theme_backgrounds/{new_filename}"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/theme_backgrounds/<filename>")
+def serve_theme_background(filename):
+    """提供主题背景图片"""
+    user_id = get_current_user_id()
+    if user_id:
+        bg_dir = os.path.join(USERS_ROOT, str(user_id), "configs", "theme_backgrounds")
+    else:
+        bg_dir = os.path.join(BASE_DIR, "configs", "theme_backgrounds")
+    
+    file_path = os.path.join(bg_dir, filename)
+    if os.path.exists(file_path):
+        return send_file(file_path)
+    return "", 404
+
+# ===================== 【新增】聊天背景设置 API =====================
+
+def _get_chat_bg_config_file(char_id):
+    """获取聊天背景配置文件路径"""
+    _, prompts_dir = get_paths(char_id)
+    return os.path.join(prompts_dir, "chat_bg_config.json")
+
+@app.route("/api/<char_id>/chat_background", methods=["GET"])
+def get_chat_background(char_id):
+    """获取聊天背景配置"""
+    config_file = _get_chat_bg_config_file(char_id)
+    if os.path.exists(config_file):
+        try:
+            with open(config_file, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            return jsonify(config)
+        except:
+            return jsonify({"filename": None})
+    return jsonify({"filename": None})
+
+@app.route("/api/<char_id>/upload_chat_background", methods=["POST"])
+def upload_chat_background(char_id):
+    """上传聊天背景图"""
+    try:
+        _, prompts_dir = get_paths(char_id)
+        bg_dir = os.path.join(prompts_dir, "backgrounds")
+        os.makedirs(bg_dir, exist_ok=True)
+        
+        if "file" not in request.files:
+            return jsonify({"error": "No file provided"}), 400
+        
+        file = request.files["file"]
+        if file.filename == "":
+            return jsonify({"error": "No file selected"}), 400
+        
+        # 验证文件类型
+        allowed_ext = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in allowed_ext:
+            return jsonify({"error": "Image type not allowed"}), 400
+        
+        # 生成唯一文件名
+        import uuid
+        new_filename = f"bg_{uuid.uuid4().hex}{ext}"
+        file_path = os.path.join(bg_dir, new_filename)
+        file.save(file_path)
+        
+        return jsonify({
+            "status": "success",
+            "filename": new_filename
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/<char_id>/save_chat_background", methods=["POST"])
+def save_chat_background(char_id):
+    """保存聊天背景配置"""
+    try:
+        config = request.json or {}
+        config_file = _get_chat_bg_config_file(char_id)
+        config_dir = os.path.dirname(config_file)
+        os.makedirs(config_dir, exist_ok=True)
+        
+        with open(config_file, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/char_backgrounds/<char_id>/<filename>")
+def serve_char_background(char_id, filename):
+    """提供聊天背景图"""
+    _, prompts_dir = get_paths(char_id)
+    bg_dir = os.path.join(prompts_dir, "backgrounds")
+    file_path = os.path.join(bg_dir, filename)
+    
+    if os.path.exists(file_path):
+        return send_file(file_path)
+    return "", 404
+
+# ===================== 【新增】群聊背景设置 API =====================
+
+def _get_group_chat_bg_config_file(group_id):
+    """获取群聊背景配置文件路径"""
+    group_dir = get_group_dir(group_id)
+    return os.path.join(group_dir, "chat_bg_config.json")
+
+@app.route("/api/group/<group_id>/chat_background", methods=["GET"])
+def get_group_chat_background(group_id):
+    """获取群聊背景配置"""
+    config_file = _get_group_chat_bg_config_file(group_id)
+    if os.path.exists(config_file):
+        try:
+            with open(config_file, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            return jsonify(config)
+        except:
+            return jsonify({"filename": None})
+    return jsonify({"filename": None})
+
+@app.route("/api/group/<group_id>/upload_chat_background", methods=["POST"])
+def upload_group_chat_background(group_id):
+    """上传群聊背景图"""
+    try:
+        group_dir = get_group_dir(group_id)
+        bg_dir = os.path.join(group_dir, "backgrounds")
+        os.makedirs(bg_dir, exist_ok=True)
+        
+        if "file" not in request.files:
+            return jsonify({"error": "No file provided"}), 400
+        
+        file = request.files["file"]
+        if file.filename == "":
+            return jsonify({"error": "No file selected"}), 400
+        
+        # 验证文件类型
+        allowed_ext = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in allowed_ext:
+            return jsonify({"error": "Image type not allowed"}), 400
+        
+        # 生成唯一文件名
+        import uuid
+        new_filename = f"bg_{uuid.uuid4().hex}{ext}"
+        file_path = os.path.join(bg_dir, new_filename)
+        file.save(file_path)
+        
+        return jsonify({
+            "status": "success",
+            "filename": new_filename
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/group/<group_id>/save_chat_background", methods=["POST"])
+def save_group_chat_background(group_id):
+    """保存群聊背景配置"""
+    try:
+        config = request.json or {}
+        config_file = _get_group_chat_bg_config_file(group_id)
+        config_dir = os.path.dirname(config_file)
+        os.makedirs(config_dir, exist_ok=True)
+        
+        with open(config_file, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/group_backgrounds/<group_id>/<filename>")
+def serve_group_background(group_id, filename):
+    """提供群聊背景图"""
+    group_dir = get_group_dir(group_id)
+    bg_dir = os.path.join(group_dir, "backgrounds")
+    file_path = os.path.join(bg_dir, filename)
+    
+    if os.path.exists(file_path):
+        return send_file(file_path)
+    return "", 404
+
 # 这是在 app.py 文件中的 call_openrouter 函数
 
 # ---------------------- OpenRouter / Compatible API ----------------------
 
+# --- 【新增】记录 API 报错日志 ---
+def log_api_error(service_name, status_code, response_text, messages=None):
+    """当 API 返回非 200 或解析失败时调用，记录到 logs/api.log"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_content = [
+        f"\n{'!'*20} API ERROR: {service_name} {'!'*20}",
+        f"Time: {timestamp}",
+        f"Status Code: {status_code}",
+        f"Response: {response_text[:1000]}" # 记录前1000字，防止过大
+    ]
+    if messages:
+        log_content.append("--- Last Prompt Sent ---")
+        for i, m in enumerate(messages[-3:]): # 只记录最后3条上下文，节省日志空间
+            log_content.append(f"[{m.get('role')}]: {m.get('content')[:200]}")
+    
+    final_log = "\n".join(log_content) + f"\n{'!'*50}\n"
+    print(final_log) # 终端显示
+    
+    try:
+        log_dir = os.path.join(BASE_DIR, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        with open(os.path.join(log_dir, "api.log"), "a", encoding="utf-8") as f:
+            f.write(final_log)
+    except: pass
+
 def get_relay_provider(user_id=None):
     """
     获取当前 relay 线路配置的中转商提供商。
-    返回值：'new' (新的中转商) 或 'old' (旧的中转商)
+    返回值：'new' (新的中转商) 或 'old' (旧的中转商) 或自定义URL
     如果配置中未找到，默认返回 'old'
     
     参数：
@@ -5219,7 +6037,15 @@ def get_relay_provider(user_id=None):
         with open(api_cfg_file, "r", encoding="utf-8") as f:
             config = json.load(f)
         relay_config = config.get("routes", {}).get("relay", {})
-        return relay_config.get("relay_provider", "old")
+        provider = relay_config.get("relay_provider", "old")
+        
+        # 如果选择了自定义网址，返回自定义URL
+        if provider == "custom":
+            custom_url = relay_config.get("relay_custom_url")
+            if custom_url:
+                return custom_url
+        
+        return provider
     except:
         return "old"  # 读取失败时默认使用旧的中转商
 
@@ -5242,7 +6068,11 @@ def call_openrouter(messages, char_id="unknown", model_name="gpt-3.5-turbo", use
 
     # 2. 根据配置选择中转商
     relay_provider = get_relay_provider(user_id)
-    if relay_provider == "old":
+    if relay_provider.startswith("http://") or relay_provider.startswith("https://"):
+        # 自定义网址
+        base_url = relay_provider
+        print(f"--- [Debug] Using CUSTOM relay provider: {base_url}")
+    elif relay_provider == "old":
         base_url = OPENROUTER_BASE_URL_OLD
         print(f"--- [Debug] Using OLD relay provider: {base_url}")
     else:
@@ -5295,16 +6125,28 @@ def call_openrouter(messages, char_id="unknown", model_name="gpt-3.5-turbo", use
 
         # 🛡️ 5. 核心修改：如果是 403 或 525 拦截，绝对不能把 HTML 源码传回前端
         if r.status_code != 200:
-            # 详细报错内容打印到服务器终端，方便你排查
-            print(f"🔥 [API 异常报告] URL: {url} | 状态码: {r.status_code}")
-            print(f"🔥 返回内容预览 (前500字): {r.text[:500]}")
+            log_api_error(f"OpenRouter ({model_name})", r.status_code, r.text, messages=messages)
             
-            if r.status_code == 403:
+            common_suffix = "（API网站：新中转商：https://api2d.com | 旧中转商：https://vg.a3e.top/ | 自定义：自行配置）"
+            
+            if r.status_code == 401:
+                return f"（系统提示：身份验证失败。请检查是否在【个人主页-账号与通知设置-openrouter】中正确填写了 API Key。\n{common_suffix}）"
+            elif r.status_code == 402:
+                return f"（系统提示：账户点数不足，请前往 API 网站充值。\n{common_suffix}）"
+            elif r.status_code == 403:
+                # 细化 403：部分中转商用 403 表示模型代码错误
+                err_text = r.text.lower()
+                if "model" in err_text or "not found" in err_text:
+                    return f"（系统提示：请正确填写模型代码。\n{common_suffix}）"
                 return "（系统提示：当前网络波动，AI 暂时被防火墙拦截，请换个话题或稍后再试。）"
+            elif r.status_code == 524:
+                return "（系统提示：请求超时，AI 思考时间过长。请尝试缩短当前聊天内容或精简人设设定。）"
             elif r.status_code == 525:
                 return "（系统提示：中转服务器连接异常(SSL)，请稍后再试或联系管理员。）"
             elif r.status_code == 429:
                 return "（系统提示：请求过于频繁，AI 累了，请休息一分钟再聊哦。）"
+            elif r.status_code >= 500:
+                return f"（系统提示：AI 服务商目前繁忙（{r.status_code}），请稍后再试。）"
             else:
                 return f"（系统提示：服务连接异常，错误码: {r.status_code}）"
 
@@ -5312,9 +6154,14 @@ def call_openrouter(messages, char_id="unknown", model_name="gpt-3.5-turbo", use
         try:
             result = r.json()
         except Exception as parse_err:
-            print(f"[ERROR] JSON解析失败，收到了非 JSON 脏数据: {parse_err}")
-            print(f"Raw response text: {r.text[:1000]}")
+            log_api_error(f"OpenRouter ({model_name})", "JSON_PARSE_ERROR", r.text, messages=messages)
             return "（系统提示：AI 返回了无法解析的异常信号，请重试。）"
+
+        # 处理 API 返回的 ['error'] 字段
+        if "error" in result:
+            err_msg = result["error"].get("message", "Unknown error")
+            log_api_error(f"OpenRouter ({model_name})", "API_INTERNAL_ERROR", str(result["error"]), messages=messages)
+            return f"（系统提示：AI 服务返回内部错误: {err_msg}）"
 
         # 7. Token 计费记录
         if 'usage' in result:
@@ -5331,6 +6178,11 @@ def call_openrouter(messages, char_id="unknown", model_name="gpt-3.5-turbo", use
         if "choices" not in result or len(result["choices"]) == 0:
             print(f"⚠️ [Empty Response] API 返回了空列表。")
             return "（系统提示：AI 暂时陷入了沉思，请换个话题试试。）"
+
+        # 🛡️ 就在这里！把 API 返回的所有原始 JSON 打印出来
+        import json
+        print("🔍 [DEBUG] API 原始完整响应:")
+        print(json.dumps(result, indent=2, ensure_ascii=False)) 
 
         # 9. 一切正常，提取内容
         try:
@@ -5407,26 +6259,35 @@ def call_gemini(messages, char_id="unknown", model_name="gemini-2.0-flash"):
         # 发送请求
         r = requests.post(url, json=payload, headers=headers, timeout=100)
 
-        # 🛡️ 核心修改：拦截非 200 状态码 (防止 HTML 进入数据库)
+        # 🛡️ 核心修改：拦截非 200 状态码
         if r.status_code != 200:
-            print(f"🔥 [Gemini 官方异常] 状态码: {r.status_code}")
-            print(f"🔥 报错预览: {r.text[:500]}")
+            log_api_error(f"Gemini {model_name}", r.status_code, r.text, messages=messages)
             
             if r.status_code == 400:
-                return "（系统提示：请求格式不正确，或是由于模型不支持此区域。）"
-            elif r.status_code == 429:
-                return "（系统提示：官方接口频率达到上限，请稍等一分钟再试。）"
+                return "（系统提示：请求参数异常（400），请联系管理员检查配置。）"
             elif r.status_code == 403:
-                return "（系统提示：访问被拒绝，请检查 API Key 是否有效。）"
+                return "（系统提示：访问被拒绝（403）。请检查是否在【个人主页-账号与通知设置-gemini】中正确填写了 API Key。）"
+            elif r.status_code == 429:
+                return "（系统提示：请求过于频繁（429），谷歌端限制了访问频率，请发慢一点哦。）"
+            elif r.status_code in [500, 504]:
+                return f"（系统提示：服务器响应超时或内部错误（{r.status_code}），请尝试精简聊天内容或缩减人设设定。）"
+            elif r.status_code == 503:
+                return "（系统提示：谷歌服务端当前过载（503），请稍后再试。）"
             else:
                 return f"（系统提示：AI 暂时无法连接，错误码: {r.status_code}）"
 
-        # 🛡️ 核心修改：捕获 JSON 解析错误
+        # 🛡️ 核心修改：解析 JSON 失败
         try:
             result = r.json()
         except Exception as parse_err:
-            print(f"🔥 [Gemini JSON 失败] {parse_err}")
+            log_api_error(f"Gemini {model_name}", "JSON_PARSE_ERROR", r.text, messages=messages)
             return "（系统提示：接收到了异常信号，请重试。）"
+
+        # 处理错误响应字段
+        if "error" in result:
+            err_info = str(result["error"])
+            log_api_error(f"Gemini {model_name}", "API_INTERNAL_ERROR", err_info, messages=messages)
+            return f"（系统提示：API 内部错误: {result['error'].get('message', 'Unknown')}）"
 
         # 5. 提取 Token 数据
         token_usage = result.get('usageMetadata', {})
@@ -5980,6 +6841,122 @@ def get_prompts_data(char_id):
         data[key] = content
 
     return jsonify(data)
+
+
+# --- 【新增】关系图谱反向读取接口 ---
+@app.route("/api/<char_id>/relationship_reverse")
+def get_relationship_reverse(char_id):
+    """
+    反向模式：遍历所有其他角色，查看他们对 char_id 的关系定义
+    """
+    user_id = get_current_user_id()
+    cfg_file = _get_characters_config_file()
+    
+    if not os.path.exists(cfg_file):
+        return jsonify({})
+        
+    try:
+        with open(cfg_file, "r", encoding="utf-8") as f:
+            all_chars = json.load(f)
+    except:
+        return jsonify({})
+
+    # 获取当前角色的名字（用于在别人的关系表中查找）
+    target_info = all_chars.get(char_id, {})
+    target_name = target_info.get("name") or char_id
+    
+    reverse_data = {}
+    
+    # 遍历所有角色
+    for cid, cinfo in all_chars.items():
+        if cid == char_id:
+            continue
+            
+        # 获取该角色的 prompts 目录
+        _, prompts_dir = get_paths(cid)
+        rel_file = os.path.join(prompts_dir, "2_relationship.json")
+        
+        if os.path.exists(rel_file):
+            try:
+                with open(rel_file, "r", encoding="utf-8-sig") as f:
+                    rel_dict = json.load(f)
+                
+                # 在该角色的关系表中查找目标角色
+                # 兼容性查找：优先匹配 ID (cid)，其次匹配角色名 (target_name)
+                found_key = None
+                if char_id in rel_dict:
+                    found_key = char_id
+                elif target_name in rel_dict:
+                    found_key = target_name
+                
+                if found_key:
+                    reverse_data[cid] = rel_dict[found_key]
+                    # 补充一个字段方便前端显示
+                    reverse_data[cid]["char_name"] = cinfo.get("name") or cid
+            except Exception as e:
+                print(f"Error reading relationship for {cid}: {e}")
+                continue
+                
+    return jsonify(reverse_data)
+
+
+# --- 【新增】保存反向关系接口 ---
+@app.route("/api/<char_id>/save_relationship_reverse", methods=["POST"])
+def save_relationship_reverse(char_id):
+    """
+    保存反向关系：其实就是去修改“对方”的角色关系文件
+    """
+    payload = request.json or {}
+    source_cid = payload.get("source_cid") # “对方”的ID
+    rel_data = payload.get("data") # 新的关系内容
+    
+    if not source_cid:
+        return jsonify({"error": "缺少 source_cid"}), 400
+
+    # 获取当前角色的名字和ID
+    cfg_file = _get_characters_config_file()
+    try:
+        with open(cfg_file, "r", encoding="utf-8") as f:
+            all_chars = json.load(f)
+        target_name = all_chars.get(char_id, {}).get("name") or char_id
+    except:
+        return jsonify({"error": "读取配置失败"}), 500
+
+    # 定位“对方”的关系文件
+    _, prompts_dir = get_paths(source_cid)
+    rel_file = os.path.join(prompts_dir, "2_relationship.json")
+    
+    try:
+        current_rel = {}
+        if os.path.exists(rel_file):
+            with open(rel_file, "r", encoding="utf-8-sig") as f:
+                current_rel = json.load(f)
+        
+        # 兼容性查找：看看是用 ID 存的还是用名字存的
+        found_key = None
+        if char_id in current_rel:
+            found_key = char_id
+        elif target_name in current_rel:
+            found_key = target_name
+
+        if rel_data is None:
+            # 删除逻辑
+            if found_key:
+                del current_rel[found_key]
+        else:
+            # 更新逻辑：如果已存在键则更新，否则新增一个键（优先用 ID）
+            target_key = found_key or char_id
+            current_rel[target_key] = rel_data
+        
+        # 写回
+        os.makedirs(os.path.dirname(rel_file), exist_ok=True)
+        with open(rel_file, "w", encoding="utf-8") as f:
+            json.dump(current_rel, f, ensure_ascii=False, indent=2)
+            
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 # --- 【新增】保存 Prompt 文件的接口 ---
 @app.route("/api/<char_id>/save_prompt", methods=["POST"])
@@ -8009,22 +8986,7 @@ def _generate_moment_comment(commenter_id, post_author_id, post_content):
             if len(text) > 100:
                 text = text[:100]
             
-            # 生成后：将评论记录到短期记忆
-            author_remark = post_author_id
-            try:
-                cfg_file = _get_characters_config_file()
-                if os.path.exists(cfg_file):
-                    with open(cfg_file, "r", encoding="utf-8") as f:
-                        all_chars = json.load(f)
-                        if isinstance(all_chars, dict):
-                            a_info = all_chars.get(post_author_id, {})
-                            author_remark = (a_info.get("remark") or a_info.get("name") or post_author_id)
-            except Exception:
-                pass
-            
-            ctx = f"评论了{author_remark}的朋友圈：「{text}」。"
-            append_moment_event_to_short_memory(commenter_id, ctx)
-            
+            # (底层不再自动写入记忆，由调用方统一处理)
             return text
     except Exception as e:
         print(f"   [Moments] 评论生成失败 {commenter_id}: {e}")
@@ -8071,10 +9033,7 @@ def _generate_moment_reply_to_user(author_char_id, post_content, user_comment):
             if len(text) > 100:
                 text = text[:100]
             
-            # 生成后：将回复记录到短期记忆
-            ctx = f"用户评论了你的朋友圈：「{user_comment}」。你的回复：「{text}」。"
-            append_moment_event_to_short_memory(author_char_id, ctx)
-            
+            # (底层不再自动写入记忆，由调用方统一处理)
             return text
     except Exception as e:
         print(f"   [Moments] 角色回复评论失败 {author_char_id}: {e}")
@@ -8151,16 +9110,45 @@ def trigger_active_moments(char_id):
                 return t.strftime("%Y-%m-%d %H:%M:%S")
 
     likers_data = []
+    comments_data = []
+
+    # 解析 @ 提及
+    # 使用 _get_moments_id_display 获取角色备注与 ID 的映射
+    _, remarks = _get_moments_id_display()
+    remark_to_id = { name: cid for cid, name in remarks.items() }
+    import re
+    mentioned_ids = []
+    at_matches = re.findall(r"@([^\s@]+)", content)
+    for name in at_matches:
+        if name in remark_to_id:
+            mentioned_ids.append(remark_to_id[name])
+        elif name in remarks: # ID 直接匹配
+            mentioned_ids.append(name)
+
     if candidates:
-        n_like = random.randint(0, min(5, len(candidates)))
-        like_cids = _weighted_sample_no_replacement(candidates, n_like)
+        # 处理被 @ 的角色（强制点赞和评论）
+        for mid in mentioned_ids:
+            if mid == "user": continue # 此时是 AI 发的朋友圈，不去 @ 用户（用户无法自动回评论）
+            # 被 @ 的角色强制点赞和评论，时间与朋友圈一致
+            likers_data.append({"liker_id": mid, "timestamp": post_ts_str})
+            comment_text = _generate_moment_comment(mid, char_id, content)
+            if comment_text:
+                comments_data.append({
+                    "commenter_id": mid,
+                    "content": comment_text,
+                    "timestamp": post_ts_str
+                })
+        
+        # 处理其他随机分配的角色
+        remaining_candidates = [c for c in candidates if c not in mentioned_ids]
+        
+        n_like = random.randint(0, min(5, len(remaining_candidates)))
+        like_cids = _weighted_sample_no_replacement(remaining_candidates, n_like)
         for cid in like_cids:
             likers_data.append({"liker_id": cid, "timestamp": random_ts_in_24h()})
 
-    comments_data = []
-    if candidates:
-        n_comment = random.randint(0, min(3, len(candidates)))
-        comment_cids = _weighted_sample_no_replacement(candidates, n_comment)
+        n_comment = random.randint(0, min(3, len(remaining_candidates)))
+        comment_cids = _weighted_sample_no_replacement(remaining_candidates, n_comment)
         for cid in comment_cids:
             comment_text = _generate_moment_comment(cid, char_id, content)
             if comment_text:

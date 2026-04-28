@@ -12,13 +12,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>记忆核心 | Memory Core</title>
+    <!-- 【新增】主题加载脚本 -->
+    <script src="/static/theme-loader.js"></script>
     <style>
         /* --- 全局基础 --- */
         * { box-sizing: border-box; /* 关键：防止内边距撑破容器 */ }
 
         body {
             font-family: "Segoe UI", "PingFang SC", sans-serif;
-            background: linear-gradient(135deg, #fff3f8 0%, #ffe9e1 100%);
+            background: linear-gradient(135deg, var(--primary-rgba-light) 0%, var(--bg-color) 100%);
             margin: 0; padding: 15px; color: #444; min-height: 100vh;
         }
         .container { max-width: 900px; margin: 0 auto; padding-bottom: 80px;}
@@ -29,7 +31,7 @@
             background: rgba(255,255,255,0.6); backdrop-filter: blur(10px);
             padding: 12px 20px; border-radius: 16px; border: 1px solid #ffe5e8;
         }
-        .back-btn { font-size: 24px; margin-right: 15px; cursor: pointer; color: #ffb6b9; }
+        .back-btn { font-size: 24px; margin-right: 15px; cursor: pointer; color: var(--primary-color); }
         h1 { margin: 0; font-size: 16px; color: #333; flex: 1; text-align: center; margin-right: 24px;}
 
         /* 【新增】右上角聊天跳转按钮 */
@@ -37,7 +39,7 @@
             font-size: 20px;
             margin-left: 15px;
             cursor: pointer;
-            color: #ffb6b9;
+            color: var(--primary-color);
             display: flex;
             align-items: center;
             transition: transform 0.2s;
@@ -78,7 +80,7 @@
 
         /* ------------------- 展示模式 (View Mode) ------------------- */
         .view-mode .mem-item { padding: 12px 16px; border-bottom: 1px solid #eee; }
-        .view-mode .mem-header { font-size: 12px; color: #ffb6b9; font-weight: bold; margin-bottom: 6px; word-break: break-all;}
+        .view-mode .mem-header { font-size: 12px; color: var(--primary-color); font-weight: bold; margin-bottom: 6px; word-break: break-all;}
         .view-mode .mem-text { font-size: 14px; white-space: pre-wrap; color: #555; line-height: 1.6; word-break: break-word;}
         .view-mode .time-capsule { display: flex; gap: 10px; padding: 6px 0; font-size: 14px; align-items: flex-start;}
         .view-mode .time-tag { background: #e3f2fd; color: #1565c0; font-size: 12px; padding: 2px 6px; border-radius: 4px; font-family: monospace; white-space: nowrap; margin-top: 2px;}
@@ -100,7 +102,7 @@
             font-family: inherit; font-size: 14px;
             transition: border-color 0.2s;
         }
-        input:focus, textarea:focus { border-color: #ffb6b9; outline: none; }
+        input:focus, textarea:focus { border-color: var(--primary-color); outline: none; }
 
         /* 2. Value 输入框 (内容) - 解决“框太小”问题 */
         textarea.input-val { min-height: 100px; resize: vertical; line-height: 1.5; }
@@ -114,7 +116,7 @@
             color: #888; border-radius: 8px; cursor: pointer; margin-top: 10px; font-weight: bold;
             transition: all 0.2s;
         }
-        .btn-add:hover { border-color: #ffb6b9; color: #ffb6b9; background: #fff; }
+        .btn-add:hover { border-color: var(--primary-color); color: var(--primary-color); background: #fff; }
 
         /* 关系编辑卡片 */
         .rel-edit-card {
@@ -448,8 +450,8 @@
             position: absolute; content: ""; height: 18px; width: 18px;
             left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%;
         }
-        input:checked + .slider { background-color: #ffb6b9; }
-        input:focus + .slider { box-shadow: 0 0 1px #ffb6b9; }
+        input:checked + .slider { background-color: var(--primary-color); }
+        input:focus + .slider { box-shadow: 0 0 1px var(--primary-color); }
         input:checked + .slider:before { transform: translateX(18px); }
 
         /* 禁用状态 */
@@ -458,7 +460,7 @@
 
         /* 情绪滑块 */
         .range-container { display: flex; align-items: center; gap: 10px; width: 60%; }
-        input[type=range] { flex: 1; accent-color: #ffb6b9; }
+        input[type=range] { flex: 1; accent-color: var(--primary-color); }
         .num-input { width: 50px; text-align: center; padding: 4px; border: 1px solid #ddd; border-radius: 6px; }
 
         /* 时间输入 */
@@ -474,7 +476,7 @@
             transition: all 0.2s;
         }
         .mode-btn.active {
-            background: #ffb6b9; color: white; font-weight: bold; box-shadow: 0 2px 5px rgba(255,182,185,0.4);
+            background: var(--primary-color); color: white; font-weight: bold; box-shadow: 0 2px 5px var(--primary-rgba-dark);
         }
 
         /* --- 时间选择器不换行容器 --- */
@@ -495,7 +497,7 @@
 
         /* 1. 正常开启状态 (粉色) */
         .switch input:checked + .slider {
-            background-color: #ffb6b9;
+            background-color: var(--primary-color);
         }
 
         /* 2. 【关键】禁用状态 (强制变灰，不管是否开启) */
@@ -512,6 +514,15 @@
     </style>
 </head>
 <body>
+
+<!-- 【新增】主题加载屏幕 -->
+<div id="theme-loading-screen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:#f5f5f5;display:flex;align-items:center;justify-content:center;z-index:10000;opacity:1;">
+  <div style="text-align:center;">
+    <div style="width:40px;height:40px;border:3px solid #ddd;border-top:3px solid #999;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 20px;"></div>
+    <div style="color:#999;font-size:14px;">加载中...</div>
+  </div>
+  <style>@keyframes spin { to { transform:rotate(360deg); } }</style>
+</div>
 
 <div class="container">
     <div class="header">
@@ -556,11 +567,11 @@
 
                 <!-- 头像上传 -->
                 <div style="margin-bottom: 20px; position: relative; display: inline-block;">
-                    <div style="font-size:12px; color:#ffb6b9; margin-bottom:8px; font-weight:bold;">点击更换头像 / Tap to Upload</div>
+                    <div style="font-size:12px; color:var(--primary-color); margin-bottom:8px; font-weight:bold;">点击更换头像 / Tap to Upload</div>
                     <img id="edit-avatar-preview" src=""
                          onclick="document.getElementById('avatar-upload-input').click()"
                          style="width:100px; height:100px; border-radius:15px; object-fit:cover;
-                      border: 3px solid #ffb6b9; box-shadow: 0 4px 12px rgba(0,0,0,0.1); cursor: pointer;">
+                      border: 3px solid var(--primary-color); box-shadow: 0 4px 12px rgba(0,0,0,0.1); cursor: pointer;">
                     <input type="file" id="avatar-upload-input" accept="image/*" style="display: none;" onchange="uploadAvatar(this)">
                 </div>
 
@@ -585,7 +596,7 @@
                 <!-- 【移动到这里】置顶开关 -->
                 <div style="margin-bottom: 15px;">
                     <label style="display: inline-flex; align-items: center; cursor: pointer; color: #555; font-weight: bold; background: #f0f0f0; padding: 8px 15px; border-radius: 20px;">
-                        <input type="checkbox" id="meta-pinned" style="width: 16px; height: 16px; margin-right: 8px; accent-color: #ffb6b9;">
+                        <input type="checkbox" id="meta-pinned" style="width: 16px; height: 16px; margin-right: 8px; accent-color: var(--primary-color);">
                         📌 置顶此联系人
                     </label>
                 </div>
@@ -706,6 +717,46 @@
         </details>
     </div>
 
+    <!-- ================= 【新增】背景设置区域 ================= -->
+    <div class="section-title">🎨 聊天背景 (Chat Background)</div>
+    
+    <div class="module" id="module-chat-bg">
+        <details>
+            <summary style="cursor: pointer; user-select: none; padding: 12px 16px; font-weight: 600; color: #333;">点击展开设置背景</summary>
+            <div style="background: #fafafa; border-radius: 12px; padding: 16px; margin: 0 12px 12px 12px;">
+            
+            <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+                <!-- 背景预览 -->
+                <div style="flex: 1;">
+                    <div id="chat-bg-preview" style="width: 100%; height: 100px; border: 2px dashed #ddd; border-radius: 8px; background-size: cover; background-position: center; display: flex; align-items: center; justify-content: center; color: #999; font-size: 12px; overflow: hidden;">
+                        <span id="bg-preview-text">点击上传背景</span>
+                        <img id="bg-preview-img" style="display: none; width: 100%; height: 100%; object-fit: cover;">
+                    </div>
+                </div>
+                
+                <!-- 操作按钮 -->
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    <button style="background: var(--primary-color); color: white; border: none; padding: 8px 16px; border-radius: 12px; cursor: pointer; font-size: 12px; font-weight: 600;" onclick="document.getElementById('chat-bg-input').click()">
+                        📤 上传
+                    </button>
+                    <button id="clear-chat-bg-btn" style="background: #f1f3f5; color: #555; border: none; padding: 8px 16px; border-radius: 12px; cursor: pointer; font-size: 12px; font-weight: 600; display: none;" onclick="clearChatBg()">
+                        🗑️ 删除
+                    </button>
+                    <button style="background: #f0f0f0; color: #888; border: none; padding: 8px 16px; border-radius: 12px; cursor: pointer; font-size: 12px; font-weight: 600;" onclick="resetToDefault()">
+                        ↩️ 默认
+                    </button>
+                </div>
+            </div>
+            
+            <div style="font-size: 12px; color: #999;">
+                💡 若不上传，此聊天将使用主题设置中的默认背景
+            </div>
+            
+            <input type="file" id="chat-bg-input" accept="image/*" style="display: none;" onchange="uploadChatBackground(this)">
+            </div>
+        </details>
+    </div>
+
     <!-- ================= 动态记忆区域 ================= -->
     <div class="section-title">🧠 动态记忆 (Dynamic Memory)</div>
 
@@ -803,6 +854,108 @@
 
     // 【新增】用于缓存浅睡眠的原始状态
     let cachedLightSleep = true;
+
+    // ========================= 【新增】背景管理函数 =========================
+    
+    // 当前聊天的背景配置
+    let chatBgConfig = null;
+
+    // 初始化背景UI
+    async function initChatBackground() {
+        try {
+            const res = await fetch(`/api/${charId}/chat_background`);
+            if (res.ok) {
+                chatBgConfig = await res.json();
+                renderChatBackgroundUI();
+            }
+        } catch(e) {
+            console.warn('获取聊天背景配置失败:', e);
+            chatBgConfig = { filename: null };
+        }
+    }
+
+    // 渲染背景UI
+    function renderChatBackgroundUI() {
+        const bgPreview = document.getElementById('chat-bg-preview');
+        const bgText = document.getElementById('bg-preview-text');
+        const clearBtn = document.getElementById('clear-chat-bg-btn');
+
+        if (chatBgConfig && chatBgConfig.filename) {
+            bgPreview.style.backgroundImage = `url(/char_backgrounds/${charId}/${chatBgConfig.filename})`;
+            bgText.style.display = 'none';
+            clearBtn.style.display = 'block';
+        } else {
+            bgPreview.style.backgroundImage = 'none';
+            bgText.style.display = 'block';
+            bgText.textContent = '点击上传背景';
+            clearBtn.style.display = 'none';
+        }
+    }
+
+    // 上传聊天背景
+    async function uploadChatBackground(input) {
+        const file = input.files[0];
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const previewEl = document.getElementById('chat-bg-preview');
+        previewEl.style.opacity = '0.5';
+
+        try {
+            const res = await fetch(`/api/${charId}/upload_chat_background`, {
+                method: 'POST',
+                body: formData
+            });
+            const result = await res.json();
+
+            if (result.status === 'success') {
+                chatBgConfig = { filename: result.filename };
+                renderChatBackgroundUI();
+                // 保存配置到服务器
+                saveChatBgConfig();
+            } else {
+                alert('上传失败: ' + result.error);
+            }
+        } catch(e) {
+            alert('网络错误');
+        } finally {
+            previewEl.style.opacity = '1';
+            input.value = '';
+        }
+    }
+
+    // 清除聊天背景
+    function clearChatBg() {
+        if (confirm('确定要删除此聊天的背景吗？')) {
+            chatBgConfig = { filename: null };
+            renderChatBackgroundUI();
+            saveChatBgConfig();
+        }
+    }
+
+    // 重置为默认背景
+    function resetToDefault() {
+        chatBgConfig = { filename: null };
+        renderChatBackgroundUI();
+        saveChatBgConfig();
+    }
+
+    // 保存背景配置
+    async function saveChatBgConfig() {
+        try {
+            await fetch(`/api/${charId}/save_chat_background`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(chatBgConfig)
+            });
+        } catch(e) {
+            console.warn('保存背景配置失败:', e);
+        }
+    }
+
+    // ======================================================================
 
     // 全局数据缓存 (存储完整的原始数据，确保保存时不丢失未显示的数据)
     let GLOBAL_DATA = {};
@@ -1017,6 +1170,7 @@
 
     // --- 初始化部分 ---
     loadCharMeta(); // <--- 【关键】页面加载时执行这个
+    initChatBackground(); // 【新增】初始化聊天背景
 
     // 初始化
     fetch(`/api/${charId}/prompts_data`)
@@ -1041,14 +1195,69 @@
 
     function renderView(key, data) {
         const container = document.querySelector(`#module-${key} .view-mode`);
-        if(!data || (typeof data === 'object' && Object.keys(data).length === 0)) {
-            container.innerHTML = '<div class="empty-state">暂无数据</div>';
+        
+        // 1. Markdown 渲染
+        if(CONFIG[key].method === 'renderMD') {
+            container.innerHTML = `<div style="padding:15px; white-space:pre-wrap;">${data || '暂无数据'}</div>`;
             return;
         }
 
-        // 1. Markdown 渲染
-        if(CONFIG[key].method === 'renderMD') {
-            container.innerHTML = `<div style="padding:15px; white-space:pre-wrap;">${data}</div>`;
+        // 5. Relation 渲染
+        if(key === 'relation') {
+            let html = '';
+            
+            // --- 【新增】反向模式切换按钮 ---
+            const isReverse = container.dataset.mode === 'reverse';
+            html += `
+                <div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">
+                    <button class="mode-btn ${!isReverse ? 'active' : ''}" onclick="switchRelationMode('${key}', 'normal')">我的视角</button>
+                    <button class="mode-btn ${isReverse ? 'active' : ''}" onclick="switchRelationMode('${key}', 'reverse')">对方视角</button>
+                </div>
+            `;
+
+            if (isReverse) {
+                // 加载反向数据（如果还没加载）
+                if (!container.dataset.reverseLoaded) {
+                    fetchReverseRelationships(key, container);
+                    container.innerHTML = html + '<div class="empty-state">正在从其他角色同步视角...</div>';
+                    return;
+                }
+                const revData = JSON.parse(container.dataset.reverseBody || '{}');
+                if (Object.keys(revData).length === 0) {
+                    html += '<div class="empty-state">目前还没有其他角色对你有深入认知</div>';
+                } else {
+                    Object.keys(revData).forEach(cid => {
+                        const info = revData[cid];
+                        const score = info.score != null ? info.score : 1;
+                        html += `<div class="mem-item" style="border-left: 3px solid #673ab7; position: relative;" id="rev-item-${cid}">
+                            <div class="mem-header">
+                                👤 ${info.char_name || cid} 的视角 [${info.role}] 指数: ${score}
+                            </div>
+                            <div class="mem-text">${info.description}</div>
+                        </div>`;
+                    });
+                }
+            } else {
+                // 原有的正向渲染
+                if(!data || Object.keys(data).length === 0) {
+                    html += '<div class="empty-state">暂无数据</div>';
+                } else {
+                    Object.keys(data).forEach(name => {
+                        const info = data[name];
+                        const score = info.score != null ? info.score : 1;
+                        html += `<div class="mem-item">
+                            <div class="mem-header">👤 ${name} [${info.role}] 关系指数: ${score}</div>
+                            <div class="mem-text">${info.description}</div>
+                        </div>`;
+                    });
+                }
+            }
+            container.innerHTML = html;
+            return;
+        }
+
+        if(!data || (typeof data === 'object' && Object.keys(data).length === 0)) {
+            container.innerHTML = '<div class="empty-state">暂无数据</div>';
             return;
         }
 
@@ -1089,7 +1298,7 @@
                     hasContent = true;
                     const label = (dateKey === todayStr) ? '(Today)' : '';
 
-                    html += `<div class="mem-item" style="border-left: 3px solid #ffb6b9; padding-left:12px;">
+                    html += `<div class="mem-item" style="border-left: 3px solid var(--primary-color); padding-left:12px;">
                       <div class="mem-header">📅 ${dateKey} ${label}</div>`;
 
                     events.forEach(e => {
@@ -1154,15 +1363,91 @@
             return;
         }
 
-        // 5. Relation 渲染
+        /* 5. Relation 渲染 */
         if(key === 'relation') {
             let html = '';
-            Object.keys(data).forEach(name => {
-                const info = data[name];
-                const score = info.score != null ? info.score : 1;
-                html += `<div class="mem-item"><div class="mem-header">👤 ${name} [${info.role}] 关系指数: ${score}</div><div class="mem-text">${info.description}</div></div>`;
-            });
+            
+            // --- 【新增】反向模式切换按钮 ---
+            const isReverse = container.dataset.mode === 'reverse';
+            html += `
+                <div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">
+                    <button class="mode-btn ${!isReverse ? 'active' : ''}" onclick="switchRelationMode('${key}', 'normal')">我的视角</button>
+                    <button class="mode-btn ${isReverse ? 'active' : ''}" onclick="switchRelationMode('${key}', 'reverse')">对方视角</button>
+                </div>
+            `;
+
+            if (isReverse) {
+                // 加载反向数据（如果还没加载）
+                if (!container.dataset.reverseLoaded) {
+                    fetchReverseRelationships(key, container);
+                    container.innerHTML = html + '<div class="empty-state">正在从其他角色同步视角...</div>';
+                    return;
+                }
+                const revData = JSON.parse(container.dataset.reverseBody || '{}');
+                if (Object.keys(revData).length === 0) {
+                    html += '<div class="empty-state">目前还没有其他角色对你有深入认知</div>';
+                } else {
+                    Object.keys(revData).forEach(cid => {
+                        const info = revData[cid];
+                        const score = info.score != null ? info.score : 1;
+                        html += `<div class="mem-item" style="border-left: 3px solid #673ab7; position: relative;">
+                            <div class="mem-header">👤 ${info.char_name || cid} 的视角 [${info.role}] 指数: ${score}</div>
+                            <div class="mem-text">${info.description}</div>
+                        </div>`;
+                    });
+                }
+            } else {
+                // 原有的正向渲染
+                Object.keys(data).forEach(name => {
+                    const info = data[name];
+                    const score = info.score != null ? info.score : 1;
+                    html += `<div class="mem-item">
+                        <div class="mem-header">👤 ${name} [${info.role}] 关系指数: ${score}</div>
+                        <div class="mem-text">${info.description}</div>
+                    </div>`;
+                });
+                if (Object.keys(data).length === 0) html += '<div class="empty-state">暂无数据</div>';
+            }
             container.innerHTML = html;
+        }
+    }
+
+    // --- 【新增】反向关系处理函数 ---
+    function switchRelationMode(key, mode) {
+        const container = document.querySelector(`#module-${key} .view-mode`);
+        const module = container.closest('.module');
+        
+        container.dataset.mode = mode;
+        
+        // 如果正在编辑模式，切换模式也需要重新构建编辑器
+        if (module.classList.contains('editing')) {
+            const editBox = module.querySelector('.edit-mode');
+            buildEditor(key, editBox);
+        } else {
+            // 如果在查看模式，清除缓存标志以便切换时重新获取（或者为了流畅性不清除）
+            if (mode === 'normal') {
+                delete container.dataset.reverseLoaded;
+            }
+            renderView(key, GLOBAL_DATA[key]);
+        }
+    }
+
+    async function fetchReverseRelationships(key, container) {
+        try {
+            const res = await fetch(`/api/${charId}/relationship_reverse`);
+            const data = await res.json();
+            container.dataset.reverseLoaded = 'true';
+            container.dataset.reverseBody = JSON.stringify(data);
+            
+            // 如果切换回来的时候已经进入编辑模式，需要同步更新编辑器
+            const module = container.closest('.module');
+            if (module.classList.contains('editing')) {
+                buildEditor(key, module.querySelector('.edit-mode'));
+            } else {
+                renderView(key, GLOBAL_DATA[key]);
+            }
+        } catch(e) {
+            container.innerHTML += '<div class="empty-state">加载失败</div>';
         }
     }
 
@@ -1191,6 +1476,8 @@
 
     function buildEditor(key, container) {
         const data = GLOBAL_DATA[key];
+        const module = container.closest('.module');
+        const viewMode = module.querySelector('.view-mode');
         container.innerHTML = ''; // 清空
 
         // 1. Markdown 编辑器
@@ -1228,7 +1515,7 @@
             </div>
           </div>
 
-          <div style="font-weight:bold; margin-bottom:10px; color:#ffb6b9; display:flex; justify-content:space-between;">
+          <div style="font-weight:bold; margin-bottom:10px; color:var(--primary-color); display:flex; justify-content:space-between;">
             <span>当前编辑: ${targetDate}</span>
             <label style="font-size:12px; color:#666; display:flex; align-items:center; cursor:pointer;">
                 <input type="checkbox" id="reset-progress-chk" style="margin-right:4px;">
@@ -1388,28 +1675,85 @@
 
         // 4. Relation 编辑器
         if(key === 'relation') {
-            const names = Object.keys(data);
-            const listDiv = document.createElement('div');
-            names.forEach(name => {
-                const info = data[name];
-                const score = info.score != null ? info.score : 1;
-                listDiv.innerHTML += `
-                   <div class="rel-edit-card">
-                       <div class="input-group">
-                           <input type="text" class="input-key" value="${name}" placeholder="姓名">
-                           <input type="text" class="input-val" value="${info.role}" placeholder="关系定位">
-                           <label class="rel-score-wrap" title="该角色认为自己与此人关系的程度">
-                               <span class="rel-score-label">指数</span>
-                               <input type="number" class="input-score" value="${score}" min="0" step="0.1" placeholder="1">
-                           </label>
-                           <button class="btn-del" onclick="this.closest('.rel-edit-card').remove()">×</button>
-                       </div>
-                       <textarea class="input-full" rows="2" placeholder="详细描述">${info.description}</textarea>
-                   </div>`;
-            });
-            container.appendChild(listDiv);
-            container.innerHTML += `<button class="btn-add" onclick="addRelRow(this)">+ 添加角色</button>`;
+            const isReverse = viewMode.dataset.mode === 'reverse';
+            let html = '';
+            
+            // 模式切换按钮 (并在编辑模式也显示，以便切换)
+            html += `
+                <div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">
+                    <button class="mode-btn ${!isReverse ? 'active' : ''}" onclick="switchRelationMode('${key}', 'normal')">我的视角</button>
+                    <button class="mode-btn ${isReverse ? 'active' : ''}" onclick="switchRelationMode('${key}', 'reverse')">对方视角</button>
+                </div>
+            `;
+            
+            if (isReverse) {
+                // 【核心修复】如果没加载过且当前是反向模式，直接在 buildEditor 里触发加载
+                if (!viewMode.dataset.reverseLoaded) {
+                    fetchReverseRelationships(key, viewMode);
+                    container.innerHTML = html + '<div class="empty-state">正在同步对方视角数据...</div>';
+                    return;
+                }
+                const revData = JSON.parse(viewMode.dataset.reverseBody || '{}');
+                const listDiv = document.createElement('div');
+                Object.keys(revData).forEach(sourceCid => {
+                    const info = revData[sourceCid];
+                    const score = info.score != null ? info.score : 1;
+                    listDiv.innerHTML += `
+                       <div class="rel-edit-card" data-source-cid="${sourceCid}" style="border-left: 4px solid #673ab7;">
+                           <div style="font-size: 11px; color: #673ab7; font-weight: bold; margin-bottom: 5px;">来自: ${info.char_name || sourceCid} 的视角</div>
+                           <div class="input-group">
+                               <input type="text" class="input-key" value="${info.char_name || sourceCid}" readonly>
+                               <input type="text" class="input-val" value="${info.role}" placeholder="关系定位">
+                               <label class="rel-score-wrap">
+                                   <span class="rel-score-label">指数</span>
+                                   <input type="number" class="input-score" value="${score}" min="0" step="0.1">
+                               </label>
+                               <button class="btn-del" onclick="deleteExistingReverseRelation(this, '${sourceCid}', '${(info.char_name || sourceCid).replace(/'/g, "\\'")}')">×</button>
+                           </div>
+                           <textarea class="input-full" rows="2" placeholder="详细描述">${info.description}</textarea>
+                       </div>`;
+                });
+                container.innerHTML = html;
+                container.appendChild(listDiv);
+                if (Object.keys(revData).length === 0) {
+                    container.innerHTML += '<div class="empty-state">暂无其他角色视角可以编辑</div>';
+                }
+                // 【新增】反向模式下的添加按钮
+                container.innerHTML += `<button class="btn-add" onclick="showAddReverseMemberModal()">+ 添加新角色对我方的视角</button>`;
+            } else {
+                const names = Object.keys(data);
+                const listDiv = document.createElement('div');
+                names.forEach(name => {
+                    const info = data[name];
+                    const score = info.score != null ? info.score : 1;
+                    listDiv.innerHTML += `
+                       <div class="rel-edit-card">
+                           <div class="input-group">
+                               <input type="text" class="input-key" value="${name}" placeholder="姓名">
+                               <input type="text" class="input-val" value="${info.role}" placeholder="关系定位">
+                               <label class="rel-score-wrap" title="该角色认为自己与此人关系的程度">
+                                   <span class="rel-score-label">指数</span>
+                                   <input type="number" class="input-score" value="${score}" min="0" step="0.1" placeholder="1">
+                               </label>
+                               <button class="btn-del" onclick="this.closest('.rel-edit-card').remove()">×</button>
+                           </div>
+                           <textarea class="input-full" rows="2" placeholder="详细描述">${info.description}</textarea>
+                       </div>`;
+                });
+                container.innerHTML = html;
+                container.appendChild(listDiv);
+                container.innerHTML += `<button class="btn-add" onclick="addRelRow(this)">+ 添加角色</button>`;
+            }
         }
+    }
+
+    function deleteExistingReverseRelation(btn, sourceCid, sourceName) {
+        if (!confirm(`确定要彻底删除 ${sourceName} 对当前角色的看法吗？\n删除后需要点击底部的“保存”才会执行后台同步。`)) return;
+        
+        const card = btn.closest('.rel-edit-card');
+        card.dataset.pendingDelete = "true";
+        card.style.display = "none"; // 先隐藏，保存时处理
+        showToast(`已标记删除 ${sourceName} 的视角`);
     }
 
     // --- 动态添加行 (修改版：查找容器的方式变了) ---
@@ -1461,9 +1805,76 @@
     }
 
     function addRelRow(btn) {
-        const row = `<div class="rel-edit-card">
+        // 创建一个简单的模态框
+        let modal = document.getElementById('addRelationMemberModal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'addRelationMemberModal';
+            modal.style.cssText = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:2000; padding:20px;";
+            modal.innerHTML = `
+                <div style="background:white; border-radius:12px; width:100%; max-width:400px; padding:20px; box-shadow:0 10px 30px rgba(0,0,0,0.2);">
+                    <h3 style="margin-top:0; font-size:16px; color:var(--primary-color);">选择要添加关系的角色</h3>
+                    <div id="relation-member-list" style="max-height:300px; overflow-y:auto; border:1px solid #eee; margin-bottom:15px; border-radius:8px;">
+                        <div style="padding:20px; text-align:center; color:#999;">正在加载角色列表...</div>
+                    </div>
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn" style="flex:1; background:#f5f5f5; color:#666;" onclick="document.getElementById('addRelationMemberModal').style.display='none'">取消</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        } else {
+            modal.style.display = 'flex';
+        }
+
+        loadRelationMemberCandidates();
+    }
+
+    async function loadRelationMemberCandidates() {
+        const listContainer = document.getElementById('relation-member-list');
+        const module = document.getElementById('module-relation');
+        const editMode = module.querySelector('.edit-mode');
+        
+        // 获取当前编辑器中已经存在的姓名
+        const existingNames = Array.from(editMode.querySelectorAll('.input-key')).map(input => input.value);
+
+        try {
+            const res = await fetch('/api/contacts');
+            const contacts = await res.json();
+            
+            let html = '';
+            contacts.forEach(c => {
+                const name = c.remark || c.name;
+                // 排除自己、已存在的名称、以及群组
+                if (c.id !== charId && c.type !== 'group' && !existingNames.includes(name)) {
+                    html += `
+                        <div style="padding:12px; border-bottom:1px solid #f9f9f9; border-top:none; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="appendRelRowByName('${name.replace(/'/g, "\\'")}')">
+                            <div style="display:flex; align-items:center;">
+                                <img src="${c.avatar || '/static/default_avatar.png'}" style="width:30px; height:30px; border-radius:50%; margin-right:10px; object-fit:cover;">
+                                <span style="font-size:14px; color:#444;">${name}</span>
+                            </div>
+                            <span style="color:var(--primary-color); font-size:12px;">+ 选择</span>
+                        </div>
+                    `;
+                }
+            });
+
+            if (!html) html = '<div style="padding:20px; text-align:center; color:#999; font-size:13px;">没有可添加的角色</div>';
+            listContainer.innerHTML = html;
+        } catch(e) {
+            listContainer.innerHTML = '<div style="padding:20px; text-align:center; color:red;">加载失败</div>';
+        }
+    }
+
+    function appendRelRowByName(name) {
+        document.getElementById('addRelationMemberModal').style.display = 'none';
+        
+        const module = document.getElementById('module-relation');
+        const listDiv = module.querySelector('.edit-mode .edit-list-container') || module.querySelector('.edit-mode > div:nth-child(2)');
+        
+        const row = `<div class="rel-edit-card" style="background: #fffdfd; border-left: 4px solid var(--primary-color);">
            <div class="input-group">
-               <input type="text" class="input-key" value="" placeholder="姓名">
+               <input type="text" class="input-key" value="${name}" placeholder="姓名" readonly>
                <input type="text" class="input-val" value="" placeholder="关系定位">
                <label class="rel-score-wrap" title="该角色认为自己与此人关系的程度">
                    <span class="rel-score-label">指数</span>
@@ -1473,10 +1884,131 @@
            </div>
            <textarea class="input-full" rows="2" placeholder="详细描述"></textarea>
        </div>`;
-        btn.previousElementSibling.insertAdjacentHTML('beforeend', row);
+        
+        if (listDiv) {
+            listDiv.insertAdjacentHTML('beforeend', row);
+        } else {
+            // 兜底方案
+            const btnAdd = module.querySelector('.btn-add');
+            if (btnAdd) btnAdd.insertAdjacentHTML('beforebegin', row);
+        }
     }
 
-    // ================= 保存逻辑 (Save) =================
+    // --- 【新增】添加反向关系模态框相关逻辑 ---
+    function showAddReverseMemberModal() {
+        // 创建一个简单的模态框
+        let modal = document.getElementById('addReverseMemberModal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'addReverseMemberModal';
+            modal.style.cssText = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:2000; padding:20px;";
+            modal.innerHTML = `
+                <div style="background:white; border-radius:12px; width:100%; max-width:400px; padding:20px; box-shadow:0 10px 30px rgba(0,0,0,0.2);">
+                    <h3 style="margin-top:0; font-size:16px; color:var(--primary-color);">选择要添加视角的角色</h3>
+                    <div id="reverse-member-list" style="max-height:300px; overflow-y:auto; border:1px solid #eee; margin-bottom:15px; border-radius:8px;">
+                        <div style="padding:20px; text-align:center; color:#999;">正在加载角色列表...</div>
+                    </div>
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn" style="flex:1; background:#f5f5f5; color:#666;" onclick="document.getElementById('addReverseMemberModal').style.display='none'">取消</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        } else {
+            modal.style.display = 'flex';
+        }
+
+        loadReverseMemberCandidates();
+    }
+
+    async function loadReverseMemberCandidates() {
+        const listContainer = document.getElementById('reverse-member-list');
+        const viewMode = document.querySelector('#module-relation .view-mode');
+        const existingData = JSON.parse(viewMode.dataset.reverseBody || '{}');
+        const existingCids = Object.keys(existingData);
+
+        try {
+            const res = await fetch('/api/contacts');
+            const contacts = await res.json();
+            
+            let html = '';
+            contacts.forEach(c => {
+                // 排除自己、已存在的、以及群组
+                if (c.id !== charId && c.type !== 'group' && !existingCids.includes(c.id)) {
+                    html += `
+                        <div style="padding:12px; border-bottom:1px solid #f9f9f9; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="addReverseMemberRow('${c.id}', '${c.remark || c.name}')">
+                            <div style="display:flex; align-items:center;">
+                                <img src="${c.avatar || '/static/default_avatar.png'}" style="width:30px; height:30px; border-radius:50%; margin-right:10px; object-fit:cover;">
+                                <span style="font-size:14px; color:#444;">${c.remark || c.name}</span>
+                            </div>
+                            <span style="color:var(--primary-color); font-size:12px;">+ 添加</span>
+                        </div>
+                    `;
+                }
+            });
+
+            if (!html) html = '<div style="padding:20px; text-align:center; color:#999; font-size:13px;">没有可添加的角色</div>';
+            listContainer.innerHTML = html;
+        } catch(e) {
+            listContainer.innerHTML = '<div style="padding:20px; text-align:center; color:red;">加载失败</div>';
+        }
+    }
+
+    function addReverseMemberRow(cid, name) {
+        document.getElementById('addReverseMemberModal').style.display = 'none';
+        
+        let container = document.querySelector('#module-relation .edit-mode .edit-list-container');
+        
+        // 如果找不到 .edit-list-container，说明可能是在构建编辑器时没有给它这个类名，或者结构有变
+        if (!container) {
+            // 兜底方案：直接找 .edit-mode 下的第一个 div 或者直接作为子元素
+            container = document.querySelector('#module-relation .edit-mode');
+        }
+
+        // 查找是否已经存在（防止重复点）
+        if (container.querySelector(`[data-source-cid="${cid}"]`)) return;
+
+        const row = `
+           <div class="rel-edit-card" data-source-cid="${cid}" style="border-left: 4px solid #673ab7; background: #fffcf9;">
+               <div style="font-size: 11px; color: #673ab7; font-weight: bold; margin-bottom: 5px;">来自: ${name} 的视角 (新添加)</div>
+               <div class="input-group">
+                   <input type="text" class="input-key" value="${name}" readonly>
+                   <input type="text" class="input-val" value="" placeholder="输入对方对你的关系定位">
+                   <label class="rel-score-wrap">
+                       <span class="rel-score-label">指数</span>
+                       <input type="number" class="input-score" value="1" min="0" step="0.1">
+                   </label>
+                   <button class="btn-del" onclick="this.closest('.rel-edit-card').remove()">×</button>
+               </div>
+               <textarea class="input-full" rows="2" placeholder="输入对方对你的详细描述"></textarea>
+           </div>`;
+        
+        // 如果 container 是 .edit-mode 本身，我们插在切换按钮（第一个子元素）后面
+        if (container.classList.contains('edit-mode')) {
+            const firstChild = container.firstElementChild;
+            if (firstChild) {
+                firstChild.insertAdjacentHTML('afterend', row);
+            } else {
+                container.innerHTML += row;
+            }
+        } else {
+            container.insertAdjacentHTML('afterbegin', row);
+        }
+    }
+
+    function deleteExistingReverseRelation(btn, sourceCid, sourceName) {
+        if (!confirm(`确定要彻底删除 ${sourceName} 对当前角色的看法吗？\n删除后需要点击底部的“保存”才会执行后台同步。`)) return;
+        
+        const card = btn.closest('.rel-edit-card');
+        card.dataset.pendingDelete = "true";
+        card.style.display = "none"; // 先隐藏，保存时处理
+        
+        if (typeof showToast === 'function') {
+            showToast(`已标记删除 ${sourceName} 的视角`);
+        } else {
+            alert(`已标记删除 ${sourceName} 的视角`);
+        }
+    }
 
     async function saveData(btn) {
         const module = btn.closest('.module');
@@ -1556,18 +2088,54 @@
 
         // 4. Relation 保存
         else if(key === 'relation') {
-            newData = {};
-            const cards = container.querySelectorAll('.rel-edit-card');
-            cards.forEach(card => {
-                const name = card.querySelector('.input-key').value.trim();
-                const role = card.querySelector('.input-val').value.trim();
-                const desc = card.querySelector('.input-full').value.trim();
-                const scoreEl = card.querySelector('.input-score');
-                const score = scoreEl ? (parseFloat(scoreEl.value) || 1) : 1;
-                if(name) {
-                    newData[name] = { role: role, description: desc, score: score };
-                }
-            });
+            const isReverse = document.querySelector(`#module-${key} .view-mode`).dataset.mode === 'reverse';
+            
+            if (isReverse) {
+                const cards = container.querySelectorAll('.rel-edit-card');
+                let promiseList = [];
+                cards.forEach(card => {
+                    const sourceCid = card.dataset.sourceCid;
+                    const role = card.querySelector('.input-val').value.trim();
+                    const desc = card.querySelector('.input-full').value.trim();
+                    const score = parseFloat(card.querySelector('.input-score').value) || 1;
+                    
+                    const isDelete = card.dataset.pendingDelete === "true";
+                    
+                    promiseList.push(fetch(`/api/${charId}/save_relationship_reverse`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            source_cid: sourceCid,
+                            data: isDelete ? null : { role: role, description: desc, score: score }
+                        })
+                    }));
+                });
+                
+                btn.textContent = 'Saving Multiple...';
+                await Promise.all(promiseList);
+                // 保存后由于是修改的别人，不更新 GLOBAL_DATA，触发一个刷新
+                const viewMode = document.querySelector(`#module-${key} .view-mode`);
+                delete viewMode.dataset.reverseLoaded;
+                
+                // 强制切回查看模式并渲染（这会触发 fetchReverseRelationships）
+                module.classList.remove('editing');
+                btn.textContent = '保存 / Save';
+                renderView(key, GLOBAL_DATA[key]);
+                return;
+            } else {
+                newData = {};
+                const cards = container.querySelectorAll('.rel-edit-card');
+                cards.forEach(card => {
+                    const name = card.querySelector('.input-key').value.trim();
+                    const role = card.querySelector('.input-val').value.trim();
+                    const desc = card.querySelector('.input-full').value.trim();
+                    const scoreEl = card.querySelector('.input-score');
+                    const score = scoreEl ? (parseFloat(scoreEl.value) || 1) : 1;
+                    if(name) {
+                        newData[name] = { role: role, description: desc, score: score };
+                    }
+                });
+            }
         }
 
         // --- 发送给后端 ---

@@ -9,10 +9,11 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="/static/logo.png">
     <title>朋友圈</title>
+    <!-- 【新增】主题加载脚本 -->
+    <script src="/static/theme-loader.js"></script>
     <style>
         :root {
-            --primary: #ffb6b9;
-            --primary-light: #fff0f2;
+            --primary-color: #ffb6b9;
             --primary-dark: #f09598;
             --bg-color: #f5f7fa;
             --card-bg: #ffffff;
@@ -52,11 +53,83 @@
         .header-title {
             font-size: 18px;
             font-weight: 700;
-            background: linear-gradient(135deg, #ffb6b9, #f09598);
+            background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
             background-clip: text;
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            position: relative;
         }
+
+        .header-title::after {
+            content: '▾';
+            font-size: 12px;
+            -webkit-text-fill-color: var(--primary-dark);
+            transition: transform 0.3s;
+        }
+        .header-title.is-open::after {
+            transform: rotate(180deg);
+        }
+
+        /* 角色筛选下拉菜单 */
+        .char-filter-menu {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background: white;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+            z-index: 100;
+            min-width: 140px;
+            margin-top: 8px;
+            overflow: hidden;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .char-filter-menu.show { display: block; }
+        .char-filter-item {
+            padding: 10px 16px;
+            font-size: 14px;
+            color: var(--text-main);
+            cursor: pointer;
+            transition: background 0.2s;
+            -webkit-text-fill-color: var(--text-main);
+            white-space: nowrap;
+        }
+        .char-filter-item:hover { background: var(--primary-rgba-light); }
+        .char-filter-item.active { 
+            color: var(--primary-dark); 
+            font-weight: 700;
+            background: var(--primary-rgba-lighter);
+            -webkit-text-fill-color: var(--primary-dark);
+        }
+
+        /* @ 自动补全菜单 */
+        .at-mention-menu {
+            display: none;
+            position: absolute;
+            background: white;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+            z-index: 200;
+            min-width: 120px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .at-mention-item {
+            padding: 8px 12px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .at-mention-item:hover { background: var(--primary-rgba-light); }
+        .at-mention-item.selected { background: var(--primary-rgba-lighter); font-weight: 700; }
 
         .header-actions {
             display: flex;
@@ -68,7 +141,7 @@
         .moment-active-toggle {
             padding: 6px 14px;
             border: none;
-            background: var(--primary-light);
+            background: var(--primary-rgba-light);
             color: var(--primary-dark);
             font-size: 13px;
             font-weight: 600;
@@ -85,8 +158,8 @@
             width: 8px;
             height: 8px;
             border-radius: 50%;
-            background: var(--primary);
-            box-shadow: 0 0 8px var(--primary);
+            background: var(--primary-color);
+            box-shadow: 0 0 8px var(--primary-color);
         }
         .moment-active-toggle:active { transform: scale(0.95); }
         
@@ -102,7 +175,7 @@
         /* 发布按钮 */
         .moment-add-btn {
             border: none;
-            background: linear-gradient(135deg, var(--primary), #ffa1a5);
+            background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
             color: #fff;
             width: 34px;
             height: 34px;
@@ -113,12 +186,12 @@
             font-size: 20px;
             line-height: 1;
             cursor: pointer;
-            box-shadow: 0 4px 12px rgba(255, 182, 185, 0.4);
+            box-shadow: 0 4px 12px var(--primary-rgba-dark);
             transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
         .moment-add-btn:hover {
             transform: scale(1.08);
-            box-shadow: 0 6px 16px rgba(255, 182, 185, 0.5);
+            box-shadow: 0 6px 16px var(--primary-rgba-darker);
         }
         .moment-add-btn:active { transform: scale(0.95); }
 
@@ -174,8 +247,28 @@
             cursor: pointer;
             transition: all 0.2s;
         }
-        .moment-regen-btn:hover { color: var(--primary); background: var(--primary-light); }
+        .moment-regen-btn:hover { color: var(--primary-color); background: var(--primary-rgba-light); }
         .moment-regen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* 统一右上角动作按钮样式 */
+        .moment-action-btn {
+            flex-shrink: 0;
+            width: 28px;
+            height: 28px;
+            border: none;
+            background: #f8f9fb;
+            color: var(--text-muted);
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            padding: 0;
+        }
+        .moment-action-btn:hover { color: var(--primary-color); background: var(--primary-rgba-light); }
+        .moment-action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
         .moment-remark {
             font-weight: 700;
@@ -206,9 +299,10 @@
         .moment-likes {
             font-size: 12px;
             color: var(--primary-dark);
-            background: var(--primary-light);
+            background: var(--primary-rgba-light);
             padding: 6px 10px;
             border-radius: 8px;
+            margin-top: 8px;
             margin-bottom: 6px;
             display: inline-block;
             font-weight: 500;
@@ -248,7 +342,7 @@
             font-weight: 700;
             padding: 0;
         }
-        .moment-translate-btn:hover { color: var(--primary); background: var(--primary-light); }
+        .moment-translate-btn:hover { color: var(--primary-color); background: var(--primary-rgba-light); }
         .moment-translate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
         /* 评论区翻译按钮维持轻量样式 */
@@ -266,6 +360,7 @@
         .moment-translation-result,
         .comment-translation-result {
             margin-top: 4px;
+            margin-bottom: 8px;
             font-size: 12px;
             color: #5c6b7a;
             background: #f2f5f8;
@@ -288,6 +383,94 @@
         .comment-regen-btn:hover { color: var(--primary-dark); background: #eef2f6; }
         .comment-regen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+        /* 编辑/删除按钮通用样式 (与翻译/重生成一致) */
+        .btn-action-small {
+            border: none;
+            background: transparent;
+            color: #a8b4c1;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-left: 4px;
+            vertical-align: middle;
+            padding: 2px;
+        }
+        .btn-action-small:hover { color: var(--primary-dark); background: #f0f2f5; border-radius: 4px; }
+
+        /* 下拉菜单通用样式 */
+        .moment-actions-menu {
+            position: relative;
+            display: inline-block;
+        }
+        .moment-menu-btn {
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 18px;
+            padding: 0 4px;
+            transition: color 0.2s;
+        }
+        .moment-menu-btn:hover { color: var(--primary-color); }
+        .moment-menu-dropdown {
+            display: none;
+            position: absolute;
+            right: 0;
+            top: 24px;
+            background: white;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            z-index: 100;
+            overflow: hidden;
+        }
+        .moment-menu-dropdown.show { display: block; }
+        .moment-menu-item {
+            display: block;
+            width: 100%;
+            padding: 8px 16px;
+            border: none;
+            background: transparent;
+            text-align: left;
+            color: var(--text-main);
+            cursor: pointer;
+            font-size: 13px;
+            transition: background 0.2s;
+            white-space: nowrap;
+        }
+        .moment-menu-item:hover { background: var(--primary-rgba-light); }
+        .moment-menu-item + .moment-menu-item {
+            border-top: 1px solid var(--border-color);
+        }
+        /* 菜单内按钮样式完全覆盖 */
+        .moment-menu-dropdown .comment-translate-btn,
+        .moment-menu-dropdown .comment-regen-btn,
+        .moment-menu-dropdown .moment-translate-btn,
+        .moment-menu-dropdown .moment-regen-btn {
+            flex-shrink: 1 !important;
+            width: 100% !important;
+            height: auto !important;
+            margin: 0 !important;
+            padding: 8px 16px !important;
+            border: none !important;
+            border-radius: 0 !important;
+            color: var(--text-main) !important;
+            background: transparent !important;
+            font-size: 13px !important;
+            font-weight: normal !important;
+            transition: background 0.2s !important;
+        }
+        .moment-menu-dropdown .comment-translate-btn:hover,
+        .moment-menu-dropdown .comment-regen-btn:hover,
+        .moment-menu-dropdown .moment-translate-btn:hover,
+        .moment-menu-dropdown .moment-regen-btn:hover {
+            color: var(--text-main) !important;
+            background: var(--primary-rgba-light) !important;
+        }
+
         /* 底部互动操作 */
         .moment-actions {
             margin-top: 10px;
@@ -305,8 +488,8 @@
         }
         /* 统一使用同一颗心，只通过颜色区分“赞 / 已赞”，避免大小不一致的视觉差异 */
         .moment-like-btn::before { content: "♥"; font-size: 16px; line-height: 1; }
-        .moment-like-btn:hover { color: var(--primary); }
-        .moment-like-btn.is-liked { color: var(--primary); }
+        .moment-like-btn:hover { color: var(--primary-color); }
+        .moment-like-btn.is-liked { color: var(--primary-color); }
 
         .moment-comment-form { display: flex; gap: 8px; flex: 1; min-width: 0; }
         .moment-comment-trans-row {
@@ -338,9 +521,9 @@
         }
         
         .moment-comment-btn {
-            padding: 6px 14px; background: var(--primary); color: #fff;
+            padding: 6px 14px; background: var(--primary-color); color: #fff;
             border: none; border-radius: 20px; font-size: 13px; font-weight: 600;
-            cursor: pointer; box-shadow: 0 2px 8px rgba(255, 182, 185, 0.3); transition: all 0.2s;
+            cursor: pointer; box-shadow: 0 2px 8px var(--primary-rgba-strong); transition: all 0.2s;
             display: flex; align-items: center; gap: 6px; justify-content: center;
         }
         .moment-comment-btn:active { transform: scale(0.95); }
@@ -378,7 +561,7 @@
             border-radius: 999px;
             border: none;
             background: linear-gradient(135deg, #ffffff, #fdfdfd);
-            box-shadow: 0 6px 20px rgba(255, 182, 185, 0.2), inset 0 0 0 1px rgba(255, 182, 185, 0.15);
+            box-shadow: 0 6px 20px var(--primary-rgba-medium), inset 0 0 0 1px var(--primary-rgba-lighter);
             font-size: 13px;
             font-weight: 600;
             color: var(--primary-dark);
@@ -390,15 +573,15 @@
         }
         .moment-load-btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(255, 182, 185, 0.3), inset 0 0 0 1px rgba(255, 182, 185, 0.2);
-            color: #e57373;
+            box-shadow: 0 8px 25px var(--primary-rgba-strong), inset 0 0 0 1px var(--primary-rgba-medium);
+            color: var(--primary-color);
         }
         .moment-load-btn:hover svg {
             transform: translateY(3px); /* 箭头悬浮下拉动画 */
         }
         .moment-load-btn:active {
             transform: translateY(1px);
-            box-shadow: 0 2px 10px rgba(255, 182, 185, 0.15), inset 0 0 0 1px rgba(255, 182, 185, 0.1);
+            box-shadow: 0 2px 10px var(--primary-rgba-lighter), inset 0 0 0 1px var(--primary-rgba-light);
         }
         .moment-load-btn:disabled {
             background: #f0f2f5; color: #a0a0a0; box-shadow: none; transform: none; cursor: not-allowed;
@@ -459,8 +642,8 @@
             transition: all 0.2s; font-family: inherit;
         }
         .moment-compose-text:focus {
-            background: #fff; border-color: var(--primary);
-            box-shadow: 0 0 0 4px rgba(255, 182, 185, 0.15); outline: none;
+            background: #fff; border-color: var(--primary-color);
+            box-shadow: 0 0 0 4px var(--primary-rgba-lighter); outline: none;
         }
         .moment-compose-text.is-full {
             border-color: #ff6b6b; background-color: #ffebee;
@@ -498,8 +681,8 @@
         }
         .moment-comment-input:focus {
             background: #fff;
-            border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(255, 182, 185, 0.15);
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px var(--primary-rgba-lighter);
             outline: none;
         }
         .moment-comment-input.is-full {
@@ -531,12 +714,36 @@
         }
         .moment-cancel-btn:hover { background: #e4e6eb; color: var(--text-main); }
         .moment-compose-btn {
-            padding: 10px 24px; background: linear-gradient(135deg, var(--primary), #ffa1a5); color: #fff;
+            padding: 10px 24px; background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color: #fff;
             border: none; border-radius: 24px; font-size: 14px; font-weight: 600; cursor: pointer;
-            box-shadow: 0 4px 12px rgba(255, 182, 185, 0.4); transition: all 0.2s;
+            box-shadow: 0 4px 12px var(--primary-rgba-dark); transition: all 0.2s;
         }
-        .moment-compose-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(255, 182, 185, 0.5); }
+        .moment-compose-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 16px var(--primary-rgba-darker); }
         .moment-compose-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+        /* Toast 通知 */
+        .moment-toast {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.65);
+            color: #ffffff;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 9999;
+            white-space: nowrap;
+            pointer-events: none;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+            animation: toast-fade-in-out 2s ease-in-out forwards;
+        }
+        @keyframes toast-fade-in-out {
+            0% { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+            10% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+            90% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+            100% { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+        }
 
         /* 空白页状态 */
         .empty-state {
@@ -553,16 +760,33 @@
             to { opacity: 1; transform: translateY(0); }
         }
         @keyframes moment-card-highlight {
-            0% { box-shadow: 0 0 0 2px var(--primary); transform: scale(0.98); }
-            50% { box-shadow: 0 0 20px rgba(255, 182, 185, 0.6); transform: scale(1.02); }
+            0% { box-shadow: 0 0 0 2px var(--primary-color); transform: scale(0.98); }
+            50% { box-shadow: 0 0 20px var(--primary-rgba-darkest); transform: scale(1.02); }
             100% { box-shadow: var(--shadow-sm); transform: scale(1); }
         }
     </style>
 </head>
 <body>
+    <!-- 【新增】主题加载屏幕 -->
+    <div id="theme-loading-screen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:#f5f5f5;display:flex;align-items:center;justify-content:center;z-index:10000;opacity:1;">
+      <div style="text-align:center;">
+        <div style="width:40px;height:40px;border:3px solid #ddd;border-top:3px solid #999;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 20px;"></div>
+        <div style="color:#999;font-size:14px;">加载中...</div>
+      </div>
+      <style>@keyframes spin { to { transform:rotate(360deg); } }</style>
+    </div>
+
     <header class="header">
-        <div class="header-title">朋友圈</div>
+        <div class="header-title" id="charFilterBtn">
+            <span id="charFilterLabel">朋友圈</span>
+            <div class="char-filter-menu" id="charFilterMenu">
+                <div class="char-filter-item active" data-char-id="all">所有</div>
+                <div class="char-filter-item" data-char-id="user">我自己</div>
+                <!-- 角色项将通过 JS 动态注入 -->
+            </div>
+        </div>
         <div class="header-actions">
+            <button type="button" class="moment-active-toggle" id="onlySelfToggle" style="display:none;" title="只看我发表的内容">只看自己</button>
             <button type="button" class="moment-active-toggle" id="activeMomentsToggle" title="角色会定时自动发朋友圈">关闭主动朋友圈</button>
             <button class="moment-add-btn" id="openMomentModal" aria-label="发朋友圈">＋</button>
         </div>
@@ -600,6 +824,23 @@
                     </div>
                 </div>
             </div>
+            <!-- @ 提示菜单 -->
+            <div id="atMentionMenu" class="at-mention-menu"></div>
+        </div>
+
+        <!-- 编辑弹窗 -->
+        <div class="moment-modal-mask" id="editModalMask" style="display:none;">
+            <div class="moment-modal" id="editModal">
+                <div class="moment-modal-title" id="editModalTitle">编辑内容</div>
+                <div class="moment-modal-body">
+                    <textarea class="moment-compose-text" id="editModalTextarea" placeholder="编辑内容…" maxlength="1000" style="max-height: 300px;"></textarea>
+                    <div class="moment-char-count" id="editCharCount">0/1000</div>
+                    <div class="moment-modal-actions">
+                        <button type="button" class="moment-cancel-btn" id="editModalCancel">取消</button>
+                        <button type="button" class="moment-compose-btn" id="editModalSubmit">保存</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </main>
 
@@ -607,6 +848,18 @@
 
     <script>
         (function() {
+            // 【新增】Toast 通知函数
+            function showToast(message = '复制成功！') {
+                const toast = document.createElement('div');
+                toast.className = 'moment-toast';
+                toast.textContent = message;
+                document.body.appendChild(toast);
+                // 2秒后自动移除
+                setTimeout(() => {
+                    toast.remove();
+                }, 2000);
+            }
+            
             const listEl = document.getElementById('momentsList');
             const USER_ID = 'user';
             const loadMoreBtn = document.getElementById('loadMoreBtn');
@@ -614,6 +867,7 @@
             let allMoments = [];
             let loading = false;
             let finished = false;
+            let currentFilterCharId = 'all'; // 'all', 'user', or specific char_id
 
             function escapeHtml(s) {
                 if (s == null) return '';
@@ -713,12 +967,23 @@
                                 ? '<span class="comment-reply-label">回复 ' + escapeHtml(c.reply_to_remark) + '：</span>'
                                 : '';
                             const canRegen = c.commenter_id && c.commenter_id !== USER_ID;
-                            const regenBtn = canRegen
-                                ? '<button type="button" class="comment-regen-btn" title="重生成评论" data-comment-index="' + escapeAttr(c.comment_index) + '">↻</button>'
-                                : '';
-                            const transBtn = isJaMode()
-                                ? '<button type="button" class="comment-translate-btn" title="翻译评论" data-comment-index="' + escapeAttr(c.comment_index) + '" data-comment-key="' + escapeAttr(commentKey) + '">文</button>'
-                                : '';
+                            
+                            // 评论区操作菜单
+                            let menuItems = '';
+                            if (isJaMode()) {
+                                menuItems += '<button type="button" class="moment-menu-item comment-translate-btn" title="翻译评论" data-comment-index="' + escapeAttr(c.comment_index) + '" data-comment-key="' + escapeAttr(commentKey) + '">翻译</button>';
+                            }
+                            if (canRegen) {
+                                menuItems += '<button type="button" class="moment-menu-item comment-regen-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">重生成</button>';
+                            }
+                            menuItems += '<button type="button" class="moment-menu-item comment-edit-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">编辑</button>';
+                            menuItems += '<button type="button" class="moment-menu-item comment-delete-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">删除</button>';
+                            
+                            const commentMenu = '<div class="moment-actions-menu">' +
+                                '<button type="button" class="moment-menu-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">⋮</button>' +
+                                '<div class="moment-menu-dropdown">' + menuItems + '</div>' +
+                                '</div>';
+                            
                             const transResult = translationCache[commentKey]
                                 ? '<div class="comment-translation-result">' + escapeHtml(translationCache[commentKey]) + '</div>'
                                 : '';
@@ -727,19 +992,35 @@
                                 '<span class="comment-remark">' + escapeHtml(c.remark) + '</span>' +
                                 replyLabel +
                                 '<span class="comment-text">' + (c.display_content || escapeHtml(c.content)) + '</span>' +
-                                transBtn +
-                                regenBtn +
+                                commentMenu +
                                 transResult +
                                 '</div></div>';
                         }).join('') + '</div>'
                         : '';
                     const avatarHref = (m.char_id === USER_ID) ? '/profile' : ('/memory/' + escapeAttr(m.char_id));
                     const postTransBtn = isJaMode()
-                        ? '<button type="button" class="moment-translate-btn" title="翻译正文" data-post-key="' + escapeAttr(postKey) + '">文</button>'
+                        ? '<button type="button" class="moment-action-btn moment-translate-btn" title="翻译正文" data-post-key="' + escapeAttr(postKey) + '">文</button>'
                         : '';
                     const postTransResult = translationCache[postKey]
                         ? '<div class="moment-translation-result">' + escapeHtml(translationCache[postKey]) + '</div>'
                         : '';
+                    
+                    // 朋友圈操作菜单
+                    let postMenuItems = '<button type="button" class="moment-menu-item btn-copy-moment">复制</button>';
+                    if (isJaMode()) {
+                        postMenuItems += '<button type="button" class="moment-menu-item moment-translate-btn" data-post-key="' + escapeAttr(postKey) + '">翻译</button>';
+                    }
+                    if (m.char_id !== USER_ID) {
+                        postMenuItems += '<button type="button" class="moment-menu-item moment-regen-btn">重新生成</button>';
+                    }
+                    postMenuItems += '<button type="button" class="moment-menu-item moment-edit-btn">编辑</button>';
+                    postMenuItems += '<button type="button" class="moment-menu-item moment-delete-btn">删除</button>';
+                    
+                    const postActionsMenu = '<div class="moment-actions-menu">' +
+                        '<button type="button" class="moment-menu-btn">⋮</button>' +
+                        '<div class="moment-menu-dropdown">' + postMenuItems + '</div>' +
+                        '</div>';
+                    
                     const commentTransRow = isJaMode()
                         ? '<div class="moment-comment-trans-row">' +
                           '<input type="text" class="moment-comment-trans-input" placeholder="输入中文，翻译成日语后填入上方评论框">' +
@@ -759,8 +1040,7 @@
                         '<div class="moment-time">' + formatTime(m.timestamp) + '</div>' +
                         '</div>' +
                         '<div class="moment-head-actions">' +
-                        postTransBtn +
-                        '<button type="button" class="moment-regen-btn" aria-label="重新生成" title="重新生成">↻</button>' +
+                        postActionsMenu +
                         '</div>' +
                         '</div>' +
                         '<div class="moment-content">' + (m.display_content || escapeHtml(m.content)) + '</div>' +
@@ -862,7 +1142,9 @@
                 loading = true;
                 updateLoadMoreBtn();
 
-                fetch('/api/moments?page=' + nextPage)
+                const url = '/api/moments?page=' + nextPage + '&filter_char_id=' + currentFilterCharId;
+                console.log("Fetching moments from:", url);
+                fetch(url)
                     .then(r => r.json())
                     .then(async moments => {
                         if (!moments || moments.length === 0) {
@@ -962,7 +1244,38 @@
             }
 
             function attachMomentEvents() {
+                // 处理下拉菜单的展开/关闭
                 listEl.addEventListener('click', function(e) {
+                    const menuBtn = e.target.closest('.moment-menu-btn');
+                    if (menuBtn) {
+                        e.stopPropagation();
+                        const menu = menuBtn.nextElementSibling;
+                        if (menu && menu.classList.contains('moment-menu-dropdown')) {
+                            // 关闭其他菜单
+                            listEl.querySelectorAll('.moment-menu-dropdown.show').forEach(m => {
+                                if (m !== menu) m.classList.remove('show');
+                            });
+                            // 切换当前菜单
+                            menu.classList.toggle('show');
+                        }
+                        return;
+                    }
+                    
+                    // 关闭菜单（当点击其他地方时）
+                    if (!e.target.closest('.moment-menu-dropdown')) {
+                        listEl.querySelectorAll('.moment-menu-dropdown.show').forEach(m => m.classList.remove('show'));
+                    }
+                });
+                
+                // 处理菜单项点击
+                listEl.addEventListener('click', function(e) {
+                    // 处理菜单项点击：关闭菜单
+                    const menuItem = e.target.closest('.moment-menu-item');
+                    if (menuItem) {
+                        const menu = menuItem.closest('.moment-menu-dropdown');
+                        if (menu) menu.classList.remove('show');
+                    }
+                    
                     const regenBtn = e.target.closest('.moment-regen-btn');
                     if (regenBtn && !regenBtn.disabled) {
                         const card = regenBtn.closest('.moment-card');
@@ -1103,16 +1416,161 @@
                         fetch('/api/moments/comment/regenerate', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                char_id: charId,
-                                timestamp: timestamp,
-                                comment_index: commentIndex
-                            })
+                            body: JSON.stringify({ char_id: charId, timestamp: timestamp, comment_index: commentIndex })
                         })
                             .then(r => r.json())
                             .then(() => reloadAndScrollTo({ char_id: charId, timestamp: timestamp }))
-                            .catch(() => reloadAndScrollTo({ char_id: charId, timestamp: timestamp }))
+                            .catch(() => {})
                             .finally(() => { commentRegenBtn.disabled = false; });
+                        return;
+                    }
+                    
+                    // ===== 编辑弹窗相关处理 =====
+                    const momentEditBtn = e.target.closest('.moment-edit-btn');
+                    if (momentEditBtn) {
+                        const card = momentEditBtn.closest('.moment-card');
+                        const moment = findMomentFromCard(card);
+                        if (!moment) return;
+                        
+                        // 打开编辑弹窗
+                        const editModalMask = document.getElementById('editModalMask');
+                        const editModalTitle = document.getElementById('editModalTitle');
+                        const editModalTextarea = document.getElementById('editModalTextarea');
+                        const editCharCount = document.getElementById('editCharCount');
+                        
+                        editModalTitle.textContent = '编辑朋友圈';
+                        editModalTextarea.value = moment.content;
+                        editModalTextarea.maxLength = 1000;
+                        updateEditCharCount();
+                        editModalMask.style.display = 'flex';
+                        editModalTextarea.focus();
+                        
+                        // 保存编辑上下文
+                        editModalMask.dataset.editType = 'moment';
+                        editModalMask.dataset.charId = moment.char_id;
+                        editModalMask.dataset.timestamp = moment.timestamp;
+                        editModalMask.dataset.originalContent = moment.content;
+                        return;
+                    }
+                    const momentDeleteBtn = e.target.closest('.moment-delete-btn');
+                    if (momentDeleteBtn) {
+                        if (!confirm('确定要删除这条朋友圈吗？')) return;
+                        const card = momentDeleteBtn.closest('.moment-card');
+                        const charId = card.getAttribute('data-char-id');
+                        const timestamp = card.getAttribute('data-timestamp');
+                        fetch('/api/moments/delete', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ char_id: charId, timestamp: timestamp })
+                        })
+                            .then(r => r.json())
+                            .then(() => {
+                                // 清除该朋友圈的所有翻译缓存（正文和所有评论）
+                                const postKey = charId + '|' + timestamp;
+                                Object.keys(translationCache).forEach(key => {
+                                    if (key.startsWith(postKey)) {
+                                        delete translationCache[key];
+                                    }
+                                });
+                                loadNextPage(true);
+                            })
+                            .catch(err => alert('删除失败: ' + err));
+                        return;
+                    }
+                    const commentEditBtn = e.target.closest('.comment-edit-btn');
+                    if (commentEditBtn) {
+                        const card = commentEditBtn.closest('.moment-card');
+                        const moment = findMomentFromCard(card);
+                        const cIdx = parseInt(commentEditBtn.getAttribute('data-comment-index'), 10);
+                        const comment = (moment.comments || []).find(c => Number(c.comment_index) === cIdx);
+                        if (!comment) return;
+                        
+                        // 打开编辑弹窗
+                        const editModalMask = document.getElementById('editModalMask');
+                        const editModalTitle = document.getElementById('editModalTitle');
+                        const editModalTextarea = document.getElementById('editModalTextarea');
+                        const editCharCount = document.getElementById('editCharCount');
+                        
+                        editModalTitle.textContent = '编辑评论';
+                        editModalTextarea.value = comment.content;
+                        editModalTextarea.maxLength = 500;
+                        updateEditCharCount();
+                        editModalMask.style.display = 'flex';
+                        editModalTextarea.focus();
+                        
+                        // 保存编辑上下文
+                        editModalMask.dataset.editType = 'comment';
+                        editModalMask.dataset.charId = moment.char_id;
+                        editModalMask.dataset.timestamp = moment.timestamp;
+                        editModalMask.dataset.commentIndex = cIdx;
+                        editModalMask.dataset.originalContent = comment.content;
+                        return;
+                    }
+                    const commentDeleteBtn = e.target.closest('.comment-delete-btn');
+                    if (commentDeleteBtn) {
+                        if (!confirm('确定要删除这条评论吗？')) return;
+                        const card = commentDeleteBtn.closest('.moment-card');
+                        const charId = card.getAttribute('data-char-id');
+                        const timestamp = card.getAttribute('data-timestamp');
+                        const cIdx = commentDeleteBtn.getAttribute('data-comment-index');
+                        fetch('/api/moments/comment/delete', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ char_id: charId, timestamp: timestamp, comment_index: cIdx })
+                        })
+                            .then(r => r.json())
+                            .then(() => {
+                                // 清除该朋友圈的所有评论翻译缓存，避免删除评论后翻译显示混乱
+                                const postKey = charId + '|' + timestamp;
+                                Object.keys(translationCache).forEach(key => {
+                                    if (key.startsWith(postKey + '|c|')) {
+                                        delete translationCache[key];
+                                    }
+                                });
+                                reloadAndScrollTo({ char_id: charId, timestamp: timestamp });
+                            })
+                            .catch(err => alert('删除失败: ' + err));
+                        return;
+                    }
+                    const copyBtn = e.target.closest('.btn-copy-moment');
+                    if (copyBtn) {
+                        const card = copyBtn.closest('.moment-card');
+                        const m = findMomentFromCard(card);
+                        if (!m) return;
+                        // 格式为：【朋友圈】xxxx（角色/用户名）：xxxxxxx（朋友圈内容）。（xxxxx）（日期时间）
+                        let text = `【朋友圈】${m.remark}：${m.content}。（${formatTime(m.timestamp)}）\n`;
+                        if (m.liker_remarks && m.liker_remarks.length) {
+                             text += `【点赞】${m.liker_remarks.join('、')}\n`;
+                        }
+                        if (m.comments && m.comments.length) {
+                            text += "【评论】\n" + m.comments.map(c => {
+                                const reply = (c.reply_to_remark) ? `回复 ${c.reply_to_remark}：` : '';
+                                return `${c.remark}：${reply}${c.content}`;
+                            }).join('\n');
+                        }
+                        navigator.clipboard.writeText(text.trim()).then(() => {
+                            const old = copyBtn.textContent;
+                            copyBtn.textContent = '已复制';
+                            showToast('复制成功！');
+                            setTimeout(() => copyBtn.textContent = old, 1500);
+                        }).catch(err => {
+                            // Fallback for non-secure contexts
+                            const textArea = document.createElement("textarea");
+                            textArea.value = text.trim();
+                            document.body.appendChild(textArea);
+                            textArea.select();
+                            try {
+                                document.execCommand('copy');
+                                const old = copyBtn.textContent;
+                                copyBtn.textContent = '已复制';
+                                showToast('复制成功！');
+                                setTimeout(() => copyBtn.textContent = old, 1500);
+                            } catch (err2) {
+                                alert('复制失败: ' + err2);
+                            }
+                            document.body.removeChild(textArea);
+                        });
+                        return;
                     }
                 });
             }
@@ -1169,7 +1627,7 @@
                     closeModal();
                 });
                 // 点击遮罩空白处关闭
-                mask.addEventListener('click', function(e) {
+                mask.addEventListener('mousedown', function(e) {
                     if (e.target === mask) {
                         closeModal();
                     }
@@ -1223,12 +1681,293 @@
                             composeBtn.innerHTML = '发布';
                         });
                 });
+                
+                // ===== 编辑弹窗事件处理 =====
+                const editModalMask = document.getElementById('editModalMask');
+                const editModal = document.getElementById('editModal');
+                const editModalTextarea = document.getElementById('editModalTextarea');
+                const editModalCancel = document.getElementById('editModalCancel');
+                const editModalSubmit = document.getElementById('editModalSubmit');
+                const editCharCount = document.getElementById('editCharCount');
+                
+                if (!editModalMask || !editModalTextarea) return;
+                
+                // 更新编辑框字数显示
+                window.updateEditCharCount = function() {
+                    if (!editCharCount) return;
+                    const length = editModalTextarea.value.length;
+                    const maxLength = editModalTextarea.maxLength || 1000;
+                    editCharCount.textContent = length + '/' + maxLength;
+                    if (length >= maxLength) {
+                        editModalTextarea.classList.add('is-full');
+                        editCharCount.classList.add('is-full');
+                    } else {
+                        editModalTextarea.classList.remove('is-full');
+                        editCharCount.classList.remove('is-full');
+                    }
+                }
+                
+                editModalTextarea.addEventListener('input', updateEditCharCount);
+                
+                // 关闭编辑弹窗
+                function closeEditModal() {
+                    editModalMask.style.display = 'none';
+                    editModalSubmit.disabled = false;
+                    editModalSubmit.classList.remove('is-loading');
+                    editModalSubmit.innerHTML = '保存';
+                }
+                
+                editModalCancel.addEventListener('click', function() {
+                    closeEditModal();
+                });
+                
+                // 点击遮罩空白处关闭
+                editModalMask.addEventListener('click', function(e) {
+                    if (e.target === editModalMask) {
+                        closeEditModal();
+                    }
+                });
+                
+                // 提交编辑
+                editModalSubmit.addEventListener('click', function() {
+                    const newContent = (editModalTextarea.value || '').trim();
+                    const originalContent = (editModalMask.dataset.originalContent || '').trim();
+                    
+                    if (!newContent) {
+                        alert('内容不能为空');
+                        return;
+                    }
+                    if (newContent === originalContent) {
+                        alert('内容未修改');
+                        return;
+                    }
+                    
+                    const editType = editModalMask.dataset.editType;
+                    const charId = editModalMask.dataset.charId;
+                    const timestamp = editModalMask.dataset.timestamp;
+                    
+                    editModalSubmit.disabled = true;
+                    editModalSubmit.classList.add('is-loading');
+                    editModalSubmit.innerHTML = '<span class="moment-compose-spinner"></span>保存中…';
+                    
+                    if (editType === 'moment') {
+                        // 编辑朋友圈
+                        fetch('/api/moments/edit', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ char_id: charId, timestamp: timestamp, new_content: newContent })
+                        })
+                            .then(r => r.json())
+                            .then(() => {
+                                closeEditModal();
+                                reloadAndScrollTo({ char_id: charId, timestamp: timestamp });
+                            })
+                            .catch(err => {
+                                alert('保存失败: ' + err);
+                            })
+                            .finally(() => {
+                                editModalSubmit.disabled = false;
+                                editModalSubmit.classList.remove('is-loading');
+                                editModalSubmit.innerHTML = '保存';
+                            });
+                    } else if (editType === 'comment') {
+                        // 编辑评论
+                        const commentIndex = parseInt(editModalMask.dataset.commentIndex, 10);
+                        fetch('/api/moments/comment/edit', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ char_id: charId, timestamp: timestamp, comment_index: commentIndex, new_content: newContent })
+                        })
+                            .then(r => r.json())
+                            .then(() => {
+                                closeEditModal();
+                                reloadAndScrollTo({ char_id: charId, timestamp: timestamp });
+                            })
+                            .catch(err => {
+                                alert('保存失败: ' + err);
+                            })
+                            .finally(() => {
+                                editModalSubmit.disabled = false;
+                                editModalSubmit.classList.remove('is-loading');
+                                editModalSubmit.innerHTML = '保存';
+                            });
+                    }
+                });
+
+                // --- 新增：@ 自动补齐逻辑 ---
+                const atMenuId = 'atMentionMenu';
+                const atMenu = document.getElementById(atMenuId);
+                let charListForAt = [];
+                let highlightIdx = 0;
+
+                // 加载角色列表供 @ 使用
+                fetch('/api/moments/characters')
+                    .then(r => r.json())
+                    .then(remarks => {
+                        charListForAt = Object.keys(remarks).map(cid => ({ id: cid, name: remarks[cid] }));
+                    });
+
+                function updateAtMenu(textarea) {
+                    const text = textarea.value;
+                    const pos = textarea.selectionStart;
+                    if (pos === 0) { atMenu.style.display = 'none'; return; }
+                    
+                    const before = text.substring(0, pos);
+                    const lastAt = before.lastIndexOf('@');
+                    
+                    if (lastAt !== -1) {
+                        const afterAt = before.substring(lastAt + 1);
+                        if (!afterAt.includes(' ') && !afterAt.includes('\n')) {
+                            const query = afterAt.toLowerCase();
+                            const matches = charListForAt.filter(c => c.name.toLowerCase().includes(query) || c.id.toLowerCase().includes(query));
+                            
+                            if (matches.length > 0) {
+                                highlightIdx = Math.min(highlightIdx, matches.length - 1);
+                                atMenu.innerHTML = matches.map((c, i) => 
+                                    `<div class="at-mention-item ${i === highlightIdx ? 'selected' : ''}" data-name="${c.name}">${c.name}</div>`
+                                ).join('');
+                                atMenu.style.display = 'block';
+                                
+                                // 定位在输入文本框上方或下方
+                                const rect = textarea.getBoundingClientRect();
+                                atMenu.style.left = rect.left + 'px';
+                                atMenu.style.width = (rect.width - 2) + 'px';
+                                atMenu.style.top = (rect.bottom + 5) + 'px'; 
+                                
+                                atMenu.onmousedown = (e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    const item = e.target.closest('.at-mention-item');
+                                    if (item) {
+                                        const textVal = textarea.value;
+                                        const startOfAt = textVal.substring(0, textarea.selectionStart).lastIndexOf('@');
+                                        insertAt(textarea, item.getAttribute('data-name'), startOfAt);
+                                    }
+                                };
+                                return;
+                            }
+                        }
+                    }
+                    atMenu.style.display = 'none';
+                    highlightIdx = 0;
+                }
+
+                function insertAt(textarea, name, atPos) {
+                    const text = textarea.value;
+                    const pos = textarea.selectionStart;
+                    const before = text.substring(0, atPos);
+                    const after = text.substring(pos);
+                    textarea.value = before + '@' + name + ' ' + after;
+                    const newPos = atPos + name.length + 2;
+                    textarea.selectionStart = textarea.selectionEnd = newPos;
+                    atMenu.style.display = 'none';
+                    textarea.focus();
+                    
+                    // 确保 updateCharCount 也更新
+                    const event = new Event('input', { bubbles: true });
+                    textarea.dispatchEvent(event);
+                }
+
+                composeText.addEventListener('input', () => updateAtMenu(composeText));
+                // 防止在 @ 菜单显示时按回车导致表单提交或弹窗关闭
+                composeText.addEventListener('keydown', function(e) {
+                    if (atMenu.style.display === 'block') {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const items = atMenu.querySelectorAll('.at-mention-item');
+                            const selected = items[highlightIdx];
+                            if (selected) {
+                                const before = composeText.value.substring(0, composeText.selectionStart);
+                                insertAt(composeText, selected.dataset.name, before.lastIndexOf('@'));
+                            }
+                            return;
+                        }
+                        if (e.key === 'ArrowDown') {
+                            const items = atMenu.querySelectorAll('.at-mention-item');
+                            highlightIdx = (highlightIdx + 1) % items.length;
+                            updateAtMenu(composeText);
+                            e.preventDefault();
+                        } else if (e.key === 'ArrowUp') {
+                            const items = atMenu.querySelectorAll('.at-mention-item');
+                            highlightIdx = (highlightIdx - 1 + items.length) % items.length;
+                            updateAtMenu(composeText);
+                            e.preventDefault();
+                        } else if (e.key === 'Escape') {
+                            atMenu.style.display = 'none';
+                            e.preventDefault();
+                        }
+                    }
+                });
             }
 
             if (loadMoreBtn) {
                 loadMoreBtn.addEventListener('click', function() {
                     loadNextPage(false);
                 });
+            }
+
+            function initCharFilter() {
+                const filterBtn = document.getElementById('charFilterBtn');
+                const filterMenu = document.getElementById('charFilterMenu');
+                const label = document.getElementById('charFilterLabel');
+                if (!filterBtn || !filterMenu) return;
+
+                // 切换菜单显示
+                filterBtn.addEventListener('click', function(e) {
+                    if (e.target.closest('.char-filter-menu')) return;
+                    filterMenu.classList.toggle('show');
+                    filterBtn.classList.toggle('is-open');
+                });
+
+                // 点击外部关闭菜单
+                document.addEventListener('click', function(e) {
+                    if (!filterBtn.contains(e.target)) {
+                        filterMenu.classList.remove('show');
+                        filterBtn.classList.remove('is-open');
+                    }
+                });
+
+                // 核心筛选逻辑：监听菜单项点击（包括后续注入的角色项）
+                filterMenu.addEventListener('click', function(e) {
+                    const item = e.target.closest('.char-filter-item');
+                    if (!item) return;
+
+                    const charId = item.dataset.charId;
+                    const name = item.innerText;
+
+                    // 更新 UI 状态
+                    filterMenu.querySelectorAll('.char-filter-item').forEach(i => i.classList.remove('active'));
+                    item.classList.add('active');
+                    
+                    if (charId === 'all') {
+                        label.innerText = '朋友圈';
+                    } else {
+                        label.innerText = name + '的朋友圈';
+                    }
+
+                    // 重新加载数据
+                    currentFilterCharId = charId;
+                    loadNextPage(true);
+                    
+                    filterMenu.classList.remove('show');
+                    filterBtn.classList.remove('is-open');
+                });
+
+                // 注入角色列表
+                fetch('/api/moments/characters')
+                    .then(r => r.json())
+                    .then(remarks => {
+                        Object.keys(remarks).forEach(cid => {
+                            const name = remarks[cid];
+                            const item = document.createElement('div');
+                            item.className = 'char-filter-item';
+                            item.dataset.charId = cid;
+                            item.innerText = name;
+                            filterMenu.appendChild(item);
+                        });
+                    })
+                    .catch(() => {});
             }
 
             function initActiveMomentsToggle() {
@@ -1272,6 +2011,7 @@
 
             attachMomentEvents();
             attachComposeEvent();
+            initCharFilter();
             initActiveMomentsToggle();
             loadUserLanguage().finally(function() {
                 loadNextPage(true);
