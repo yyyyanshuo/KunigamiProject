@@ -2042,7 +2042,7 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
             # 优先查找当前用户名匹配的关系，找不到再用 ID 尝试
             user_rel = rel_data.get(current_user_name)
             if not user_rel:
-                user_id = get_user_id()
+                user_id = get_current_user_id()
                 if user_id:
                     user_rel = rel_data.get(str(user_id))
 
@@ -2052,8 +2052,9 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
                        f"関係度：{user_rel.get('score', 1)}\n"
                        f"詳細：{user_rel.get('description', '')}")
                 prompt_parts.append(f"【関係 / 关系】\n{rel_str}")
-            elif rel_data:
-                # 如果没找到特定匹配，且是在群聊或没有明确匹配时，展示列表（原有逻辑）
+            
+            # --- 【修复也同步到 v2 的 Prompt 引擎】---
+            if rel_data:
                 rel_lines = []
                 
                 # 尝试加载名字映射，如果是 ID 存的就转成名字
@@ -2065,6 +2066,9 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
                 except: pass
                 
                 for key_name, info in rel_data.items():
+                    # 跳过用户的信息，因为上面已经单独输出了
+                    if key_name == current_user_name or key_name == str(get_current_user_id()):
+                        continue
                     disp_name = id_to_name.get(key_name, key_name)
                     role = info.get('role', '未知')
                     desc = info.get('description', '特になし')
@@ -2072,7 +2076,7 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
                     rel_lines.append(f"- {disp_name}: {role} (关系度:{score}) {desc}")
                 if rel_lines:
                     rel_text = "\n".join(rel_lines)
-                    prompt_parts.append(f"【関係 / 关系】\n{rel_text}")
+                    prompt_parts.append(f"【其他角色关系 / 他キャラクターとの関係】\n{rel_text}")
     except Exception:
         pass
     
@@ -2305,7 +2309,7 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
                 rel_data = json.load(f)
                 user_rel = rel_data.get(current_user_name)
                 if not user_rel:
-                    user_id = get_user_id()
+                    user_id = get_current_user_id()
                     if user_id:
                         user_rel = rel_data.get(str(user_id))
                         
@@ -2317,8 +2321,10 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
                            f"詳細：{user_rel.get('description', '')}")
                     # 【修正】append 必须在 if 内部，避免 rel_str 未定义错误
                     prompt_parts.append(f"【Relationship / 関係設定】\n{rel_str}")
-                elif rel_data:
-                    # v1 版本中处理无明确匹配的列表 (群聊或全局)
+                
+                # ------ 【修复】将关系列表的拼接作为独立逻辑，而不是互斥的 elif ------
+                # 如果这个系统提示是为了朋友圈等需要“了解群里所有人关系”的场景，应该把所有关系都加上去
+                if rel_data:
                     rel_lines = []
                     id_to_name = {}
                     try:
@@ -2327,6 +2333,9 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
                             id_to_name = {str(k): v.get("name", str(k)) for k, v in c_data.items()}
                     except: pass
                     for key_name, info in rel_data.items():
+                        # 跳过用户的信息，因为上面已经单独输出了
+                        if key_name == current_user_name or key_name == str(get_current_user_id()):
+                            continue
                         disp_name = id_to_name.get(key_name, key_name)
                         role = info.get('role', '未知')
                         desc = info.get('description', '特になし')
@@ -2334,7 +2343,7 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
                         rel_lines.append(f"- {disp_name}: {role} (关系度:{score}) {desc}")
                     if rel_lines:
                         rel_text = "\n".join(rel_lines)
-                        prompt_parts.append(f"【Relationship / 関係設定】\n{rel_text}")
+                        prompt_parts.append(f"【Relationships with others / その他キャラクターとの関係】\n{rel_text}")
     except Exception: pass
 
     # ========== 新顺序：4. 长期记忆 ==========
@@ -8968,7 +8977,7 @@ def _generate_moment_comment(commenter_id, post_author_id, post_content):
         print(f"   ⚠️ [Moment Comment] 记忆同步失败 {commenter_id}: {e}，继续生成")
     
     recent_messages = [post_content]
-    sys_prompt = build_system_prompt(commenter_id, recent_messages=recent_messages)
+    sys_prompt = build_system_prompt(commenter_id, include_global_format=False, recent_messages=recent_messages)
 
     # 从当前用户的 characters.json 中读取双方名字，便于在 Prompt 中明确说明评论对象与关系
     commenter_name = commenter_id
