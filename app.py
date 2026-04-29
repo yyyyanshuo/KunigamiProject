@@ -3607,7 +3607,7 @@ def contact_list_view():
 
 @app.route("/moments")
 def moments_view():
-    return render_template("moments.html")
+    return render_template("moments.html", ai_lang=get_ai_language())
 
 
 def _get_active_moments_enabled_file():
@@ -3814,6 +3814,44 @@ def moments_like():
     return jsonify({"status": "success", "liked": True})
 
 
+@app.route("/api/moments/unlike", methods=["POST"])
+def moments_unlike():
+    """用户取消点赞一条朋友圈。body: { char_id, timestamp }。"""
+    data = request.get_json() or {}
+    char_id = data.get("char_id")
+    timestamp_str = data.get("timestamp")
+    if not char_id or not timestamp_str:
+        return jsonify({"error": "缺少 char_id 或 timestamp"}), 400
+
+    moments_path, _ = get_moments_paths()
+    if not os.path.exists(moments_path):
+        return jsonify({"error": "暂无朋友圈数据"}), 404
+    try:
+        with open(moments_path, "r", encoding="utf-8-sig") as f:
+            raw = json.load(f)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    idx, post = _find_moment_post(raw, char_id, timestamp_str)
+    if idx is None:
+        return jsonify({"error": "未找到该条朋友圈"}), 404
+
+    likers = post.get("likers", [])
+    # 过滤掉用户的点赞
+    new_likers = [l for l in likers if l.get("liker_id") != "user"]
+    
+    # 同时也处理旧版字段 liker_ids (如果有)
+    if post.get("liker_ids"):
+        post["liker_ids"] = [lid for lid in post["liker_ids"] if lid != "user"]
+
+    if len(new_likers) != len(likers):
+        post["likers"] = new_likers
+        raw[idx] = post
+        safe_save_json(moments_path, raw)
+        
+    return jsonify({"status": "success", "liked": False})
+
+
 @app.route("/api/moments/comment", methods=["POST"])
 def moments_comment():
     """用户评论一条朋友圈。body: { char_id, timestamp, content }。"""
@@ -3934,6 +3972,243 @@ def moments_comment_regenerate():
     safe_save_json(moments_path, raw)
 
     return jsonify({"status": "success"})
+
+
+@app.route("/api/moments/force_active", methods=["POST"])
+def force_active_moment():
+    """
+    手动选择角色，催促其立即生成一条主动朋友圈。
+    """
+    data = request.get_json() or {}
+    char_id = data.get("char_id")
+    if not char_id:
+        return jsonify({"error": "缺少角色参数"}), 400
+
+    # 尝试在当前请求中跑触发逻辑
+    success = trigger_active_moments(char_id)
+    if success:
+        return jsonify({"status": "success"})
+    else:
+        return jsonify({"error": "生成朋友圈失败或被过滤"}), 500
+
+
+@app.route("/api/moments/post/ai_comment", methods=["POST"])
+def moments_ai_comment_to_post():
+    """
+    手动指派某个角色直接对朋友圈本身生成评论（无 reply_to）。
+    body: { char_id, timestamp, commenter_id }
+    """
+    data = request.get_json() or {}
+    post_char_id = data.get("char_id")
+    timestamp_str = data.get("timestamp")
+    commenter_id = data.get("commenter_id")
+    
+    if not all([post_char_id, timestamp_str, commenter_id]):
+        return jsonify({"error": "缺少必要参数"}), 400
+
+    moments_path, _ = get_moments_paths()
+    if not os.path.exists(moments_path):
+        return jsonify({"error": "暂无朋友圈数据"}), 404
+        
+    try:
+        with open(moments_path, "r", encoding="utf-8-sig") as f:
+            raw = json.load(f)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    idx, post = _find_moment_post(raw, post_char_id, timestamp_str)
+    if idx is None:
+        return jsonify({"error": "未找到该条朋友圈"}), 404
+
+    post_content = post.get("content", "")
+
+    # 调用现有函数生成角色对贴文的直接评论。该函数内部已包含系统提示的拼装和目标角色的关联
+    new_text = _generate_moment_comment(commenter_id, post_char_id, post_content)
+    if not new_text:
+        return jsonify({"error": "AI生成的评论内容为空，请重试"}), 500
+        
+    comments = post.get("comments", [])
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    comments.append({
+        "commenter_id": commenter_id,
+        "content": new_text,
+        "timestamp": now
+        # 直接评论到朋友圈，不带 reply_to
+    })
+    post["comments"] = comments
+    raw[idx] = post
+    safe_save_json(moments_path, raw)
+    
+    def get_name(cid):
+        if cid == "user": return get_current_username()
+        return get_char_name(cid)
+
+    post_author_name = get_name(post_char_id)
+    ctx = f"在{post_author_name}的朋友圈：「{post_content}」下，你评论说：「{new_text}」。"
+    append_moment_event_to_short_memory(commenter_id, ctx)
+
+    return jsonify({"status": "success", "comment": comments[-1]})
+
+
+@app.route("/api/moments/comment/ai_reply", methods=["POST"])
+def moments_ai_reply_to_comment():
+    """
+    手动指派某个角色（replying_char_id）对指定的评论（comment_index）进行回复。
+    body: { char_id, timestamp, comment_index, replying_char_id }
+    """
+    data = request.get_json() or {}
+    post_char_id = data.get("char_id")
+    timestamp_str = data.get("timestamp")
+    comment_index = data.get("comment_index")
+    replying_char_id = data.get("replying_char_id")
+    
+    if not all([post_char_id, timestamp_str, replying_char_id]) or comment_index is None:
+        return jsonify({"error": "缺少必要参数"}), 400
+
+    try:
+        comment_index = int(comment_index)
+    except Exception:
+        return jsonify({"error": "comment_index 无效"}), 400
+
+    moments_path, _ = get_moments_paths()
+    if not os.path.exists(moments_path):
+        return jsonify({"error": "暂无朋友圈数据"}), 404
+        
+    try:
+        with open(moments_path, "r", encoding="utf-8-sig") as f:
+            raw = json.load(f)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    idx, post = _find_moment_post(raw, post_char_id, timestamp_str)
+    if idx is None:
+        return jsonify({"error": "未找到该条朋友圈"}), 404
+
+    comments = post.get("comments", [])
+    if comment_index < 0 or comment_index >= len(comments):
+        return jsonify({"error": "评论索引不存在"}), 404
+
+    target_comment = comments[comment_index]
+    target_commenter_id = target_comment.get("commenter_id")
+    target_comment_content = target_comment.get("content", "")
+    
+    post_content = post.get("content", "")
+
+    # 调用 AI 生成回复
+    new_text = _generate_ai_reply_to_any_comment(replying_char_id, post_char_id, post_content, comments, comment_index)
+    if not new_text:
+        return jsonify({"error": "AI生成的回复内容为空，请重试"}), 500
+        
+    # 追加新的回复评论
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    comments.append({
+        "commenter_id": replying_char_id,
+        "content": new_text,
+        "timestamp": now,
+        "reply_to": target_commenter_id
+    })
+    post["comments"] = comments
+    raw[idx] = post
+    safe_save_json(moments_path, raw)
+    
+    # 获取双方名字用于短期记忆构建
+    def get_name(cid):
+        if cid == "user": return get_current_username()
+        return get_char_name(cid)
+
+    target_name = get_name(target_commenter_id)
+    post_author_name = get_name(post_char_id)
+    ctx = f"在{post_author_name}的朋友圈：「{post_content}」下，你回复了{target_name}的评论「{target_comment_content}」，你说：「{new_text}」。"
+    append_moment_event_to_short_memory(replying_char_id, ctx)
+
+    return jsonify({"status": "success", "comment": comments[-1]})
+
+@app.route("/api/moments/comment/user_reply", methods=["POST"])
+def moments_user_reply_to_comment():
+    """
+    用户亲自回复某个角色的评论。
+    系统会先保存用户评论，然后让被回复的角色自动回访一次。
+    body: { char_id, timestamp, comment_index, content }
+    """
+    data = request.get_json() or {}
+    post_char_id = data.get("char_id")
+    timestamp_str = data.get("timestamp")
+    comment_index = data.get("comment_index")
+    content = (data.get("content") or "").strip()
+    
+    if not all([post_char_id, timestamp_str, content]) or comment_index is None:
+        return jsonify({"error": "缺少必要参数"}), 400
+
+    try:
+        comment_index = int(comment_index)
+    except Exception:
+        return jsonify({"error": "comment_index 无效"}), 400
+
+    moments_path, _ = get_moments_paths()
+    if not os.path.exists(moments_path):
+        return jsonify({"error": "暂无朋友圈数据"}), 404
+        
+    try:
+        with open(moments_path, "r", encoding="utf-8-sig") as f:
+            raw = json.load(f)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    idx, post = _find_moment_post(raw, post_char_id, timestamp_str)
+    if idx is None:
+        return jsonify({"error": "未找到该条朋友圈"}), 404
+
+    comments = post.get("comments", [])
+    if comment_index < 0 or comment_index >= len(comments):
+        return jsonify({"error": "评论索引不存在"}), 404
+
+    target_comment = comments[comment_index]
+    target_commenter_id = target_comment.get("commenter_id")
+    
+    if target_commenter_id == "user":
+        return jsonify({"error": "不能回复自己的评论"}), 400
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # 1. 保存用户的回复
+    user_comment_obj = {
+        "commenter_id": "user",
+        "content": content,
+        "timestamp": now,
+        "reply_to": target_commenter_id
+    }
+    comments.append(user_comment_obj)
+    
+    # 2. 让目标角色回复用户
+    post_content = post.get("content", "")
+    
+    # 我们调用 _generate_ai_reply_to_any_comment 让 target_commenter_id 回复刚生成的 user 评论
+    ai_reply_text = _generate_ai_reply_to_any_comment(
+        replying_char_id=target_commenter_id,
+        post_author_id=post_char_id,
+        post_content=post_content,
+        comments_list=comments,
+        target_comment_index=len(comments)-1
+    )
+    
+    if ai_reply_text:
+        ai_reply_obj = {
+            "commenter_id": target_commenter_id,
+            "content": ai_reply_text,
+            "timestamp": now,
+            "reply_to": "user"
+        }
+        comments.append(ai_reply_obj)
+        
+        # 记录朋友圈记忆
+        memory_event = f"在朋友圈回复了用户的回复：{ai_reply_text}"
+        append_moment_event_to_short_memory(target_commenter_id, memory_event)
+
+    post["comments"] = comments
+    raw[idx] = post
+    safe_save_json(moments_path, raw)
+    
+    return jsonify({"success": True})
 
 
 def _generate_likes_comments_for_user_moment(post_ts_str, post_content):
@@ -8326,10 +8601,11 @@ def add_group():
 def copy_other_schedule(target_char_id):
     source_char_id = request.json.get("source_id")
 
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
     # 1. 获取源路径 和 目标路径
-    source_path = os.path.join(BASE_DIR, "characters", source_char_id, "prompts", "7_schedule.json")
+    # 修复：不再使用固定的全局 BASE_DIR，而是使用 get_paths 动态获取当前用户的角色路径
+    _, source_prompts_dir = get_paths(source_char_id)
+    source_path = os.path.join(source_prompts_dir, "7_schedule.json")
+    
     _, target_prompts_dir = get_paths(target_char_id)
     target_path = os.path.join(target_prompts_dir, "7_schedule.json")
 
@@ -9097,6 +9373,92 @@ def _generate_moment_reply_to_user(author_char_id, post_content, user_comment):
         print(f"   [Moments] 角色回复评论失败 {author_char_id}: {e}")
     return None
 
+def _generate_ai_reply_to_any_comment(replying_char_id, post_author_id, post_content, comments_list, target_comment_index):
+    """
+    让 replying_char_id 对朋友圈的某条特定评论进行回复。
+    """
+    # 生成前：同步该角色的短期记忆
+    try:
+        sync_memory_before_moments(replying_char_id)
+    except Exception as e:
+        print(f"   ⚠️ [Moment Any Reply] 记忆同步失败 {replying_char_id}: {e}，继续生成")
+
+    target_comment = comments_list[target_comment_index]
+    target_comment_author_id = target_comment.get("commenter_id")
+    target_comment_content = target_comment.get("content", "")
+
+    # 获取所有参与者的名字
+    def get_name(cid):
+        if cid == "user": return get_current_username()
+        return get_char_name(cid)
+
+    post_author_name = get_name(post_author_id)
+    target_author_name = get_name(target_comment_author_id)
+
+    # 提取整个评论区作为上下文
+    comments_context = ""
+    for c in comments_list:
+        c_name = get_name(c.get("commenter_id"))
+        rep_to = c.get("reply_to")
+        if rep_to:
+            rep_name = get_name(rep_to)
+            comments_context += f"- {c_name} 回复 {rep_name}：{c.get('content')}\n"
+        else:
+            comments_context += f"- {c_name}：{c.get('content')}\n"
+
+    # 生成系统提示：包含对 "目标评论者" 的关系
+    sys_prompt = build_system_prompt(replying_char_id, include_global_format=False, recent_messages=[post_content, target_comment_content], target_char_id=target_comment_author_id)
+
+    lang = get_ai_language()
+    if lang == "zh":
+        user_msg = (
+            "【评论互动任务】\n"
+            "你正在浏览社交软件的朋友圈，现在你需要对其中的一条评论进行「回复」。只输出回复内容，不要加引号或「回复：」等前缀。\n\n"
+            f"【朋友圈原文】\n"
+            f"发布者：{post_author_name}\n"
+            f"内容：{post_content}\n\n"
+            f"【当前评论区的所有评论】\n"
+            f"{comments_context}\n"
+            f"【你要回复的目标评论（⚠️重点）】\n"
+            f"评论者：{target_author_name}（你与他/她的关系已包含在人设中）\n"
+            f"TA的评论内容：「{target_comment_content}」\n\n"
+            "请结合整体语境，特别是针对你要回复的这条评论，以你的身份进行真实简短的回复（一两句话即可）。"
+        )
+    else:
+        user_msg = (
+            "【コメント返信タスク】\n"
+            "あなたはSNSのタイムラインを見ています。以下の特定のコメントに対して「返信」を書いてください。出力は返信コメントのみとし、引用符や接頭辞は不要です。\n\n"
+            f"【元の投稿】\n"
+            f"投稿者：{post_author_name}\n"
+            f"内容：{post_content}\n\n"
+            f"【現在の全コメント】\n"
+            f"{comments_context}\n"
+            f"【あなたが返信する対象のコメント（⚠️重要）】\n"
+            f"コメント者：{target_author_name}（あなたと相手との関係性はシステムプロンプトに記載されています）\n"
+            f"コメント内容：「{target_comment_content}」\n\n"
+            "全体の文脈を踏まえつつ、特にこの対象コメントに対して、あなたのキャラクターらしい自然で短い返信（1〜2文程度）を書いてください。"
+        )
+
+    messages = [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": user_msg}
+    ]
+    
+    try:
+        route, current_model = get_model_config("moments")
+        if route == "relay":
+            text = call_openrouter(messages, char_id=replying_char_id, model_name=current_model)
+        else:
+            text = call_gemini(messages, char_id=replying_char_id, model_name=current_model)
+            
+        if text:
+            text = text.strip().strip('"\'')
+            if len(text) > 100:
+                text = text[:100]
+            return text
+    except Exception as e:
+        print(f"   [Moments] 任意回复评论生成失败 {replying_char_id}: {e}")
+    return None
 
 # --- 【朋友圈】角色主动发朋友圈（含点赞、评论）---
 def trigger_active_moments(char_id):

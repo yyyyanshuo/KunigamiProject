@@ -9,6 +9,10 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="/static/logo.png">
     <title>朋友圈</title>
+    <script>
+        // 将后端语言设置传递给前端
+        window.AI_LANG = "{{ ai_lang }}";
+    </script>
     <!-- 【新增】主题加载脚本 -->
     <script src="/static/theme-loader.js"></script>
     <style>
@@ -473,27 +477,9 @@
 
         /* 底部互动操作 */
         .moment-actions {
-            margin-top: 10px;
-            padding-top: 10px;
-            border-top: 1px dashed var(--border-color);
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            flex-wrap: wrap;
+            display: none !important;
         }
-        .moment-like-btn {
-            background: none; border: none; color: var(--text-muted);
-            font-size: 13px; cursor: pointer; padding: 4px; transition: all 0.2s;
-            display: flex; align-items: center; gap: 4px; font-weight: 500;
-        }
-        /* 统一使用同一颗心，只通过颜色区分“赞 / 已赞”，避免大小不一致的视觉差异 */
-        .moment-like-btn::before { content: "♥"; font-size: 16px; line-height: 1; }
-        .moment-like-btn:hover { color: var(--primary-color); }
-        .moment-like-btn.is-liked { color: var(--primary-color); }
-
-        .moment-comment-form { display: flex; gap: 8px; flex: 1; min-width: 0; }
         .moment-comment-trans-row {
-            margin-top: 6px;
             display: flex;
             gap: 8px;
             width: 100%;
@@ -810,17 +796,38 @@
         <!-- 发送弹窗 -->
         <div class="moment-modal-mask" id="momentModalMask">
             <div class="moment-modal" id="momentModal">
-                <div class="moment-modal-title">写点什么...</div>
+                <div class="moment-modal-title">发朋友圈</div>
                 <div class="moment-modal-body">
-                    <div class="moment-compose-trans-row" id="momentComposeTransRow" style="display:none;">
-                        <input type="text" class="moment-compose-trans-input" id="momentComposeTransText" placeholder="输入中文，翻译成日语后填入下方正文">
-                        <button type="button" class="moment-compose-trans-btn" id="momentComposeTransBtn">翻译</button>
+                    <!-- 发帖方式切换 -->
+                    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                        <button type="button" class="moment-compose-btn" id="showUserPostBtn" style="flex: 1; background: var(--primary-color); color: white;">我自己发</button>
+                        <button type="button" class="moment-compose-btn" id="showAiPostBtn" style="flex: 1; background: #f0f2f5; color: var(--text-main); border: 1px solid var(--border-color);">让角色发</button>
                     </div>
-                    <textarea class="moment-compose-text" id="momentComposeText" placeholder="分享此刻的想法…" maxlength="1000"></textarea>
-                    <div class="moment-char-count" id="momentCharCount">0/1000</div>
-                    <div class="moment-modal-actions">
-                        <button type="button" class="moment-cancel-btn" id="momentModalCancel">取消</button>
-                        <button type="button" class="moment-compose-btn" id="momentComposeBtn">发布</button>
+
+                    <!-- 我自己发区域 -->
+                    <div id="userPostSection">
+                        <div class="moment-compose-trans-row" id="momentComposeTransRow" style="display:none;">
+                            <input type="text" class="moment-compose-trans-input" id="momentComposeTransText" placeholder="输入中文，翻译成日语后填入下方正文">
+                            <button type="button" class="moment-compose-trans-btn" id="momentComposeTransBtn">翻译</button>
+                        </div>
+                        <textarea class="moment-compose-text" id="momentComposeText" placeholder="分享此刻的想法…" maxlength="1000"></textarea>
+                        <div class="moment-char-count" id="momentCharCount">0/1000</div>
+                        <div class="moment-modal-actions">
+                            <button type="button" class="moment-cancel-btn" id="momentModalCancel">取消</button>
+                            <button type="button" class="moment-compose-btn" id="momentComposeBtn">发布</button>
+                        </div>
+                    </div>
+
+                    <!-- 让角色发区域 -->
+                    <div id="aiPostSection" style="display:none;">
+                        <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 5px;">选择一个角色，让他立刻发一条朋友圈：</div>
+                        <select id="forceMomentCharacterSelect" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--card-bg); color: var(--text-color); width: 100%;">
+                            <option value="">(加载角色中...)</option>
+                        </select>
+                        <div class="moment-modal-actions">
+                            <button type="button" class="moment-cancel-btn" id="forceAiPostCancel">取消</button>
+                            <button type="button" class="moment-compose-btn" id="forceMomentModalSubmit">立即生成</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -838,6 +845,64 @@
                     <div class="moment-modal-actions">
                         <button type="button" class="moment-cancel-btn" id="editModalCancel">取消</button>
                         <button type="button" class="moment-compose-btn" id="editModalSubmit">保存</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 角色回复评论弹窗 -->
+        <div class="moment-modal-mask" id="replyModalMask" style="display:none;">
+            <div class="moment-modal" id="replyModal">
+                <div class="moment-modal-title">如何回复？</div>
+                <div class="moment-modal-body" style="display: flex; flex-direction: column; gap: 10px;">
+                    <!-- 方式 choice -->
+                    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                        <button type="button" class="moment-compose-btn" id="showAiReplyBtn" style="flex: 1; background: var(--primary-color); color: white;">角色回复</button>
+                        <button type="button" class="moment-compose-btn" id="showUserReplyBtn" style="flex: 1; background: #f0f2f5; color: var(--text-main); border: 1px solid var(--border-color);">我自己发</button>
+                    </div>
+
+                    <!-- AI 自动回复区域 -->
+                    <div id="aiReplySection">
+                        <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 5px;">选择一个角色自动生成回复：</div>
+                        <select id="replyCharacterSelect" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--card-bg); color: var(--text-color); width: 100%;">
+                            <option value="">(加载角色中...)</option>
+                        </select>
+                        <div class="moment-modal-actions">
+                            <button type="button" class="moment-cancel-btn" id="replyModalCancel">取消</button>
+                            <button type="button" class="moment-compose-btn" id="replyModalSubmit">开始生成</button>
+                        </div>
+                    </div>
+
+                    <!-- 用户亲自回复区域 -->
+                    <div id="userReplySection" style="display:none;">
+                        <div class="moment-compose-trans-row" id="userReplyTransRow" style="display:none; margin-bottom: 10px;">
+                            <input type="text" class="moment-compose-trans-input" id="userReplyTransInput" placeholder="输入中文，翻译成日语后填入下方" style="flex:1;">
+                            <button type="button" class="moment-compose-trans-btn" id="userReplyTransBtn">翻译</button>
+                        </div>
+                        <textarea class="moment-compose-text" id="userReplyTextarea" placeholder="我也说一句…" maxlength="200" style="height: 100px; margin-bottom: 5px;"></textarea>
+                        <div style="text-align: right; font-size: 11px; color: var(--text-muted); margin-bottom: 10px;" id="userReplyCharCount">0/200</div>
+                        <div class="moment-modal-actions">
+                            <button type="button" class="moment-cancel-btn" id="userReplyCancel">取消</button>
+                            <button type="button" class="moment-compose-btn" id="userReplySubmit">发送并引起互动</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 催发朋友圈弹窗 -->
+        <!-- 已集成到发布弹窗，此处保留结构以防 JS 报错，但在 CSS 中彻底隐藏 -->
+        <div class="moment-modal-mask" id="forceMomentModalMask" style="display:none !important;">
+            <div class="moment-modal" id="forceMomentModal">
+                <div class="moment-modal-title">催发朋友圈</div>
+                <div class="moment-modal-body" style="display: flex; flex-direction: column; gap: 10px;">
+                    <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 5px;">选择一个角色，让他立刻发一条朋友圈：</div>
+                    <select id="forceMomentCharacterSelect" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--card-bg); color: var(--text-color); width: 100%;">
+                        <option value="">(加载角色中...)</option>
+                    </select>
+                    <div class="moment-modal-actions">
+                        <button type="button" class="moment-cancel-btn" id="forceMomentModalCancel">取消</button>
+                        <button type="button" class="moment-compose-btn" id="forceMomentModalSubmit">立即生成</button>
                     </div>
                 </div>
             </div>
@@ -974,8 +1039,9 @@
                                 menuItems += '<button type="button" class="moment-menu-item comment-translate-btn" title="翻译评论" data-comment-index="' + escapeAttr(c.comment_index) + '" data-comment-key="' + escapeAttr(commentKey) + '">翻译</button>';
                             }
                             if (canRegen) {
-                                menuItems += '<button type="button" class="moment-menu-item comment-regen-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">重生成</button>';
+                                menuItems += '<button type="button" class="moment-menu-item comment-regen-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">重新生成</button>';
                             }
+                            menuItems += '<button type="button" class="moment-menu-item comment-reply-ai-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">回复</button>';
                             menuItems += '<button type="button" class="moment-menu-item comment-edit-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">编辑</button>';
                             menuItems += '<button type="button" class="moment-menu-item comment-delete-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">删除</button>';
                             
@@ -1007,12 +1073,21 @@
                     
                     // 朋友圈操作菜单
                     let postMenuItems = '<button type="button" class="moment-menu-item btn-copy-moment">复制</button>';
+                    
+                    // 点赞/取消点赞
+                    if (hasMyLike) {
+                        postMenuItems += '<button type="button" class="moment-menu-item moment-unlike-btn" style="color: var(--primary-dark);">取消点赞</button>';
+                    } else {
+                        postMenuItems += '<button type="button" class="moment-menu-item moment-like-btn">点赞</button>';
+                    }
+
                     if (isJaMode()) {
                         postMenuItems += '<button type="button" class="moment-menu-item moment-translate-btn" data-post-key="' + escapeAttr(postKey) + '">翻译</button>';
                     }
                     if (m.char_id !== USER_ID) {
                         postMenuItems += '<button type="button" class="moment-menu-item moment-regen-btn">重新生成</button>';
                     }
+                    postMenuItems += '<button type="button" class="moment-menu-item post-reply-ai-btn">评论</button>';
                     postMenuItems += '<button type="button" class="moment-menu-item moment-edit-btn">编辑</button>';
                     postMenuItems += '<button type="button" class="moment-menu-item moment-delete-btn">删除</button>';
                     
@@ -1047,17 +1122,6 @@
                         postTransResult +
                         likersHtml +
                         commentsHtml +
-                        '<div class="moment-actions">' +
-                        '<button type="button" class="' + likeBtnClass + '" aria-label="赞">' + likeBtnText + '</button>' +
-                        '<form class="moment-comment-form" onsubmit="return false;">' +
-                        '<div class="moment-comment-input-wrapper">' +
-                        '<input type="text" class="moment-comment-input" placeholder="说点什么…" maxlength="200" data-max="200">' +
-                        '<span class="comment-char-count">0/200</span>' +
-                        '</div>' +
-                        '<button type="button" class="moment-comment-btn">发送</button>' +
-                        '</form>' +
-                        commentTransRow +
-                        '</div>' +
                         '</div></div>';
                 }).join('');
                 if (options && options.highlightFirst) {
@@ -1311,12 +1375,15 @@
                         return;
                     }
                     const likeBtn = e.target.closest('.moment-like-btn');
-                    if (likeBtn) {
-                        const card = likeBtn.closest('.moment-card');
-                        if (!card || likeBtn.classList.contains('is-liked')) return;
+                    const unlikeBtn = e.target.closest('.moment-unlike-btn');
+                    if (likeBtn || unlikeBtn) {
+                        const card = (likeBtn || unlikeBtn).closest('.moment-card');
+                        if (!card) return;
                         const charId = card.getAttribute('data-char-id');
                         const timestamp = card.getAttribute('data-timestamp');
-                        fetch('/api/moments/like', {
+                        const isUnlike = !!unlikeBtn;
+                        
+                        fetch(isUnlike ? '/api/moments/unlike' : '/api/moments/like', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ char_id: charId, timestamp: timestamp })
@@ -1422,6 +1489,45 @@
                             .then(() => reloadAndScrollTo({ char_id: charId, timestamp: timestamp }))
                             .catch(() => {})
                             .finally(() => { commentRegenBtn.disabled = false; });
+                        return;
+                    }
+
+                    // ===== 角色回复评论弹窗 =====
+                    const replyAiBtn = e.target.closest('.comment-reply-ai-btn');
+                    if (replyAiBtn && !replyAiBtn.disabled) {
+                        const card = replyAiBtn.closest('.moment-card');
+                        if (!card) return;
+                        const charId = card.getAttribute('data-char-id');
+                        const timestamp = card.getAttribute('data-timestamp');
+                        const commentIndex = replyAiBtn.getAttribute('data-comment-index');
+                        
+                        // Close any open menus
+                        listEl.querySelectorAll('.moment-menu-dropdown.show').forEach(m => m.classList.remove('show'));
+
+                        document.getElementById('replyModalMask').dataset.charId = charId;
+                        document.getElementById('replyModalMask').dataset.timestamp = timestamp;
+                        document.getElementById('replyModalMask').dataset.commentIndex = commentIndex;
+                        
+                        document.getElementById('replyModalMask').style.display = 'flex';
+                        return;
+                    }
+
+                    // ===== 角色直接评论朋友圈本体弹窗 =====
+                    const postReplyAiBtn = e.target.closest('.post-reply-ai-btn');
+                    if (postReplyAiBtn && !postReplyAiBtn.disabled) {
+                        const card = postReplyAiBtn.closest('.moment-card');
+                        if (!card) return;
+                        const charId = card.getAttribute('data-char-id');
+                        const timestamp = card.getAttribute('data-timestamp');
+                        
+                        // Close any open menus
+                        listEl.querySelectorAll('.moment-menu-dropdown.show').forEach(m => m.classList.remove('show'));
+
+                        document.getElementById('replyModalMask').dataset.charId = charId;
+                        document.getElementById('replyModalMask').dataset.timestamp = timestamp;
+                        document.getElementById('replyModalMask').dataset.commentIndex = ''; // 置空代表它是给朋友圈的评论
+                        
+                        document.getElementById('replyModalMask').style.display = 'flex';
                         return;
                     }
                     
@@ -1584,7 +1690,50 @@
                 const mask = document.getElementById('momentModalMask');
                 const cancelBtn = document.getElementById('momentModalCancel');
                 const charCountEl = document.getElementById('momentCharCount');
+
+                // 新增元素
+                const showUserPostBtn = document.getElementById('showUserPostBtn');
+                const showAiPostBtn = document.getElementById('showAiPostBtn');
+                const userPostSection = document.getElementById('userPostSection');
+                const aiPostSection = document.getElementById('aiPostSection');
+                const forceAiPostCancel = document.getElementById('forceAiPostCancel');
+                const momentComposeTransRow = document.getElementById('momentComposeTransRow');
+
                 if (!composeBtn || !composeText || !openBtn || !mask || !cancelBtn) return;
+
+                // 按钮切换
+                if (showUserPostBtn && showAiPostBtn) {
+                    showUserPostBtn.addEventListener('click', () => {
+                        userPostSection.style.display = 'block';
+                        aiPostSection.style.display = 'none';
+                        showUserPostBtn.style.background = 'var(--primary-color)';
+                        showUserPostBtn.style.color = 'white';
+                        showAiPostBtn.style.background = '#f0f2f5';
+                        showAiPostBtn.style.color = 'var(--text-main)';
+                    });
+                    showAiPostBtn.addEventListener('click', () => {
+                        userPostSection.style.display = 'none';
+                        aiPostSection.style.display = 'block';
+                        showAiPostBtn.style.background = 'var(--primary-color)';
+                        showAiPostBtn.style.color = 'white';
+                        showUserPostBtn.style.background = '#f0f2f5';
+                        showUserPostBtn.style.color = 'var(--text-main)';
+                        
+                        // 切换到“让角色发”时，自动加载角色列表（如果还没加载）
+                        const forceCharacterSelect = document.getElementById('forceMomentCharacterSelect');
+                        if (forceCharacterSelect && forceCharacterSelect.options.length <= 1) {
+                            fetch('/api/moments/characters')
+                                .then(r => r.json())
+                                .then(remarks => {
+                                    let html = '<option value="">(选择一个角色)</option>';
+                                    for (const cid in remarks) {
+                                        html += `<option value="${cid}">${remarks[cid]}</option>`;
+                                    }
+                                    forceCharacterSelect.innerHTML = html;
+                                });
+                        }
+                    });
+                }
 
                 // 更新朋友圈字数显示
                 function updateCharCount() {
@@ -1605,6 +1754,16 @@
 
                 function openModal() {
                     mask.style.display = 'flex';
+                    // 默认显示我自己发
+                    if (showUserPostBtn) showUserPostBtn.click();
+                    // 检查翻译框
+                    if (momentComposeTransRow) {
+                        if (window.AI_LANG === 'ja') {
+                            momentComposeTransRow.style.display = 'flex';
+                        } else {
+                            momentComposeTransRow.style.display = 'none';
+                        }
+                    }
                     setTimeout(() => composeText.focus(), 0);
                     updateCharCount();
                 }
@@ -1613,6 +1772,48 @@
                     composeBtn.disabled = false;
                     composeBtn.classList.remove('is-loading');
                     composeBtn.innerHTML = '发布';
+                }
+
+                const forceMomentModalSubmit = document.getElementById('forceMomentModalSubmit');
+                if (forceMomentModalSubmit) {
+                    forceMomentModalSubmit.addEventListener('click', function() {
+                        const forceCharacterSelect = document.getElementById('forceMomentCharacterSelect');
+                        const char_id = forceCharacterSelect.value;
+                        if (!char_id) {
+                            alert("请选择要催发动态的角色");
+                            return;
+                        }
+
+                        forceMomentModalSubmit.disabled = true;
+                        const oldText = forceMomentModalSubmit.innerHTML;
+                        forceMomentModalSubmit.innerHTML = '<span class="moment-compose-spinner"></span>生成中…';
+
+                        fetch('/api/moments/force_active', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({
+                                    char_id: char_id
+                                })
+                            })
+                            .then(r => r.json())
+                            .then(data => {
+                                if (data.status === 'success') {
+                                    closeModal();
+                                    loadNextPage(true, {
+                                        highlightFirst: true
+                                    });
+                                } else {
+                                    alert("生成失败: " + (data.error || "未知原因"));
+                                }
+                            })
+                            .catch(err => alert("网络错误: " + err))
+                            .finally(() => {
+                                forceMomentModalSubmit.disabled = false;
+                                forceMomentModalSubmit.innerHTML = oldText;
+                            });
+                    });
                 }
 
                 openBtn.addEventListener('click', openModal);
@@ -1626,6 +1827,9 @@
                     composeText.classList.remove('is-full');
                     closeModal();
                 });
+                if (forceAiPostCancel) {
+                    forceAiPostCancel.addEventListener('click', closeModal);
+                }
                 // 点击遮罩空白处关闭
                 mask.addEventListener('mousedown', function(e) {
                     if (e.target === mask) {
@@ -1799,6 +2003,227 @@
                 const atMenu = document.getElementById(atMenuId);
                 let charListForAt = [];
                 let highlightIdx = 0;
+
+                // ====== 回复弹窗相关 ======
+                const replyModalMask = document.getElementById('replyModalMask');
+                const replyModalCancel = document.getElementById('replyModalCancel');
+                const replyModalSubmit = document.getElementById('replyModalSubmit');
+                const replyCharacterSelect = document.getElementById('replyCharacterSelect');
+                
+                // 新增元素
+                const showAiReplyBtn = document.getElementById('showAiReplyBtn');
+                const showUserReplyBtn = document.getElementById('showUserReplyBtn');
+                const aiReplySection = document.getElementById('aiReplySection');
+                const userReplySection = document.getElementById('userReplySection');
+                const userReplyCancel = document.getElementById('userReplyCancel');
+                const userReplySubmit = document.getElementById('userReplySubmit');
+                const userReplyTextarea = document.getElementById('userReplyTextarea');
+                const userReplyCharCount = document.getElementById('userReplyCharCount');
+                const userReplyTransRow = document.getElementById('userReplyTransRow');
+                const userReplyTransInput = document.getElementById('userReplyTransInput');
+                const userReplyTransBtn = document.getElementById('userReplyTransBtn');
+
+                if (replyModalMask && replyCharacterSelect) {
+                    // 初始化角色列表
+                    fetch('/api/moments/characters')
+                        .then(r => r.json())
+                        .then(remarks => {
+                            let html = '<option value="">(选择一个角色)</option>';
+                            for (const cid in remarks) {
+                                html += `<option value="${cid}">${escapeHtml(remarks[cid])}</option>`;
+                            }
+                            replyCharacterSelect.innerHTML = html;
+                        });
+
+                    function closeReplyModal() {
+                        replyModalMask.style.display = 'none';
+                        replyCharacterSelect.value = '';
+                        userReplyTextarea.value = '';
+                        if (userReplyCharCount) userReplyCharCount.innerText = '0/200';
+                        userReplyTransInput.value = '';
+                        replyModalMask.dataset.charId = '';
+                        replyModalMask.dataset.timestamp = '';
+                        replyModalMask.dataset.commentIndex = '';
+                        // 重置到AI选择界面
+                        aiReplySection.style.display = 'block';
+                        userReplySection.style.display = 'none';
+                        
+                        // 重置按钮样式
+                        showAiReplyBtn.style.background = 'var(--primary-color)';
+                        showAiReplyBtn.style.color = 'white';
+                        showUserReplyBtn.style.background = '#f0f2f5';
+                        showUserReplyBtn.style.color = 'var(--text-main)';
+                    }
+
+                    replyModalCancel.addEventListener('click', closeReplyModal);
+                    userReplyCancel.addEventListener('click', closeReplyModal);
+                    replyModalMask.addEventListener('click', e => {
+                        if (e.target === replyModalMask) closeReplyModal();
+                    });
+
+                    // 切换回复方式
+                    showAiReplyBtn.addEventListener('click', () => {
+                        aiReplySection.style.display = 'block';
+                        userReplySection.style.display = 'none';
+                        showAiReplyBtn.style.background = 'var(--primary-color)';
+                        showAiReplyBtn.style.color = 'white';
+                        showUserReplyBtn.style.background = '#f0f2f5';
+                        showUserReplyBtn.style.color = 'var(--text-main)';
+                    });
+                    showUserReplyBtn.addEventListener('click', () => {
+                        aiReplySection.style.display = 'none';
+                        userReplySection.style.display = 'block';
+                        showUserReplyBtn.style.background = 'var(--primary-color)';
+                        showUserReplyBtn.style.color = 'white';
+                        showAiReplyBtn.style.background = '#f0f2f5';
+                        showAiReplyBtn.style.color = 'var(--text-main)';
+                        // 仅当 AI 设置为日语模式时才显示翻译框
+                        if (window.AI_LANG === 'ja') {
+                            userReplyTransRow.style.display = 'flex';
+                        } else {
+                            userReplyTransRow.style.display = 'none';
+                        }
+                    });
+
+                    // 实时字数统计
+                    if (userReplyTextarea && userReplyCharCount) {
+                        userReplyTextarea.addEventListener('input', () => {
+                            const len = userReplyTextarea.value.length;
+                            userReplyCharCount.innerText = `${len}/200`;
+                            if (len >= 200) {
+                                userReplyCharCount.style.color = '#ff4d4f';
+                            } else {
+                                userReplyCharCount.style.color = 'var(--text-muted)';
+                            }
+                        });
+                    }
+
+                    // 翻译逻辑
+                    if (userReplyTransBtn) {
+                        userReplyTransBtn.addEventListener('click', () => {
+                            const text = userReplyTransInput.value.trim();
+                            if (!text) return;
+                            userReplyTransBtn.disabled = true;
+                            userReplyTransBtn.innerText = "...";
+                            fetch('/api/translate/zh2jp', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({ text: text })
+                            })
+                            .then(r => r.json())
+                            .then(data => {
+                                if (data.translated) {
+                                    userReplyTextarea.value = data.translated;
+                                    userReplyTransInput.value = '';
+                                    // 翻译后手动触发 input 事件以更新字数
+                                    userReplyTextarea.dispatchEvent(new Event('input'));
+                                }
+                            })
+                            .finally(() => {
+                                userReplyTransBtn.disabled = false;
+                                userReplyTransBtn.innerText = "翻译";
+                            });
+                        });
+                    }
+
+                    // AI 回复发送
+                    replyModalSubmit.addEventListener('click', () => {
+                        const replying_char_id = replyCharacterSelect.value;
+                        if (!replying_char_id) {
+                            alert("请选择用于回复的角色");
+                            return;
+                        }
+
+                        const charId = replyModalMask.dataset.charId;
+                        const timestamp = replyModalMask.dataset.timestamp;
+                        const commentIndex = replyModalMask.dataset.commentIndex;
+
+                        replyModalSubmit.disabled = true;
+                        const oldText = replyModalSubmit.innerHTML;
+                        replyModalSubmit.innerHTML = '<span class="moment-compose-spinner"></span>生成中…';
+
+                        let fetchUrl = '';
+                        let requestBody = { char_id: charId, timestamp: timestamp };
+
+                        if (commentIndex === '' || commentIndex === null || commentIndex === undefined) {
+                            fetchUrl = '/api/moments/post/ai_comment';
+                            requestBody.commenter_id = replying_char_id;
+                        } else {
+                            fetchUrl = '/api/moments/comment/ai_reply';
+                            requestBody.comment_index = commentIndex;
+                            requestBody.replying_char_id = replying_char_id;
+                        }
+
+                        fetch(fetchUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(requestBody)
+                        })
+                        .then(r => r.json())
+                        .then(data => {
+                            if (data.error) {
+                                alert("生成失败: " + data.error);
+                            } else {
+                                closeReplyModal();
+                                reloadAndScrollTo({ char_id: charId, timestamp: timestamp });
+                            }
+                        })
+                        .catch(err => alert("网络错误: " + err))
+                        .finally(() => {
+                            replyModalSubmit.disabled = false;
+                            replyModalSubmit.innerHTML = oldText;
+                        });
+                    });
+
+                    // 用户亲自回复发送
+                    userReplySubmit.addEventListener('click', () => {
+                        const content = userReplyTextarea.value.trim();
+                        if (!content) {
+                            alert("回复内容不能为空");
+                            return;
+                        }
+
+                        const charId = replyModalMask.dataset.charId;
+                        const timestamp = replyModalMask.dataset.timestamp;
+                        const commentIndex = replyModalMask.dataset.commentIndex;
+
+                        userReplySubmit.disabled = true;
+                        const oldText = userReplySubmit.innerHTML;
+                        userReplySubmit.innerHTML = '<span class="moment-compose-spinner"></span>发送中…';
+
+                        let fetchUrl = '';
+                        let requestBody = { char_id: charId, timestamp: timestamp, content: content };
+
+                        if (commentIndex === '' || commentIndex === null || commentIndex === undefined) {
+                            // 直接回复朋友圈本身（调用原有的 moments_comment）
+                            fetchUrl = '/api/moments/comment';
+                        } else {
+                            // 回复特定的某条评论 (调用新接口)
+                            fetchUrl = '/api/moments/comment/user_reply';
+                            requestBody.comment_index = commentIndex;
+                        }
+
+                        fetch(fetchUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(requestBody)
+                        })
+                        .then(r => r.json())
+                        .then(data => {
+                            if (data.error) {
+                                alert("发送失败: " + data.error);
+                            } else {
+                                closeReplyModal();
+                                reloadAndScrollTo({ char_id: charId, timestamp: timestamp });
+                            }
+                        })
+                        .catch(err => alert("网络错误: " + err))
+                        .finally(() => {
+                            userReplySubmit.disabled = false;
+                            userReplySubmit.innerHTML = oldText;
+                        });
+                    });
+                }
 
                 // 加载角色列表供 @ 使用
                 fetch('/api/moments/characters')
@@ -2009,10 +2434,77 @@
                 });
             }
 
+            function initForceMoment() {
+                const forceMomentBtn = document.getElementById('forceMomentBtn');
+                const forceModalMask = document.getElementById('forceMomentModalMask');
+                const forceModalCancel = document.getElementById('forceMomentModalCancel');
+                const forceModalSubmit = document.getElementById('forceMomentModalSubmit');
+                const forceCharacterSelect = document.getElementById('forceMomentCharacterSelect');
+
+                if (!forceMomentBtn || !forceModalMask) return;
+
+                function closeForceModal() {
+                    forceModalMask.style.display = 'none';
+                    forceCharacterSelect.value = '';
+                }
+
+                forceMomentBtn.addEventListener('click', function() {
+                    // Fetch characters
+                    fetch('/api/moments/characters')
+                        .then(r => r.json())
+                        .then(remarks => {
+                            let html = '<option value="">(选择一个角色)</option>';
+                            for (const cid in remarks) {
+                                html += `<option value="${cid}">${escapeHtml(remarks[cid])}</option>`;
+                            }
+                            forceCharacterSelect.innerHTML = html;
+                        });
+                    forceModalMask.style.display = 'flex';
+                });
+
+                forceModalCancel.addEventListener('click', closeForceModal);
+                forceModalMask.addEventListener('click', e => {
+                    if (e.target === forceModalMask) closeForceModal();
+                });
+
+                forceModalSubmit.addEventListener('click', function() {
+                    const char_id = forceCharacterSelect.value;
+                    if (!char_id) {
+                        alert("请选择要催发动态的角色");
+                        return;
+                    }
+
+                    forceModalSubmit.disabled = true;
+                    const oldText = forceModalSubmit.innerHTML;
+                    forceModalSubmit.innerHTML = '<span class="moment-compose-spinner"></span>生成中…';
+
+                    fetch('/api/moments/force_active', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ char_id: char_id })
+                    })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.error) {
+                            alert("生成失败: " + data.error);
+                        } else {
+                            closeForceModal();
+                            loadNextPage(true); // reload
+                        }
+                    })
+                    .catch(err => alert("网络错误: " + err))
+                    .finally(() => {
+                        forceModalSubmit.disabled = false;
+                        forceModalSubmit.innerHTML = oldText;
+                    });
+                });
+            }
+
             attachMomentEvents();
             attachComposeEvent();
             initCharFilter();
             initActiveMomentsToggle();
+            initForceMoment();
             loadUserLanguage().finally(function() {
                 loadNextPage(true);
             });
