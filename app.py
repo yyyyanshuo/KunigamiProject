@@ -3677,27 +3677,62 @@ def _get_moments_id_display():
 
 @app.route("/api/moments/characters", methods=["GET"])
 def get_moments_characters():
-    """获取有权发朋友圈的角色列表。支持通过 rel_char_id 过滤只返回该角色的关系图谱好友。"""
-    rel_char_id = request.args.get("rel_char_id")
-    
-    avatars, remarks = _get_moments_id_display()
+    """获取所有有权发朋友圈的角色列表。用于前端筛选。"""
+    _, remarks = _get_moments_id_display()
     # 移除 user，前端单独处理
     if "user" in remarks:
         remarks.pop("user")
+    return jsonify(remarks)
 
-    if not rel_char_id or rel_char_id == "user":
+@app.route("/api/moments/related_characters", methods=["GET"])
+def get_moments_related_characters():
+    """获取与某个角色有关系图谱的角色列表。如果 target_id 为 user 或关系图为找不到，则返回全部角色。"""
+    target_id = request.args.get("target_id")
+    _, remarks = _get_moments_id_display()
+    if "user" in remarks:
+        remarks.pop("user")
+
+    if not target_id or target_id == "user" or target_id not in remarks:
         return jsonify(remarks)
-    
-    # 如果指定了 rel_char_id，则只返回与其有关系的角色
-    candidates = _get_moments_relationship_candidates(rel_char_id)
-    if not candidates:
-        return jsonify({})
-    
-    candidate_ids = {c[0] for c in candidates}
-    # 过滤 remarks，只保留在 candidate_ids 中的角色
-    filtered_remarks = {cid: remark for cid, remark in remarks.items() if cid in candidate_ids}
-    return jsonify(filtered_remarks)
 
+    try:
+        _, prompts_dir = get_paths(target_id)
+        rel_path = os.path.join(prompts_dir, "2_relationship.json")
+        if not os.path.exists(rel_path):
+            return jsonify(remarks)
+
+        with open(rel_path, "r", encoding="utf-8") as f:
+            rel_data = json.load(f)
+
+        current_user_name = get_current_username()
+        name_to_cid = {}
+        cfg_file = _get_characters_config_file()
+        if os.path.exists(cfg_file):
+            with open(cfg_file, "r", encoding="utf-8") as f:
+                for cid, info in json.load(f).items():
+                    name = (info.get("name") or "").strip()
+                    remark = (info.get("remark") or "").strip()
+                    if name:
+                        name_to_cid[name] = cid
+                    if remark and remark != name:
+                        name_to_cid[remark] = cid
+
+        filtered_remarks = {}
+        for name, _ in rel_data.items():
+            if name.strip() == current_user_name:
+                continue
+            cid = name_to_cid.get(name.strip())
+            if cid and cid in remarks:
+                filtered_remarks[cid] = remarks[cid]
+
+        if not filtered_remarks:
+            # 如果关系图没有匹配到任何系统中实际存在的角色，退化到全列表，避免没角色可选
+            return jsonify(remarks)
+            
+        return jsonify(filtered_remarks)
+    except Exception as e:
+        print(f"Error fetching related characters for {target_id}: {e}")
+        return jsonify(remarks)
 
 @app.route("/api/moments", methods=["GET"])
 def get_moments():

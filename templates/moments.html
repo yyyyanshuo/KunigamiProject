@@ -1041,7 +1041,7 @@
                             if (canRegen) {
                                 menuItems += '<button type="button" class="moment-menu-item comment-regen-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">重新生成</button>';
                             }
-                            menuItems += '<button type="button" class="moment-menu-item comment-reply-ai-btn" data-comment-index="' + escapeAttr(c.comment_index) + '" data-commenter-id="' + escapeAttr(c.commenter_id || '') + '">回复</button>';
+                            menuItems += '<button type="button" class="moment-menu-item comment-reply-ai-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">回复</button>';
                             menuItems += '<button type="button" class="moment-menu-item comment-edit-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">编辑</button>';
                             menuItems += '<button type="button" class="moment-menu-item comment-delete-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">删除</button>';
                             
@@ -1500,23 +1500,11 @@
                         const charId = card.getAttribute('data-char-id');
                         const timestamp = card.getAttribute('data-timestamp');
                         const commentIndex = replyAiBtn.getAttribute('data-comment-index');
-                        const commenterId = replyAiBtn.getAttribute('data-commenter-id');
                         
                         // Close any open menus
                         listEl.querySelectorAll('.moment-menu-dropdown.show').forEach(m => m.classList.remove('show'));
 
-                        document.getElementById('replyModalMask').dataset.charId = charId;
-                        document.getElementById('replyModalMask').dataset.timestamp = timestamp;
-                        document.getElementById('replyModalMask').dataset.commentIndex = commentIndex;
-                        
-                        // Load character list based on the commenter's perspective (if it's a character)
-                        // otherwise default to the post author's perspective.
-                        if (window.refreshReplyCharacterList) {
-                            const relSourceId = (commenterId && commenterId !== 'user') ? commenterId : charId;
-                            window.refreshReplyCharacterList(relSourceId);
-                        }
-                        
-                        document.getElementById('replyModalMask').style.display = 'flex';
+                        openReplyModal(charId, timestamp, commentIndex);
                         return;
                     }
 
@@ -1531,16 +1519,7 @@
                         // Close any open menus
                         listEl.querySelectorAll('.moment-menu-dropdown.show').forEach(m => m.classList.remove('show'));
 
-                        document.getElementById('replyModalMask').dataset.charId = charId;
-                        document.getElementById('replyModalMask').dataset.timestamp = timestamp;
-                        document.getElementById('replyModalMask').dataset.commentIndex = ''; // 置空代表它是给朋友圈的评论
-                        
-                        // Load or refresh character list, optionally auto-select the current persona
-                        if (window.refreshReplyCharacterList) {
-                            window.refreshReplyCharacterList(charId);
-                        }
-                        
-                        document.getElementById('replyModalMask').style.display = 'flex';
+                        openReplyModal(charId, timestamp, '');
                         return;
                     }
                     
@@ -2036,25 +2015,48 @@
                 const userReplyTransInput = document.getElementById('userReplyTransInput');
                 const userReplyTransBtn = document.getElementById('userReplyTransBtn');
 
-                if (replyModalMask && replyCharacterSelect) {
-                    // Refactored: reusable character list loader
-                    window.refreshReplyCharacterList = function(relCharId) {
-                        const url = relCharId ? `/api/moments/characters?rel_char_id=${relCharId}` : '/api/moments/characters';
-                        return fetch(url)
+                // 新增：回复弹窗动态打开方法
+                window.openReplyModal = function(charId, timestamp, commentIndex) {
+                    if (!replyModalMask) return;
+                    replyModalMask.dataset.charId = charId;
+                    replyModalMask.dataset.timestamp = timestamp;
+                    replyModalMask.dataset.commentIndex = commentIndex || '';
+                    
+                    let targetAuthor = charId;
+                    if (commentIndex) {
+                        const m = (allMoments || []).find(m => String(m.char_id) === String(charId) && String(m.timestamp) === String(timestamp));
+                        if (m && m.comments) {
+                            const comment = m.comments.find(c => String(c.comment_index) === String(commentIndex));
+                            if (comment && comment.commenter_id) {
+                                targetAuthor = comment.commenter_id;
+                            }
+                        }
+                    }
+                    
+                    if (replyCharacterSelect) {
+                        replyCharacterSelect.innerHTML = '<option value="">(加载关系图中...)</option>';
+                        fetch('/api/moments/related_characters?target_id=' + encodeURIComponent(targetAuthor))
                             .then(r => r.json())
                             .then(remarks => {
                                 let html = '<option value="">(选择一个角色)</option>';
+                                let hasChars = false;
                                 for (const cid in remarks) {
                                     html += `<option value="${cid}">${escapeHtml(remarks[cid])}</option>`;
+                                    hasChars = true;
+                                }
+                                if (!hasChars) {
+                                    html = '<option value="">(无相关关系人)</option>';
                                 }
                                 replyCharacterSelect.innerHTML = html;
-                                return remarks;
+                            })
+                            .catch(() => {
+                                replyCharacterSelect.innerHTML = '<option value="">(加载失败)</option>';
                             });
-                    };
+                    }
+                    replyModalMask.style.display = 'flex';
+                };
 
-                    // Initial load
-                    refreshReplyCharacterList();
-
+                if (replyModalMask && replyCharacterSelect) {
                     function closeReplyModal() {
                         replyModalMask.style.display = 'none';
                         replyCharacterSelect.value = '';
