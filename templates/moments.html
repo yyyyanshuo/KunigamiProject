@@ -1041,7 +1041,7 @@
                             if (canRegen) {
                                 menuItems += '<button type="button" class="moment-menu-item comment-regen-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">重新生成</button>';
                             }
-                            menuItems += '<button type="button" class="moment-menu-item comment-reply-ai-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">回复</button>';
+                            menuItems += '<button type="button" class="moment-menu-item comment-reply-ai-btn" data-comment-index="' + escapeAttr(c.comment_index) + '" data-commenter-id="' + escapeAttr(c.commenter_id || '') + '">回复</button>';
                             menuItems += '<button type="button" class="moment-menu-item comment-edit-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">编辑</button>';
                             menuItems += '<button type="button" class="moment-menu-item comment-delete-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">删除</button>';
                             
@@ -1500,6 +1500,7 @@
                         const charId = card.getAttribute('data-char-id');
                         const timestamp = card.getAttribute('data-timestamp');
                         const commentIndex = replyAiBtn.getAttribute('data-comment-index');
+                        const commenterId = replyAiBtn.getAttribute('data-commenter-id');
                         
                         // Close any open menus
                         listEl.querySelectorAll('.moment-menu-dropdown.show').forEach(m => m.classList.remove('show'));
@@ -1507,6 +1508,13 @@
                         document.getElementById('replyModalMask').dataset.charId = charId;
                         document.getElementById('replyModalMask').dataset.timestamp = timestamp;
                         document.getElementById('replyModalMask').dataset.commentIndex = commentIndex;
+                        
+                        // Load character list based on the commenter's perspective (if it's a character)
+                        // otherwise default to the post author's perspective.
+                        if (window.refreshReplyCharacterList) {
+                            const relSourceId = (commenterId && commenterId !== 'user') ? commenterId : charId;
+                            window.refreshReplyCharacterList(relSourceId);
+                        }
                         
                         document.getElementById('replyModalMask').style.display = 'flex';
                         return;
@@ -1526,6 +1534,11 @@
                         document.getElementById('replyModalMask').dataset.charId = charId;
                         document.getElementById('replyModalMask').dataset.timestamp = timestamp;
                         document.getElementById('replyModalMask').dataset.commentIndex = ''; // 置空代表它是给朋友圈的评论
+                        
+                        // Load or refresh character list, optionally auto-select the current persona
+                        if (window.refreshReplyCharacterList) {
+                            window.refreshReplyCharacterList(charId);
+                        }
                         
                         document.getElementById('replyModalMask').style.display = 'flex';
                         return;
@@ -2024,16 +2037,23 @@
                 const userReplyTransBtn = document.getElementById('userReplyTransBtn');
 
                 if (replyModalMask && replyCharacterSelect) {
-                    // 初始化角色列表
-                    fetch('/api/moments/characters')
-                        .then(r => r.json())
-                        .then(remarks => {
-                            let html = '<option value="">(选择一个角色)</option>';
-                            for (const cid in remarks) {
-                                html += `<option value="${cid}">${escapeHtml(remarks[cid])}</option>`;
-                            }
-                            replyCharacterSelect.innerHTML = html;
-                        });
+                    // Refactored: reusable character list loader
+                    window.refreshReplyCharacterList = function(relCharId) {
+                        const url = relCharId ? `/api/moments/characters?rel_char_id=${relCharId}` : '/api/moments/characters';
+                        return fetch(url)
+                            .then(r => r.json())
+                            .then(remarks => {
+                                let html = '<option value="">(选择一个角色)</option>';
+                                for (const cid in remarks) {
+                                    html += `<option value="${cid}">${escapeHtml(remarks[cid])}</option>`;
+                                }
+                                replyCharacterSelect.innerHTML = html;
+                                return remarks;
+                            });
+                    };
+
+                    // Initial load
+                    refreshReplyCharacterList();
 
                     function closeReplyModal() {
                         replyModalMask.style.display = 'none';

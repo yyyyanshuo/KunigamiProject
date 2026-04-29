@@ -3677,12 +3677,27 @@ def _get_moments_id_display():
 
 @app.route("/api/moments/characters", methods=["GET"])
 def get_moments_characters():
-    """获取所有有权发朋友圈的角色列表。用于前端筛选。"""
-    _, remarks = _get_moments_id_display()
+    """获取有权发朋友圈的角色列表。支持通过 rel_char_id 过滤只返回该角色的关系图谱好友。"""
+    rel_char_id = request.args.get("rel_char_id")
+    
+    avatars, remarks = _get_moments_id_display()
     # 移除 user，前端单独处理
     if "user" in remarks:
         remarks.pop("user")
-    return jsonify(remarks)
+
+    if not rel_char_id or rel_char_id == "user":
+        return jsonify(remarks)
+    
+    # 如果指定了 rel_char_id，则只返回与其有关系的角色
+    candidates = _get_moments_relationship_candidates(rel_char_id)
+    if not candidates:
+        return jsonify({})
+    
+    candidate_ids = {c[0] for c in candidates}
+    # 过滤 remarks，只保留在 candidate_ids 中的角色
+    filtered_remarks = {cid: remark for cid, remark in remarks.items() if cid in candidate_ids}
+    return jsonify(filtered_remarks)
+
 
 @app.route("/api/moments", methods=["GET"])
 def get_moments():
