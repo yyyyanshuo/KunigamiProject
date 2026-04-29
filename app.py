@@ -2039,8 +2039,13 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
             with open(path, "r", encoding="utf-8") as f:
                 rel_data = json.load(f) or {}
             
-            # 优先查找当前用户名匹配的关系
+            # 优先查找当前用户名匹配的关系，找不到再用 ID 尝试
             user_rel = rel_data.get(current_user_name)
+            if not user_rel:
+                user_id = get_user_id()
+                if user_id:
+                    user_rel = rel_data.get(str(user_id))
+
             if user_rel:
                 rel_str = (f"対话相手：{current_user_name}\n"
                        f"関係性：{user_rel.get('role', '不明')}\n"
@@ -2050,11 +2055,21 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
             elif rel_data:
                 # 如果没找到特定匹配，且是在群聊或没有明确匹配时，展示列表（原有逻辑）
                 rel_lines = []
-                for name, info in rel_data.items():
+                
+                # 尝试加载名字映射，如果是 ID 存的就转成名字
+                id_to_name = {}
+                try:
+                    with open(_get_characters_config_file(), "r", encoding="utf-8") as cf:
+                        c_data = json.load(cf)
+                        id_to_name = {str(k): v.get("name", str(k)) for k, v in c_data.items()}
+                except: pass
+                
+                for key_name, info in rel_data.items():
+                    disp_name = id_to_name.get(key_name, key_name)
                     role = info.get('role', '未知')
                     desc = info.get('description', '特になし')
                     score = info.get('score', 1)
-                    rel_lines.append(f"- {name}: {role} (关系度:{score}) {desc}")
+                    rel_lines.append(f"- {disp_name}: {role} (关系度:{score}) {desc}")
                 if rel_lines:
                     rel_text = "\n".join(rel_lines)
                     prompt_parts.append(f"【関係 / 关系】\n{rel_text}")
@@ -2289,6 +2304,11 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
             with open(path, "r", encoding="utf-8-sig") as f:
                 rel_data = json.load(f)
                 user_rel = rel_data.get(current_user_name)
+                if not user_rel:
+                    user_id = get_user_id()
+                    if user_id:
+                        user_rel = rel_data.get(str(user_id))
+                        
                 if user_rel:
                     # 【修改】拼装文本改成日语
                     rel_str = (f"対話相手：{current_user_name}\n"
@@ -2297,6 +2317,24 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
                            f"詳細：{user_rel.get('description', '')}")
                     # 【修正】append 必须在 if 内部，避免 rel_str 未定义错误
                     prompt_parts.append(f"【Relationship / 関係設定】\n{rel_str}")
+                elif rel_data:
+                    # v1 版本中处理无明确匹配的列表 (群聊或全局)
+                    rel_lines = []
+                    id_to_name = {}
+                    try:
+                        with open(_get_characters_config_file(), "r", encoding="utf-8") as cf:
+                            c_data = json.load(cf)
+                            id_to_name = {str(k): v.get("name", str(k)) for k, v in c_data.items()}
+                    except: pass
+                    for key_name, info in rel_data.items():
+                        disp_name = id_to_name.get(key_name, key_name)
+                        role = info.get('role', '未知')
+                        desc = info.get('description', '特になし')
+                        score = info.get('score', 1)
+                        rel_lines.append(f"- {disp_name}: {role} (关系度:{score}) {desc}")
+                    if rel_lines:
+                        rel_text = "\n".join(rel_lines)
+                        prompt_parts.append(f"【Relationship / 関係設定】\n{rel_text}")
     except Exception: pass
 
     # ========== 新顺序：4. 长期记忆 ==========
@@ -2491,8 +2529,8 @@ def build_group_relationship_prompt(current_char_id, other_member_ids):
             target_name = id_to_name_map.get(other_id, other_id)
 
             # 在关系表里查找
-            # 尝试直接匹配名字
-            rel_info = rels_data.get(target_name)
+            # 尝试匹配对方名字或者对方 ID (兼容历史数据存放了 ID 的情况)
+            rel_info = rels_data.get(target_name) or rels_data.get(other_id)
 
             if rel_info:
                 role = rel_info.get('role', '未知')
@@ -6932,20 +6970,20 @@ def save_relationship_reverse(char_id):
             with open(rel_file, "r", encoding="utf-8-sig") as f:
                 current_rel = json.load(f)
         
-        # 兼容性查找：看看是用 ID 存的还是用名字存的
+        # 兼容性查找：看看是用名字存的还是用 ID 存的
         found_key = None
-        if char_id in current_rel:
-            found_key = char_id
-        elif target_name in current_rel:
+        if target_name in current_rel:
             found_key = target_name
+        elif char_id in current_rel:
+            found_key = char_id
 
         if rel_data is None:
             # 删除逻辑
             if found_key:
                 del current_rel[found_key]
         else:
-            # 更新逻辑：如果已存在键则更新，否则新增一个键（优先用 ID）
-            target_key = found_key or char_id
+            # 更新逻辑：如果已存在键则更新，否则新增一个键（优先用名字）
+            target_key = found_key or target_name
             current_rel[target_key] = rel_data
         
         # 写回
