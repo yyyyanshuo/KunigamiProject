@@ -9608,6 +9608,17 @@ def trigger_active_moments(char_id):
                     "content": comment_text,
                     "timestamp": post_ts_str
                 })
+                # 记录评论者的短期记忆
+                # 尝试获取双方名字
+                try:
+                    def get_name_internal(cid):
+                        if cid == "user": return get_current_username()
+                        return remarks.get(cid) or get_char_name(cid) or cid
+                    author_name = get_name_internal(char_id)
+                    mem_ctx = f"在{author_name}的朋友圈：「{content}」下，你评论说：「{comment_text}」。"
+                    append_moment_event_to_short_memory(mid, mem_ctx)
+                except Exception as e:
+                    print(f"   ⚠️ [Trigger Moments] 分配被@者记忆失败 {mid}: {e}")
         
         # 处理其他随机分配的角色
         remaining_candidates = [c for c in candidates if c not in mentioned_ids]
@@ -9627,6 +9638,16 @@ def trigger_active_moments(char_id):
                     "content": comment_text,
                     "timestamp": random_ts_in_24h()
                 })
+                # 记录评论者的短期记忆
+                try:
+                    def get_name_internal(cid2):
+                        if cid2 == "user": return get_current_username()
+                        return remarks.get(cid2) or get_char_name(cid2) or cid2
+                    author_name = get_name_internal(char_id)
+                    mem_ctx = f"在{author_name}的朋友圈：「{content}」下，你评论说：「{comment_text}」。"
+                    append_moment_event_to_short_memory(cid, mem_ctx)
+                except Exception as e:
+                    print(f"   ⚠️ [Trigger Moments] 分配随机评论者记忆失败 {cid}: {e}")
 
     new_post = {
         "char_id": char_id,
