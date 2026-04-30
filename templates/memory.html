@@ -1875,13 +1875,6 @@
         }
     }
 
-            if (!html) html = '<div style="padding:20px; text-align:center; color:#999; font-size:13px;">没有可添加的角色</div>';
-            listContainer.innerHTML = html;
-        } catch(e) {
-            listContainer.innerHTML = '<div style="padding:20px; text-align:center; color:red;">加载失败</div>';
-        }
-    }
-
     function appendRelRowByName(name) {
         document.getElementById('addRelationMemberModal').style.display = 'none';
         
