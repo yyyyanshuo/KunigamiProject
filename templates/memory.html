@@ -1845,9 +1845,11 @@
             // 找寻当前登录用户的名称
             let currentUserName = "用户";
             try {
-                // 尝试从页面加载的全局变量或 session 中获取，如果获取不到则维持默认
-                const profileName = document.querySelector('.user-info .name')?.innerText;
-                if(profileName) currentUserName = profileName.trim();
+                // 尝试从全局配置或联系人列表中寻找 'user' 这个 ID 对应的名字
+                const userContact = contacts.find(c => c.id === 'user');
+                if (userContact) {
+                    currentUserName = userContact.remark || userContact.name;
+                }
             } catch(e) {}
 
             let html = '';

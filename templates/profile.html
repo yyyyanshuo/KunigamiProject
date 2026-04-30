@@ -6,13 +6,17 @@
   <title>个人中心</title>
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#fff3f8">
-  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <!-- 【新增】主题加载脚本 -->
+  <script src="/static/theme-loader.js"></script>
   <style>
     :root {
       --primary-color: #ffb6b9;
       --primary-dark: #f09598;
       --bg-color: #f2f4f8;
+      --primary-light: #fff3f8;
+      --primary-lighter: #ffe9e1;
       --card-bg: #ffffff;
       --text-main: #2c3e50;
       --text-muted: #8ca0b3;
@@ -35,7 +39,7 @@
 
     /* 头部样式（带柔和渐变） */
     .header {
-      background: linear-gradient(135deg, #fff3f8 0%, #ffffff 100%);
+      background: linear-gradient(135deg, var(--primary-light) 0%, #ffffff 100%);
       padding: 38px 16px 24px;
       text-align: center;
       border-bottom-left-radius: 24px;
@@ -55,7 +59,7 @@
       border-radius: 50%;
       background: #eee;
       border: 3px solid #fff;
-      box-shadow: 0 6px 14px rgba(255, 182, 185, 0.3);
+      box-shadow: 0 6px 14px var(--primary-rgba-strong);
       object-fit: cover;
       transition: transform 0.3s ease;
     }
@@ -165,7 +169,7 @@
     }
     .field-input:focus {
       background: #fff; border-color: var(--primary-color);
-      box-shadow: 0 0 0 3px rgba(255,182,185,0.2); outline: none;
+      box-shadow: 0 0 0 3px var(--primary-rgba-medium); outline: none;
     }
     .field-input::placeholder { color: #c0c4cc; }
 
@@ -179,7 +183,7 @@
     }
     .btn:active { transform: scale(0.96); }
     .btn-cancel { background: #f1f3f5; color: #495057; }
-    .btn-save { background: var(--primary-color); color: #fff; box-shadow: 0 4px 10px rgba(255,182,185,0.4); }
+    .btn-save { background: var(--primary-color); color: #fff; box-shadow: 0 4px 10px var(--primary-rgba-dark); }
     
     .btn-edit-toggle {
       color: #3b82f6; font-size: 13px; background: rgba(59,130,246,0.1); 
@@ -231,7 +235,7 @@
       transition: all 0.2s; font-weight: 500;
     }
     .radio-card:has(input:checked) {
-      border-color: var(--primary-color); background: #fff5f6; 
+      border-color: var(--primary-color); background: var(--primary-rgba-light); 
       color: var(--primary-dark); font-weight: 600;
     }
     .radio-card input { display: none; }
@@ -261,7 +265,7 @@
 
     /* 打赏模块样式 */
     .donate-section {
-      background: linear-gradient(135deg, #fff3f8 0%, #ffe9e1 100%);
+      background: linear-gradient(135deg, var(--primary-light) 0%, var(--primary-lighter) 100%);
       border-radius: var(--radius-lg);
       padding: 16px;
       margin: 20px 16px;
@@ -290,11 +294,11 @@
       font-weight: 600;
       cursor: pointer;
       transition: all 0.2s;
-      box-shadow: 0 4px 10px rgba(255, 182, 185, 0.3);
+      box-shadow: 0 4px 10px var(--primary-rgba-strong);
     }
     .donate-button:active {
       transform: scale(0.95);
-      box-shadow: 0 2px 6px rgba(255, 182, 185, 0.3);
+      box-shadow: 0 2px 6px var(--primary-rgba-strong);
     }
     .donate-codes {
       display: flex;
@@ -330,17 +334,52 @@
       color: var(--text-main);
     }
 
+    /* 问题反馈模块样式 */
+    .feedback-section {
+      background: #fff;
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      margin: 12px 14px;
+      box-shadow: var(--shadow-sm);
+    }
+    .feedback-contact-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px dashed var(--border-color);
+    }
+    .feedback-contact-item:last-child { border-bottom: none; }
+    .contact-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .contact-label { font-size: 11px; color: var(--text-muted); }
+    .contact-value { font-size: 13px; font-weight: 600; color: var(--text-main); }
+    .btn-copy {
+      background: var(--primary-rgba-light);
+      color: var(--primary-dark);
+      border: none;
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-copy:active { opacity: 0.7; }
+
     /* 底部按钮区 */
     .bottom-actions {
       display: flex; justify-content: center; align-items: center; gap: 12px;
       margin: 22px 16px 36px;
     }
     .btn-switch {
-      padding: 8px 16px; border-radius: 22px; border: 1px solid #ff9b73; 
-      background: transparent; color: #ff9b73; font-size: 13px; font-weight: 600;
+      padding: 8px 16px; border-radius: 22px; border: 1px solid var(--primary-dark); 
+      background: transparent; color: var(--primary-dark); font-size: 13px; font-weight: 600;
       cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px;
     }
-    .btn-switch:active { background: rgba(255, 155, 115, 0.1); }
+    .btn-switch:active { background: var(--primary-rgba-light); }
     .btn-logout {
       color: var(--text-muted); text-decoration: none; font-size: 13px; 
       display: flex; align-items: center; gap: 6px; padding: 8px; transition: color 0.2s;
@@ -364,6 +403,15 @@
   </style>
 </head>
 <body>
+
+<!-- 【新增】主题加载屏幕 -->
+<div id="theme-loading-screen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:#f5f5f5;display:flex;align-items:center;justify-content:center;z-index:10000;opacity:1;">
+  <div style="text-align:center;">
+    <div style="width:40px;height:40px;border:3px solid #ddd;border-top:3px solid #999;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 20px;"></div>
+    <div style="color:#999;font-size:14px;">加载中...</div>
+  </div>
+  <style>@keyframes spin { to { transform:rotate(360deg); } }</style>
+</div>
 
 <div class="header">
   <!-- 头像点击上传区域 -->
@@ -413,7 +461,7 @@
         <label class="field-label">登录密码</label>
         <div style="display:flex; gap:8px; width:100%;">
           <input type="password" id="new-password-input" placeholder="设置新密码 (留空不改)" class="field-input" style="flex:1;">
-          <button class="btn" style="background:#ffe0e3; color:#d81b60; border-radius:16px; padding:6px 12px; font-size:12px;"
+          <button class="btn" style="background:var(--primary-color); color:white; border-radius:16px; padding:6px 12px; font-size:12px;"
                   onclick="savePassword(document.getElementById('new-password-input'))">
             修改
           </button>
@@ -587,7 +635,7 @@
         <!-- 【新增】国内中转 - 中转商选择（移到模型设置前面） -->
         <div id="relay-provider-settings" style="margin-bottom: 20px; display:none;">
           <div class="input-label" style="font-weight:600; color:var(--text-main);">2. 中转商选择 (Relay Provider)</div>
-          <div style="display:flex; gap:12px; margin-top:8px;">
+          <div style="display:flex; gap:12px; margin-top:8px; flex-wrap: wrap;">
             <label class="radio-card" onclick="selectRelayProvider('new')">
               <input type="radio" name="relay_provider" value="new" id="relay_new">
               <span>🆕 新中转商 (api2d)</span>
@@ -596,9 +644,19 @@
               <input type="radio" name="relay_provider" value="old" id="relay_old">
               <span>📡 旧中转商 (vg)</span>
             </label>
+            <label class="radio-card" onclick="selectRelayProvider('custom')">
+              <input type="radio" name="relay_provider" value="custom" id="relay_custom">
+              <span>🔧 自定义网址</span>
+            </label>
+          </div>
+          <div id="custom-url-input-container" style="display:none; margin-top:12px;">
+            <input type="text" id="relay_custom_url" placeholder="输入自定义API网址，如 https://api.example.com/v1" style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:4px; font-size:14px;">
+            <div style="font-size:12px; color:var(--text-secondary); margin-top:6px;">
+              请输入完整的API网址，末尾无需带 /chat/completions
+            </div>
           </div>
           <div style="font-size:12px; color:var(--text-secondary); margin-top:8px;">
-            新中转商：https://api2d.com | 旧中转商：https://vg.a3e.top/
+            新中转商：https://api2d.com | 旧中转商：https://vg.a3e.top/ | 自定义：自行配置
           </div>
         </div>
 
@@ -667,6 +725,106 @@
   </div>
 </div>
 
+<!-- 【新增】页面风格设置模块 -->
+<div class="section-container collapsed">
+  <div class="section-header" onclick="toggleSectionByHeader(this)">
+    <div class="section-header-main">
+      <div class="section-title">🎨 页面风格设置 (Theme)</div>
+    </div>
+    <span class="section-arrow">▾</span>
+  </div>
+  <div class="section-body">
+    <div class="config-card">
+      <!-- 主题颜色选择 -->
+      <div style="margin-bottom: 20px;">
+        <div class="input-label" style="font-weight:600; color:var(--text-main);">主题颜色</div>
+        <div id="theme-colors" style="display:flex; gap:12px; margin-top:10px; flex-wrap:wrap;">
+          <!-- 预设颜色会动态加载 -->
+        </div>
+      </div>
+
+      <hr style="border:0; border-top:1px dashed var(--border-color); margin:16px 0;">
+
+      <!-- 默认聊天背景 -->
+      <div style="margin-bottom: 20px;">
+        <div class="input-label" style="font-weight:600; color:var(--text-main);">默认聊天背景</div>
+        <div style="display:flex; gap:10px; margin-top:10px; align-items:flex-start;">
+          <div style="flex:1;">
+            <div id="default-bg-preview" style="width:100%; height:100px; border:2px dashed var(--border-color); border-radius:var(--radius-md); background-size:cover; background-position:center; display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-size:12px; overflow:hidden;">
+              <span id="bg-preview-text">点击上传背景图</span>
+              <img id="bg-preview-img" style="display:none; width:100%; height:100%; object-fit:cover;">
+            </div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <button class="btn" style="background:var(--primary-color); color:white; border-radius:16px; padding:8px 16px; font-size:12px;" onclick="document.getElementById('default-bg-input').click()">
+              📤 上传
+            </button>
+            <button class="btn" id="clear-default-bg-btn" style="background:#f1f3f5; color:var(--text-main); border-radius:16px; padding:8px 16px; font-size:12px; display:none;" onclick="clearDefaultBg()">
+              🗑️ 删除
+            </button>
+          </div>
+        </div>
+        <input type="file" id="default-bg-input" accept="image/*" style="display: none;" onchange="uploadDefaultBackground(this)">
+      </div>
+
+      <div class="action-bar" style="margin-top:24px;">
+        <button class="btn btn-save" onclick="saveThemeSettings()">保存主题设置</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 模块: 问题反馈 (Feedback) -->
+<div class="section-container collapsed">
+  <div class="section-header" onclick="toggleSectionByHeader(this)">
+    <div class="section-header-main">
+      <div class="section-title">💌 问题反馈 (Feedback)</div>
+    </div>
+    <span class="section-arrow">▾</span>
+  </div>
+  <div class="section-body">
+    <div class="config-card">
+      <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px; line-height:1.4;">
+        如果您在使用过程中遇到任何问题，或者有好的建议，欢迎通过以下方式联系开发者。
+      </div>
+      
+      <!-- 社交群聊二维码 -->
+      <div style="display: flex; gap: 12px; margin-bottom: 16px; overflow-x: auto; padding-bottom: 8px;">
+        <div class="qr-box" style="flex-shrink: 0;">
+          <div class="qr-code" style="width: 120px; height: 120px; cursor: pointer;" onclick="zoomImage('/static/xhs_qr.png')">
+            <img src="/static/xhs_qr.png" alt="小红书" onerror="this.src='https://via.placeholder.com/120?text=Wait+Upload'">
+          </div>
+          <div class="qr-label">小红书</div>
+        </div>
+        <div class="qr-box" style="flex-shrink: 0;">
+          <div class="qr-code" style="width: 120px; height: 120px; cursor: pointer;" onclick="zoomImage('/static/qq_qr.png')">
+            <img src="/static/qq_qr.png" alt="QQ群" onerror="this.src='https://via.placeholder.com/120?text=Wait+Upload'">
+          </div>
+          <div class="qr-label">QQ</div>
+        </div>
+      </div>
+
+      <hr style="border:0; border-top:1px dashed var(--border-color); margin:12px 0;">
+
+      <!-- 个人联系方式 -->
+      <div class="feedback-contact-item">
+        <div class="contact-info">
+          <span class="contact-label">微信 WeChat</span>
+          <span class="contact-value" id="val-wechat">SuShih10370108</span>
+        </div>
+        <button class="btn-copy" onclick="copyToClipboard('SuShih10370108', this)">复制</button>
+      </div>
+      <div class="feedback-contact-item">
+        <div class="contact-info">
+          <span class="contact-label">邮箱 Email</span>
+          <span class="contact-value" id="val-email">yyyyanshuo@foxmail.com</span>
+        </div>
+        <button class="btn-copy" onclick="copyToClipboard('yyyyanshuo@foxmail.com', this)">复制</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- 打赏模块 -->
 <div class="donate-section" id="donate-section">
   <div class="donate-title">☕ 打赏开发者</div>
@@ -678,14 +836,14 @@
   <button class="donate-button" onclick="toggleDonateQR()">显示收款码</button>
   <div class="donate-codes" id="donate-codes" style="display:none;">
     <div class="qr-box">
-      <div class="qr-code">
-        <img src="/static/wechat_qr.png" alt="微信收款码" onerror="this.alt='微信二维码未找到'">
+      <div class="qr-code" style="cursor:zoom-in;">
+        <img src="/static/wechat_qr.png" alt="微信收款码" onclick="zoomImage(this.src)" onerror="this.alt='微信二维码未找到'">
       </div>
       <div class="qr-label">微信</div>
     </div>
     <div class="qr-box">
-      <div class="qr-code">
-        <img src="/static/alipay_qr.png" alt="支付宝收款码" onerror="this.alt='支付宝二维码未找到'">
+      <div class="qr-code" style="cursor:zoom-in;">
+        <img src="/static/alipay_qr.png" alt="支付宝收款码" onclick="zoomImage(this.src)" onerror="this.alt='支付宝二维码未找到'">
       </div>
       <div class="qr-label">支付宝</div>
     </div>
@@ -739,6 +897,191 @@
     if (!container) return;
     container.classList.toggle('collapsed');
   }
+
+  // ========================= 【新增】主题相关函数 =========================
+
+  // 当前主题配置
+  let currentTheme = {
+    preset: 'pink',
+    custom_colors: {},
+    default_chat_bg: null
+  };
+
+  // 加载并初始化主题
+  async function initTheme() {
+    try {
+      const res = await fetch('/api/theme/settings');
+      currentTheme = await res.json();
+      applyTheme();
+      renderThemeUI();
+      loadThemePresets();
+    } catch(e) {
+      console.error('主题加载失败', e);
+    }
+  }
+
+  // 辅助函数：生成浅色版本
+  function lightenColor(hex, percent) {
+    const num = parseInt(hex.replace('#', ''), 16);
+    const r = Math.min(255, Math.floor((num >> 16) + (255 - (num >> 16)) * (percent / 100)));
+    const g = Math.min(255, Math.floor(((num >> 8) & 255) + (255 - ((num >> 8) & 255)) * (percent / 100)));
+    const b = Math.min(255, Math.floor((num & 255) + (255 - (num & 255)) * (percent / 100)));
+    return '#' + [r, g, b].map(x => {
+      const hex = x.toString(16);
+      return hex.length === 1 ? '0' + hex : hex;
+    }).join('').toUpperCase();
+  }
+
+  // 应用主题到页面
+  function applyTheme() {
+    const preset = currentTheme.preset || 'pink';
+    const colorSchemes = {
+      'pink': { primary: '#ffb6b9', dark: '#f09598', bg: '#f2f4f8' },
+      'blue': { primary: '#a8d8ea', dark: '#7dbfd3', bg: '#f0f4f8' },
+      'purple': { primary: '#c8a8d8', dark: '#b390d3', bg: '#f5f0f8' },
+      'green': { primary: '#a8d8a8', dark: '#90c890', bg: '#f0f8f0' },
+      'orange': { primary: '#ffb366', dark: '#ff9944', bg: '#f8f4f0' }
+    };
+    
+    const colors = colorSchemes[preset] || colorSchemes['pink'];
+    document.documentElement.style.setProperty('--primary-color', colors.primary);
+    document.documentElement.style.setProperty('--primary-dark', colors.dark);
+    document.documentElement.style.setProperty('--bg-color', colors.bg);
+    
+    // 生成并应用浅色版本
+    const primaryLight = lightenColor(colors.primary, 50);
+    const primaryLighter = lightenColor(colors.primary, 70);
+    document.documentElement.style.setProperty('--primary-light', primaryLight);
+    document.documentElement.style.setProperty('--primary-lighter', primaryLighter);
+    
+    // 也应用到其他页面（通过localStorage）
+    localStorage.setItem('theme_preset', preset);
+  }
+
+  // 加载预设主题列表
+  async function loadThemePresets() {
+    try {
+      const res = await fetch('/api/theme/presets');
+      const presets = await res.json();
+      
+      const colorsContainer = document.getElementById('theme-colors');
+      if (!colorsContainer) return;
+      
+      colorsContainer.innerHTML = '';
+      for (const [key, preset] of Object.entries(presets)) {
+        const colorEl = document.createElement('div');
+        colorEl.style.cssText = `
+          width: 50px;
+          height: 50px;
+          border-radius: 50%;
+          background: ${preset['primary']};
+          border: 3px solid ${key === currentTheme.preset ? preset['primary-dark'] : 'transparent'};
+          box-shadow: ${key === currentTheme.preset ? `0 0 0 2px white, 0 0 0 4px ${preset['primary-dark']}` : 'none'};
+          cursor: pointer;
+          transition: all 0.3s;
+        `;
+        colorEl.title = preset.name;
+        colorEl.onclick = () => selectTheme(key);
+        colorsContainer.appendChild(colorEl);
+      }
+    } catch(e) {
+      console.error('加载主题预设失败', e);
+    }
+  }
+
+  // 选择主题
+  function selectTheme(themeKey) {
+    currentTheme.preset = themeKey;
+    applyTheme();
+    loadThemePresets();
+    // 只选择，不立即保存
+  }
+
+  // 渲染主题UI
+  function renderThemeUI() {
+    if (currentTheme.default_chat_bg) {
+      const bgElem = document.getElementById('default-bg-preview');
+      const imgElem = document.getElementById('bg-preview-img');
+      const textElem = document.getElementById('bg-preview-text');
+      const clearBtn = document.getElementById('clear-default-bg-btn');
+      
+      if (bgElem && imgElem && textElem && clearBtn) {
+        bgElem.style.backgroundImage = `url(/theme_backgrounds/${currentTheme.default_chat_bg})`;
+        textElem.style.display = 'none';
+        clearBtn.style.display = 'block';
+      }
+    }
+  }
+
+  // 上传默认背景图
+  async function uploadDefaultBackground(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const previewEl = document.getElementById('default-bg-preview');
+    previewEl.style.opacity = '0.5';
+
+    try {
+      const res = await fetch('/api/theme/upload_bg', {
+        method: 'POST',
+        body: formData
+      });
+      const result = await res.json();
+
+      if (result.status === 'success') {
+        currentTheme.default_chat_bg = result.filename;
+        renderThemeUI();
+      } else {
+        alert('上传失败: ' + result.error);
+      }
+    } catch(e) {
+      alert('网络错误');
+    } finally {
+      previewEl.style.opacity = '1';
+      input.value = '';
+    }
+  }
+
+  // 删除默认背景
+  function clearDefaultBg() {
+    if (confirm('确定要删除默认聊天背景吗？')) {
+      currentTheme.default_chat_bg = null;
+      const bgElem = document.getElementById('default-bg-preview');
+      const textElem = document.getElementById('bg-preview-text');
+      const clearBtn = document.getElementById('clear-default-bg-btn');
+      
+      if (bgElem) bgElem.style.backgroundImage = 'none';
+      if (textElem) textElem.style.display = 'block';
+      if (clearBtn) clearBtn.style.display = 'none';
+    }
+  }
+
+  // 保存主题设置
+  async function saveThemeSettings() {
+    try {
+      const res = await fetch('/api/theme/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(currentTheme)
+      });
+      const result = await res.json();
+
+      if (result.status === 'success') {
+        alert('主题设置已保存！');
+        // 通知其他页面更新主题
+        localStorage.setItem('theme_updated', Date.now().toString());
+      } else {
+        alert('保存失败');
+      }
+    } catch(e) {
+      alert('网络错误');
+    }
+  }
+
+  // ======================================================================
 
   // 1. 加载所有配置 (合并调用)
   async function loadConfigs() {
@@ -1069,6 +1412,7 @@
 
   // 初始化
   loadConfigs();
+  initTheme();  // 【新增】初始化主题
 
   // 【新增】加载日志函数
   async function loadUsageLogs() {
@@ -1176,6 +1520,19 @@
     apiConfig.routes.relay.relay_provider = provider;
     // 选中对应的 radio
     document.getElementById(`relay_${provider}`).checked = true;
+    
+    // 显示/隐藏自定义网址输入框
+    const customUrlContainer = document.getElementById('custom-url-input-container');
+    const customUrlInput = document.getElementById('relay_custom_url');
+    if (provider === 'custom') {
+      customUrlContainer.style.display = 'block';
+      // 加载保存的自定义网址
+      customUrlInput.value = apiConfig.routes.relay?.relay_custom_url || '';
+      customUrlInput.focus();
+    } else {
+      customUrlContainer.style.display = 'none';
+      customUrlInput.value = '';
+    }
   }
 
   // 5. 刷新编辑界面 UI (下拉框 + 标签列表)
@@ -1190,6 +1547,17 @@
       // 加载保存的中转商选择
       const savedProvider = apiConfig.routes.relay?.relay_provider || 'old';
       document.getElementById(`relay_${savedProvider}`).checked = true;
+      
+      // 如果之前选择的是自定义网址，显示输入框并加载值
+      const customUrlContainer = document.getElementById('custom-url-input-container');
+      const customUrlInput = document.getElementById('relay_custom_url');
+      if (savedProvider === 'custom') {
+        customUrlContainer.style.display = 'block';
+        customUrlInput.value = apiConfig.routes.relay?.relay_custom_url || '';
+      } else {
+        customUrlContainer.style.display = 'none';
+        customUrlInput.value = '';
+      }
     } else {
       relayProviderSettings.style.display = 'none';
     }
@@ -1311,6 +1679,18 @@
         apiConfig.routes.relay = {};
       }
       apiConfig.routes.relay.relay_provider = relayProvider;
+      
+      // 如果是自定义网址，保存输入的网址
+      if (relayProvider === 'custom') {
+        const customUrl = document.getElementById('relay_custom_url').value.trim();
+        if (!customUrl) {
+          alert('请输入自定义API网址');
+          btn.textContent = originalText;
+          btn.disabled = false;
+          return;
+        }
+        apiConfig.routes.relay.relay_custom_url = customUrl;
+      }
     }
 
     const btn = document.querySelector('#module-api .btn-save');
@@ -1405,7 +1785,7 @@
         const badge = isCurrent ? '<span style="margin-left:6px; font-size:11px; color:#4cd964;">当前</span>' : '';
         const btnHtml = isCurrent
                 ? ''
-                : `<button onclick="switchAccount(${acc.user_id})" style="padding:4px 10px; border:none; background:#ffb6b9; color:#fff; border-radius:12px; cursor:pointer; font-size:12px;">切换</button>`;
+                : `<button onclick="switchAccount(${acc.user_id})" style="padding:4px 10px; border:none; background:var(--primary-color); color:#fff; border-radius:12px; cursor:pointer; font-size:12px;">切换</button>`;
 
         html += `
           <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 4px; border-bottom:1px solid #f2f2f2;">
@@ -1459,6 +1839,64 @@
       codes.style.display = 'none';
       btn.textContent = '显示收款码';
     }
+  }
+
+  // --- 【新增】复制到剪贴板 ---
+  function copyToClipboard(text, btn) {
+    const originalText = btn.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = '已复制';
+      btn.style.background = '#4cd964';
+      btn.style.color = '#fff';
+      setTimeout(() => {
+        btn.textContent = originalText;
+        btn.style.background = '';
+        btn.style.color = '';
+      }, 2000);
+    }).catch(err => {
+      console.error('无法复制:', err);
+      // 后备方案
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        btn.textContent = '已复制';
+        setTimeout(() => btn.textContent = originalText, 2000);
+      } catch (e) {}
+      document.body.removeChild(textArea);
+    });
+  }
+
+  // --- 【新增】放大查看图片 (使用已有或内置逻辑) ---
+  function zoomImage(src) {
+    // 如果 tabbar.html 里已经有 showImageZoom 或类似逻辑，可以直接调用
+    // 这里实现一个通用的简易版，或者你可以使用 alert/toast
+    // 鉴于本项目比较精致，我们动态创建一个 Overlay
+    const overlay = document.createElement('div');
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.backgroundColor = 'rgba(0,0,0,0.85)';
+    overlay.style.zIndex = '9999';
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
+    overlay.style.cursor = 'zoom-out';
+    overlay.onclick = () => document.body.removeChild(overlay);
+
+    const img = document.createElement('img');
+    img.src = src;
+    img.style.maxWidth = '90%';
+    img.style.maxHeight = '90%';
+    img.style.borderRadius = '12px';
+    img.style.boxShadow = '0 0 20px rgba(0,0,0,0.5)';
+    
+    overlay.appendChild(img);
+    document.body.appendChild(overlay);
   }
 
   // --- 通知注册逻辑 ---
