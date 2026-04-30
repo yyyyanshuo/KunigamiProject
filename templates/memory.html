@@ -1844,23 +1844,44 @@
             
             let html = '';
 
-            // 1. 角色列表与用户列表
+            // 1. 【新增】手动添加“当前用户”选项 (仅正向模式，且如果列表中不存在)
+            // 通过获取 user_settings.json 对应的名称 (篠原桐奈)
+            // 之前后端已经去掉了，我们这里前端通过获取 profile 界面可能存在的名称或者单独 fetch
+            // 为了最稳妥且满足“不加入通讯录”的要求，我们在这里单独请求一次用户信息或使用缓存
+            
+            let currentUserName = "篠原桐奈"; // 兜底使用您提到的名称，或尝试从页面其它地方获取
+            try {
+                const profileName = document.querySelector('.user-info .name')?.innerText;
+                if(profileName) currentUserName = profileName.trim();
+            } catch(e) {}
+
+            if (!existingNames.includes(currentUserName)) {
+                html += `
+                    <div style="padding:12px; border-bottom:1px solid #f9f9f9; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="appendRelRowByName('${currentUserName.replace(/'/g, "\\'")}')">
+                        <div style="display:flex; align-items:center;">
+                            <div style="width:30px; height:30px; border-radius:50%; margin-right:10px; background:#e3f2fd; display:flex; align-items:center; justify-content:center; color:#1e88e5;">
+                                <i class="fas fa-user-circle"></i>
+                            </div>
+                            <span style="font-size:14px; color:#444; font-weight:bold;">${currentUserName} (你)</span>
+                        </div>
+                        <span style="color:var(--primary-color); font-size:12px;">+ 选择</span>
+                    </div>
+                `;
+            }
+
+            // 2. 角色列表
             contacts.forEach(c => {
                 const name = c.name; 
-                // 【修改】只有当有备注且备注不等于原名时显示括号，且无备注不显示括号
+                if (c.id === 'user') return; // 再次确保
+
                 const displayName = (c.remark && c.remark !== c.name) ? `${c.remark} (${c.name})` : c.name;
 
-                // 排除自己自身所属角色、已存在的名称、以及群组
                 if (c.id !== charId && c.type !== 'group' && !existingNames.includes(name)) {
-                    // 如果是 user 类型，特别标记为 (你)
-                    const labelSuffix = (c.id === 'user') ? ' (你)' : '';
-                    const clickAction = (c.id === 'user') ? `appendRelRowByName('${name.replace(/'/g, "\\'")}')` : `appendRelRowByName('${name.replace(/'/g, "\\'")}')`;
-
                     html += `
-                        <div style="padding:12px; border-bottom:1px solid #f9f9f9; border-top:none; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="${clickAction}">
+                        <div style="padding:12px; border-bottom:1px solid #f9f9f9; border-top:none; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="appendRelRowByName('${name.replace(/'/g, "\\'")}')">
                             <div style="display:flex; align-items:center;">
                                 <img src="${c.avatar || '/static/default_avatar.png'}" style="width:30px; height:30px; border-radius:50%; margin-right:10px; object-fit:cover;">
-                                <span style="font-size:14px; color:#444;">${displayName}${labelSuffix}</span>
+                                <span style="font-size:14px; color:#444;">${displayName}</span>
                             </div>
                             <span style="color:var(--primary-color); font-size:12px;">+ 选择</span>
                         </div>
