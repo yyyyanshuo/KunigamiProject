@@ -1843,15 +1843,36 @@
             const contacts = await res.json();
             
             let html = '';
+
+            // 1. 【新增】手动添加“用户”选项（如果不存在）
+            const userName = '用户'; // 这里固定用“用户”关键词，因为系统逻辑通常识别“用户”或 username
+            if (!existingNames.includes(userName)) {
+                html += `
+                    <div style="padding:12px; border-bottom:1px solid #f9f9f9; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="appendRelRowByName('${userName}')">
+                        <div style="display:flex; align-items:center;">
+                            <div style="width:30px; height:30px; border-radius:50%; margin-right:10px; background:#e3f2fd; display:flex; align-items:center; justify-content:center; color:#1e88e5;">
+                                <i class="fas fa-user"></i>
+                            </div>
+                            <span style="font-size:14px; color:#444; font-weight:bold;">用户 (你)</span>
+                        </div>
+                        <span style="color:var(--primary-color); font-size:12px;">+ 选择</span>
+                    </div>
+                `;
+            }
+
+            // 2. 角色列表
             contacts.forEach(c => {
-                const name = c.remark || c.name;
+                // 【核心修改】即使有备注，也要用原始的 c.name 进行关系映射
+                const name = c.name; 
+                const displayName = c.remark ? `${c.remark} (${c.name})` : c.name;
+
                 // 排除自己、已存在的名称、以及群组
                 if (c.id !== charId && c.type !== 'group' && !existingNames.includes(name)) {
                     html += `
                         <div style="padding:12px; border-bottom:1px solid #f9f9f9; border-top:none; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="appendRelRowByName('${name.replace(/'/g, "\\'")}')">
                             <div style="display:flex; align-items:center;">
                                 <img src="${c.avatar || '/static/default_avatar.png'}" style="width:30px; height:30px; border-radius:50%; margin-right:10px; object-fit:cover;">
-                                <span style="font-size:14px; color:#444;">${name}</span>
+                                <span style="font-size:14px; color:#444;">${displayName}</span>
                             </div>
                             <span style="color:var(--primary-color); font-size:12px;">+ 选择</span>
                         </div>
@@ -1945,11 +1966,17 @@
             contacts.forEach(c => {
                 // 排除自己、已存在的、新添加的、以及群组
                 if (c.id !== charId && c.type !== 'group' && !allExcludedCids.includes(c.id)) {
+                    // 【核心修改】即使有备注，在作为 key 时也优先显示 c.name（或维持 ID 映射逻辑）
+                    // 这里的 addReverseMemberRow 第二个参数将作为卡片头部的显示名称
+                    // 我们传递 c.name 以保证映射准确，但界面上可以提示显示名
+                    const name = c.name; 
+                    const displayName = c.remark ? `${c.remark} (${c.name})` : c.name;
+
                     html += `
-                        <div style="padding:12px; border-bottom:1px solid #f9f9f9; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="addReverseMemberRow('${c.id}', '${(c.remark || c.name).replace(/'/g, "\\'")}')">
+                        <div style="padding:12px; border-bottom:1px solid #f9f9f9; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="addReverseMemberRow('${c.id}', '${name.replace(/'/g, "\\'")}')">
                             <div style="display:flex; align-items:center;">
                                 <img src="${c.avatar || '/static/default_avatar.png'}" style="width:30px; height:30px; border-radius:50%; margin-right:10px; object-fit:cover;">
-                                <span style="font-size:14px; color:#444;">${c.remark || c.name}</span>
+                                <span style="font-size:14px; color:#444;">${displayName}</span>
                             </div>
                             <span style="color:var(--primary-color); font-size:12px;">+ 添加</span>
                         </div>
