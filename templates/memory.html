@@ -1842,52 +1842,38 @@
             const res = await fetch('/api/contacts');
             const contacts = await res.json();
             
-            // 找寻当前登录用户的名称
-            let currentUserName = "用户";
-            try {
-                // 尝试从全局配置或联系人列表中寻找 'user' 这个 ID 对应的名字
-                const userContact = contacts.find(c => c.id === 'user');
-                if (userContact) {
-                    currentUserName = userContact.remark || userContact.name;
-                }
-            } catch(e) {}
-
             let html = '';
 
-            // 1. 【新增】手动添加“当前用户”选项（如果列表中不存在该名称）
-            if (!existingNames.includes(currentUserName)) {
-                html += `
-                    <div style="padding:12px; border-bottom:1px solid #f9f9f9; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="appendRelRowByName('${currentUserName.replace(/'/g, "\\'")}')">
-                        <div style="display:flex; align-items:center;">
-                            <div style="width:30px; height:30px; border-radius:50%; margin-right:10px; background:#e3f2fd; display:flex; align-items:center; justify-content:center; color:#1e88e5;">
-                                <i class="fas fa-user"></i>
-                            </div>
-                            <span style="font-size:14px; color:#444; font-weight:bold;">${currentUserName} (你)</span>
-                        </div>
-                        <span style="color:var(--primary-color); font-size:12px;">+ 选择</span>
-                    </div>
-                `;
-            }
-
-            // 2. 角色列表
+            // 1. 角色列表与用户列表
             contacts.forEach(c => {
                 const name = c.name; 
-                // 【修改】没有备注的角色不显示括号
-                const displayName = c.remark ? `${c.remark} (${c.name})` : c.name;
+                // 【修改】只有当有备注且备注不等于原名时显示括号，且无备注不显示括号
+                const displayName = (c.remark && c.remark !== c.name) ? `${c.remark} (${c.name})` : c.name;
 
-                // 排除自己、已存在的名称、以及群组
+                // 排除自己自身所属角色、已存在的名称、以及群组
                 if (c.id !== charId && c.type !== 'group' && !existingNames.includes(name)) {
+                    // 如果是 user 类型，特别标记为 (你)
+                    const labelSuffix = (c.id === 'user') ? ' (你)' : '';
+                    const clickAction = (c.id === 'user') ? `appendRelRowByName('${name.replace(/'/g, "\\'")}')` : `appendRelRowByName('${name.replace(/'/g, "\\'")}')`;
+
                     html += `
-                        <div style="padding:12px; border-bottom:1px solid #f9f9f9; border-top:none; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="appendRelRowByName('${name.replace(/'/g, "\\'")}')">
+                        <div style="padding:12px; border-bottom:1px solid #f9f9f9; border-top:none; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="${clickAction}">
                             <div style="display:flex; align-items:center;">
                                 <img src="${c.avatar || '/static/default_avatar.png'}" style="width:30px; height:30px; border-radius:50%; margin-right:10px; object-fit:cover;">
-                                <span style="font-size:14px; color:#444;">${displayName}</span>
+                                <span style="font-size:14px; color:#444;">${displayName}${labelSuffix}</span>
                             </div>
                             <span style="color:var(--primary-color); font-size:12px;">+ 选择</span>
                         </div>
                     `;
                 }
             });
+
+            if (!html) html = '<div style="padding:20px; text-align:center; color:#999; font-size:13px;">没有可添加的角色</div>';
+            listContainer.innerHTML = html;
+        } catch(e) {
+            listContainer.innerHTML = '<div style="padding:20px; text-align:center; color:red;">加载失败</div>';
+        }
+    }
 
             if (!html) html = '<div style="padding:20px; text-align:center; color:#999; font-size:13px;">没有可添加的角色</div>';
             listContainer.innerHTML = html;
@@ -1977,8 +1963,8 @@
                 if (c.id !== charId && c.type !== 'group' && !allExcludedCids.includes(c.id)) {
                     // 【核心修改】即使有备注，在作为 key 时也优先显示 c.name
                     const name = c.name; 
-                    // 【优化】没有备注的角色不带括号
-                    const displayName = c.remark ? `${c.remark} (${c.name})` : c.name;
+                    // 【优化】只有当备注存在且与原名不同时才显示括号
+                    const displayName = (c.remark && c.remark !== c.name) ? `${c.remark} (${c.name})` : c.name;
 
                     html += `
                         <div style="padding:12px; border-bottom:1px solid #f9f9f9; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="addReverseMemberRow('${c.id}', '${name.replace(/'/g, "\\'")}')">

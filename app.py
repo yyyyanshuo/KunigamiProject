@@ -4749,6 +4749,23 @@ def get_contacts():
     # 4. 统一排序
     contact_list.sort(key=lambda x: (1 if x['pinned'] else 0, x['timestamp']), reverse=True)
 
+    # --- 【新增】将当前用户信息加入通讯录 (ID='user') ---
+    try:
+        settings_file = _get_user_settings_file()
+        if os.path.exists(settings_file):
+            with open(settings_file, "r", encoding="utf-8-sig") as f:
+                u_settings = json.load(f)
+                u_name = u_settings.get("current_user_name", "用户")
+                u_avatar = u_settings.get("avatar", "/static/default_avatar.png")
+                contact_list.append({
+                    "type": "user",
+                    "id": "user",
+                    "name": u_name,
+                    "remark": u_name,
+                    "avatar": u_avatar
+                })
+    except: pass
+
     return jsonify(contact_list)
 
 # --- 【修正版】单聊历史记录 (精准定位版) ---
