@@ -1924,8 +1924,18 @@
     async function loadReverseMemberCandidates() {
         const listContainer = document.getElementById('reverse-member-list');
         const viewMode = document.querySelector('#module-relation .view-mode');
+        const editContainer = document.querySelector('#module-relation .edit-mode');
+        
+        // 获取已经存在的 CID（由后端加载的）
         const existingData = JSON.parse(viewMode.dataset.reverseBody || '{}');
         const existingCids = Object.keys(existingData);
+        
+        // 获取当前编辑器中已经新添加但还没保存的 CID
+        const newlyAddedCids = Array.from(editContainer.querySelectorAll('.rel-edit-card[data-source-cid]'))
+            .map(card => card.dataset.sourceCid);
+            
+        // 合并所有排除列表
+        const allExcludedCids = [...new Set([...existingCids, ...newlyAddedCids])];
 
         try {
             const res = await fetch('/api/contacts');
@@ -1933,10 +1943,10 @@
             
             let html = '';
             contacts.forEach(c => {
-                // 排除自己、已存在的、以及群组
-                if (c.id !== charId && c.type !== 'group' && !existingCids.includes(c.id)) {
+                // 排除自己、已存在的、新添加的、以及群组
+                if (c.id !== charId && c.type !== 'group' && !allExcludedCids.includes(c.id)) {
                     html += `
-                        <div style="padding:12px; border-bottom:1px solid #f9f9f9; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="addReverseMemberRow('${c.id}', '${c.remark || c.name}')">
+                        <div style="padding:12px; border-bottom:1px solid #f9f9f9; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="addReverseMemberRow('${c.id}', '${(c.remark || c.name).replace(/'/g, "\\'")}')">
                             <div style="display:flex; align-items:center;">
                                 <img src="${c.avatar || '/static/default_avatar.png'}" style="width:30px; height:30px; border-radius:50%; margin-right:10px; object-fit:cover;">
                                 <span style="font-size:14px; color:#444;">${c.remark || c.name}</span>
