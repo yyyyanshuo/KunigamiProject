@@ -1073,6 +1073,15 @@
     setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 4000);
   }
 
+  function showAffinityToast(delta) {
+    const el = document.createElement('div');
+    el.className = 'affinity-toast ' + (delta > 0 ? 'positive' : 'negative');
+    const sign = delta > 0 ? '+' : '';
+    el.textContent = `亲密度 ${sign}${delta}`;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3000);
+  }
+
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('/sw.js')
@@ -3384,15 +3393,6 @@
                       timestamp: t
                     }, 'append');
                     chatContainer.scrollTop = chatContainer.scrollHeight;
-  }
-
-  function showAffinityToast(delta) {
-    const el = document.createElement('div');
-    el.className = 'affinity-toast ' + (delta > 0 ? 'positive' : 'negative');
-    const sign = delta > 0 ? '+' : '';
-    el.textContent = `亲密度 ${sign}${delta}`;
-    document.body.appendChild(el);
-    setTimeout(() => el.remove(), 3000);
   }
                 } else {
                   await (typeof sleep === 'function' ? sleep(800) : Promise.resolve());
