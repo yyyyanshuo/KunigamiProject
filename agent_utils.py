@@ -152,7 +152,7 @@ def _update_user_affinity(char_id, delta, current_user_id=None):
         print(f"[Agent Action Error] Update Affinity: {e}")
 
 def _update_sleep_time(char_id, sleep_range, current_user_id=None):
-    """更新睡眠时间段"""
+    """更新睡眠时间段 — 写入 ds_start / ds_end / deep_sleep"""
     try:
         from app import _get_characters_config_file, safe_save_json
         cfg_file = _get_characters_config_file()
@@ -166,9 +166,15 @@ def _update_sleep_time(char_id, sleep_range, current_user_id=None):
             print(f"[Agent Action] WARNING: char_id '{char_id}' not found in {cfg_file}")
             return
 
-        data[char_id]["deep_sleep_range"] = sleep_range
-        safe_save_json(cfg_file, data)
-        print(f"[Agent Action] {char_id} deep_sleep_range -> {sleep_range} written to {cfg_file}")
+        parts = sleep_range.split("-")
+        if len(parts) == 2:
+            data[char_id]["ds_start"] = parts[0].strip()
+            data[char_id]["ds_end"] = parts[1].strip()
+            data[char_id]["deep_sleep"] = True
+            safe_save_json(cfg_file, data)
+            print(f"[Agent Action] {char_id} deep_sleep {parts[0].strip()}-{parts[1].strip()} written to {cfg_file}")
+        else:
+            print(f"[Agent Action] WARNING: invalid sleep_range format: {sleep_range}")
     except Exception as e:
         print(f"[Agent Action Error] Update Sleep Time: {e}")
 
