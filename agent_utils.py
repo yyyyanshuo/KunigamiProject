@@ -104,23 +104,22 @@ def process_agent_actions(char_id, raw_text, user_id=None):
     return cleaned_text, (round(total_affinity_delta, 2) if has_affinity else None)
 
 def _update_persona_param(char_id, param_name, value):
-    """更新 1_base_persona.json 中的参数"""
-    from app import get_paths, safe_save_json
-    _, prompts_dir = get_paths(char_id)
-    persona_path = os.path.join(prompts_dir, "1_base_persona.json")
-    if os.path.exists(persona_path):
-        try:
-            with open(persona_path, "r", encoding="utf-8") as f:
+    """更新 characters.json 中的行为参数（emotion / moments_index）"""
+    try:
+        from app import _get_characters_config_file, safe_save_json
+        cfg_file = _get_characters_config_file()
+        if os.path.exists(cfg_file):
+            with open(cfg_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            
-            # 确保 agent_state 字典存在
-            if "agent_state" not in data:
-                data["agent_state"] = {}
-                
-            data["agent_state"][param_name] = value
-            safe_save_json(persona_path, data)
-        except Exception as e:
-            print(f"Update Persona Param Error: {e}")
+
+            if char_id in data:
+                if param_name == "emotion":
+                    data[char_id]["emotion"] = float(value)
+                elif param_name == "personality":
+                    data[char_id]["moments_index"] = float(value)
+                safe_save_json(cfg_file, data)
+    except Exception as e:
+        print(f"Update Persona Param Error: {e}")
 
 def _update_user_affinity(char_id, delta, current_user_id=None):
     """累加亲密度到 characters.json 中"""
