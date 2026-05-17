@@ -15,11 +15,15 @@ def process_agent_actions(char_id, raw_text, user_id=None):
     [SET_SLEEP_TIME: "HH:MM-HH:MM"]
     [SET_RELATION: {"target": "ID或名称", "value": 0-5}]
     [ADD_SCHEDULE: {"date": "YYYY-MM-DD", "content": "内容"}]
+    
+    Returns: (cleaned_text, affinity_delta) 其中 affinity_delta 为亲密度净变动，无标签时为 None
     """
     if not raw_text:
-        return raw_text
+        return raw_text, None
 
     cleaned_text = raw_text
+    total_affinity_delta = 0.0
+    has_affinity = False
 
     # 1. 提取情绪指数 (Emotion)
     emotion_pattern = r'\[SET_EMOTION:\s*(\d+(?:\.\d+)?)\]'
@@ -47,9 +51,11 @@ def process_agent_actions(char_id, raw_text, user_id=None):
     affinity_pattern = r'\[UPDATE_AFFINITY:\s*([+-]?\d+(?:\.\d+)?)\]'
     for match in re.finditer(affinity_pattern, raw_text):
         try:
-            affinity_delta = float(match.group(1))
-            _update_user_affinity(char_id, affinity_delta, user_id)
-            print(f"[Agent Action] {char_id} 亲密度变动 {affinity_delta}")
+            delta = float(match.group(1))
+            _update_user_affinity(char_id, delta, user_id)
+            total_affinity_delta += delta
+            has_affinity = True
+            print(f"[Agent Action] {char_id} 亲密度变动 {delta}")
         except Exception as e:
             print(f"[Agent Action Error] 解析 Affinity 失败: {e}")
     cleaned_text = re.sub(affinity_pattern, '', cleaned_text)
@@ -95,7 +101,7 @@ def process_agent_actions(char_id, raw_text, user_id=None):
 
     # 清理多余的空白字符，如果标签单独占一行，删除后可能会留下空行
     cleaned_text = re.sub(r'\n\s*\n', '\n', cleaned_text).strip()
-    return cleaned_text
+    return cleaned_text, (round(total_affinity_delta, 2) if has_affinity else None)
 
 def _update_persona_param(char_id, param_name, value):
     """更新 1_base_persona.json 中的参数"""

@@ -5995,7 +5995,7 @@ def chat(char_id):
         cleaned_reply_text = re.sub(timestamp_pattern, '', reply_text_raw).strip()
         
         # --- 【新增】拦截动作标签 (Emotion/Affinity等) ---
-        cleaned_reply_text = process_agent_actions(char_id, cleaned_reply_text, get_current_user_id())
+        cleaned_reply_text, affinity_delta = process_agent_actions(char_id, cleaned_reply_text, get_current_user_id())
 
         # 把 AI 回复里的 [表情]name 转成 [表情]path 再入库
         cleaned_reply_text = _strip_consecutive_tickle(cleaned_reply_text)
@@ -6033,6 +6033,8 @@ def chat(char_id):
             "id": ai_msg_id,
             "user_id": user_msg_id
         }
+        if affinity_delta:
+            resp["affinity_delta"] = affinity_delta
         if memory_sync_warning:
             resp["memory_sync_warning"] = memory_sync_warning
         return jsonify(resp)
@@ -6156,7 +6158,7 @@ def chat_v2(char_id):
         cleaned_reply = re.sub(timestamp_pattern, '', reply_text_raw).strip()
         
         # --- 【新增】拦截动作标签 (Emotion/Affinity等) ---
-        cleaned_reply = process_agent_actions(char_id, cleaned_reply, get_current_user_id())
+        cleaned_reply, affinity_delta = process_agent_actions(char_id, cleaned_reply, get_current_user_id())
 
         cleaned_reply = _strip_consecutive_tickle(cleaned_reply)
         # --- 【关键修复】多媒体标签识别失败原因：拦截顺序 ---
@@ -6189,6 +6191,8 @@ def chat_v2(char_id):
             "user_id": user_msg_id,
             "model": current_model
         }
+        if affinity_delta:
+            resp["affinity_delta"] = affinity_delta
         if memory_sync_warning:
             resp["memory_sync_warning"] = memory_sync_warning
 
@@ -6323,7 +6327,7 @@ def regenerate_message(char_id):
         cleaned_reply_text = re.sub(timestamp_pattern, '', reply_text_raw).strip()
         
         # --- 【新增】拦截动作标签 (Emotion/Affinity等) ---
-        cleaned_reply_text = process_agent_actions(char_id, cleaned_reply_text, get_current_user_id())
+        cleaned_reply_text, affinity_delta = process_agent_actions(char_id, cleaned_reply_text, get_current_user_id())
 
         cleaned_reply_text = _strip_consecutive_tickle(cleaned_reply_text)
         
@@ -6346,11 +6350,14 @@ def regenerate_message(char_id):
         if get_ai_language() == "ja":
             reply_bubbles = [_add_furigana_to_japanese(b) for b in reply_bubbles]
 
-        return jsonify({
+        resp_data = {
             "status": "success",
             "replies": reply_bubbles,
             "id": new_id
-        })
+        }
+        if affinity_delta:
+            resp_data["affinity_delta"] = affinity_delta
+        return jsonify(resp_data)
 
     except Exception as e:
         print(f"Regenerate Error: {e}")
@@ -6399,6 +6406,7 @@ def group_chat(group_id):
 
     # --- 【关键修正 1】提前初始化变量 ---
     replies_for_frontend = []
+    group_affinity_delta = 0.0
 
     # --- 【关键步骤】获取在线成员 (过滤掉深睡眠的) ---
     # 需要读取 characters.json 查看 deep_sleep 状态 (使用 per-user 配置)
@@ -6595,7 +6603,9 @@ def group_chat(group_id):
             cleaned_reply = re.sub(timestamp_pattern, '', reply_text).strip()
             
             # --- 【新增】拦截动作标签 (Emotion/Affinity等) ---
-            cleaned_reply = process_agent_actions(speaker_id, cleaned_reply, get_current_user_id())
+            cleaned_reply, delta = process_agent_actions(speaker_id, cleaned_reply, get_current_user_id())
+            if delta:
+                group_affinity_delta += delta
 
             cleaned_reply = _strip_consecutive_tickle(cleaned_reply)
 
@@ -6649,6 +6659,8 @@ def group_chat(group_id):
 
     # 7. 最终返回；记忆同步失败时附带提示
     resp = {"replies": replies_for_frontend, "user_id": user_msg_id}
+    if group_affinity_delta:
+        resp["affinity_delta"] = round(group_affinity_delta, 2)
     if memory_sync_warning:
         resp["memory_sync_warning"] = memory_sync_warning
     return jsonify(resp)
@@ -11156,7 +11168,7 @@ def trigger_active_chat(char_id, user_id=None):
         cleaned_reply = re.sub(timestamp_pattern, '', reply_text).strip()
         
         # --- 【新增】拦截动作标签 (Emotion/Affinity等) ---
-        cleaned_reply = process_agent_actions(char_id, cleaned_reply, get_current_user_id())
+        cleaned_reply, _ = process_agent_actions(char_id, cleaned_reply, get_current_user_id())
 
         if not cleaned_reply: return False
 
@@ -11366,7 +11378,7 @@ def trigger_group_active_chat(group_id, user_id=None):
             cleaned_reply = re.sub(timestamp_pattern, '', reply_text).strip()
             
             # --- 【新增】拦截动作标签 (Emotion/Affinity等) ---
-            cleaned_reply = process_agent_actions(speaker_id, cleaned_reply, get_current_user_id())
+            cleaned_reply, _ = process_agent_actions(speaker_id, cleaned_reply, get_current_user_id())
 
             name_pattern = f"^\\[{speaker_name}\\][:：]\\s*"
             cleaned_reply = re.sub(name_pattern, '', cleaned_reply).strip()

@@ -9,11 +9,27 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="apple-touch-icon" href="/static/logo.png">
 
+  <!-- 【新增】主题加载脚本 -->
+  <script src="/static/theme-loader.js"></script>
+
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
   <title>Sakura ✿ 樱语</title>
   <!-- 这是在 chat.html 的 <head> 标签内 -->
   <style>
+    /* === 【新增】全局CSS变量默认定义（会被theme-loader.js覆盖） === */
+    :root {
+      --primary-color: #ffb6b9;
+      --primary-dark: #f09598;
+      --bg-color: #f2f4f8;
+      --primary-light: #fff3f8;
+      --primary-lighter: #ffe9e1;
+      --primary-rgba-light: rgba(255, 182, 185, 0.1);
+      --primary-rgba-lighter: rgba(255, 182, 185, 0.15);
+      --primary-rgba-strong: rgba(255, 182, 185, 0.3);
+      --primary-rgba-darker: rgba(255, 182, 185, 0.5);
+    }
+
     /* --- 1. 锁死根元素高度 --- */
     html {
       height: 100%; /* 必须是 100% */
@@ -21,7 +37,7 @@
 
     body {
       font-family: "Segoe UI", "PingFang SC", sans-serif;
-      background: linear-gradient(135deg, #fff3f8 0%, #ffe9e1 100%);
+      background: var(--bg-color); /* 使用主题背景色 */
       margin: 0; /* 核心布局 */
       height: 100%; /* 跟随 html 高度 */
       display: flex;
@@ -33,6 +49,11 @@
       /* 避让刘海屏 */
       padding-top: env(safe-area-inset-top);
       padding-bottom: env(safe-area-inset-bottom);
+      
+      background-size: cover;
+      background-position: center;
+      background-attachment: fixed;
+      background-repeat: no-repeat;
     }
 
     /* --- 2. 聊天区域 (占据剩余空间) --- */
@@ -59,7 +80,7 @@
       flex-shrink: 0; /* 【关键】禁止被键盘挤压变形 */
       display: flex; align-items: center;
       background-color: #fff;
-      border-top: 1px solid #ffdce0;
+      border-top: 1px solid var(--primary-lighter);
       z-index: 10;
       /* 适配底部小黑条 */
       padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
@@ -72,7 +93,7 @@
       padding: 10px 16px;
       background-color: rgba(255, 255, 255, 0.85);
       backdrop-filter: blur(10px);
-      border-bottom: 1px solid #ffe5e8;
+      border-bottom: 1px solid var(--primary-lighter);
       z-index: 100; flex-shrink: 0;
     }
 
@@ -97,7 +118,7 @@
     .header-btn {
       background: none; border: none; cursor: pointer; padding: 8px;
       display: flex; align-items: center; justify-content: center;
-      color: #ff9b9e; border-radius: 50%; transition: background 0.2s;
+      color: var(--primary-color); border-radius: 50%; transition: background 0.2s;
     }
     .header-btn:hover { background-color: rgba(0,0,0,0.05); }
     .header-btn svg { width: 24px; height: 24px; fill: currentColor; }
@@ -134,22 +155,35 @@
     .message-group.assistant .message-content-row {
       flex-direction: row;
     }
+    /* 【新增】利用伪元素在气泡尾部占位，保持对称并防止气泡顶边 (40px头像+10px外边距=50px) */
+    .message-group.assistant .message-content-row::after {
+      content: "";
+      display: block;
+      width: 50px;
+      flex-shrink: 0;
+    }
+
     .message-group.user .message-content-row {
       flex-direction: row-reverse;
+    }
+    /* 【新增】此伪元素处于反向排版(row-reverse)的末尾（即页面左侧），留出完美的头像级留白 */
+    .message-group.user .message-content-row::after {
+      content: "";
+      display: block;
+      width: 50px;
+      flex-shrink: 0;
     }
 
     /* 用户：右对齐，反向排列(头像在右) */
     .message-group.user {
       align-self: flex-end;
       flex-direction: row-reverse;
-      margin-left: 50px;
     }
 
     /* 助手：左对齐，正向排列(头像在左) */
     .message-group.assistant {
       align-self: flex-start;
       flex-direction: row;
-      margin-right: 50px;
     }
 
     /* --- 头像样式 --- */
@@ -209,7 +243,7 @@
       text-align: left;
     }
     .message-wrapper.user .bubble {
-      background: linear-gradient(135deg, #ffb6b9, #ffc9c9); color: #fff;
+      background-color: var(--primary-color); color: #fff;
       border-bottom-right-radius: 4px;
       text-align: left; /* 气泡还是在右边，但里面的字左对齐 */
     }
@@ -217,7 +251,7 @@
     .message-wrapper.assistant .bubble {
       background-color: #ffffff !important; /* 【关键】强制纯白背景 */
       color: #333;
-      border: 1px solid #ffb6b9; /* 加个浅粉色边框，更好看 */
+      border: 1px solid var(--primary-color); /* 加个主题色边框，更好看 */
       border-bottom-left-radius: 4px;
       box-shadow: 0 1px 3px rgba(0,0,0,0.05); /* 加一点阴影增加立体感 */
     }
@@ -315,7 +349,7 @@
       display: flex; align-items: center; justify-content: center;
       color: #aaa; transition: all 0.2s;
     }
-    .action-btn:hover { background-color: rgba(0,0,0,0.05); color: #ff9b9e; }
+    .action-btn:hover { background-color: rgba(0,0,0,0.05); color: var(--primary-color); }
     .action-btn svg { width: 14px; height: 14px; fill: currentColor; }
 
     /* 移除原来 .copy-btn 的部分样式，统一用 .action-btn */
@@ -351,18 +385,18 @@
     textarea#messageInput {
      flex: 1;
      padding: 10px 14px;
-     border: 1px solid #ffd1d1;
+     border: 1px solid var(--primary-lighter);
      border-radius: 20px;
      outline: none;
      font-size: 15px;
-     background: #fff8f9;
+     background: #fff;
      transition: border-color 0.2s;
      resize: none;
      box-sizing: border-box;
     }
-    #messageInput:focus { border-color: #ff9b9e; }
-    #sendBtn { margin-left: 8px; background: linear-gradient(135deg, #ffb6b9, #ff9b73); color: white; border: none; border-radius: 20px; padding: 10px 18px; cursor: pointer; font-weight: bold; box-shadow: 0 3px 6px rgba(255,140,140,0.3); transition: all 0.2s; }
-    #sendBtn:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(255,140,140,0.4); }
+    #messageInput:focus { border-color: var(--primary-color); }
+    #sendBtn { margin-left: 8px; background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color: white; border: none; border-radius: 20px; padding: 10px 18px; cursor: pointer; font-weight: bold; box-shadow: 0 3px 6px var(--primary-rgba-strong); transition: all 0.2s; }
+    #sendBtn:hover { transform: translateY(-2px); box-shadow: 0 4px 10px var(--primary-rgba-strong); }
 
     /* --- 【新增】强制隐藏“加载更多”按钮 --- */
     #load-more-container {
@@ -383,16 +417,16 @@
 
     /* 选中状态 */
     .message-group.selected {
-      background-color: rgba(255, 182, 185, 0.15); /* 淡淡的粉色背景 */
+      background-color: var(--primary-rgba-light); /* 使用主题色透明背景 */
       border-radius: 12px;
-      outline: 2px solid #ffb6b9; /* 粉色边框 */
+      outline: 2px solid var(--primary-color); /* 主题色边框 */
     }
 
     /* 在选中项右上角加个勾勾 (可选，为了好看) */
     .message-group.selected::after {
       content: '✔';
       position: absolute; top: -8px; right: -8px;
-      width: 20px; height: 20px; background: #ffb6b9; color: #fff;
+      width: 20px; height: 20px; background: var(--primary-color); color: #fff;
       border-radius: 50%; font-size: 12px;
       display: flex; align-items: center; justify-content: center;
       box-shadow: 0 2px 4px rgba(0,0,0,0.2);
@@ -410,7 +444,7 @@
       transition: all 0.2s;
     }
     #plusBtn:hover { background: #e0e0e0; color: #555; }
-    #plusBtn.active { background: #ffb6b9; color: #fff; border-color: #ffb6b9; transform: rotate(45deg); }
+    #plusBtn.active { background: var(--primary-color); color: #fff; border-color: var(--primary-color); transform: rotate(45deg); }
     /* --- 常用语面板 (修改版：嵌入底部流) --- */
     #quickPhrasesPanel {
       /* 不再悬浮，而是作为Flex的一部分 */
@@ -466,7 +500,7 @@
       justify-content: center;
       font-size: 24px;
     }
-    .more-item:hover .more-btn { background: #fff0f1; border-color: #ffcdd2; }
+    .more-item:hover .more-btn { background: var(--primary-rgba-light); border-color: var(--primary-color); }
     .more-label {
       font-size: 12px;
       color: #666;
@@ -521,7 +555,7 @@
     }
     .sticker-tab svg { width: 18px; height: 18px; }
     .sticker-tab:hover { background: #e0e0e0; }
-    .sticker-tab.active { background: #ffb6b9; color: #fff; }
+    .sticker-tab.active { background: var(--primary-color); color: #fff; }
     .sticker-tab.sticker-tab-pack { width: auto; padding: 0 12px; border-radius: 18px; font-size: 12px; }
     .sticker-content {
       flex: 1;
@@ -633,7 +667,7 @@
     .sticker-detail-modal .modal-body { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
     .sticker-detail-modal .modal-body img { max-width: 100%; max-height: 70vh; object-fit: contain; }
     .sticker-detail-modal .modal-footer { flex-shrink: 0; padding: 12px; text-align: center; }
-    .sticker-detail-modal .modal-footer a { color: #ffb6b9; font-size: 13px; }
+    .sticker-detail-modal .modal-footer a { color: var(--primary-color); font-size: 13px; }
     .bubble-sticker { cursor: pointer; padding: 4px; }
     .bubble-sticker .sticker-msg-img { max-width: 120px; max-height: 120px; display: block; border-radius: 8px; }
 
@@ -641,7 +675,7 @@
     .qp-header {
       padding: 8px 15px; background: #fafafa; border-bottom: 1px solid #eee;
       display: flex; justify-content: space-between; align-items: center;
-      font-weight: bold; color: #ffb6b9; font-size: 13px;
+      font-weight: bold; color: var(--primary-color); font-size: 13px;
       flex-shrink: 0;
     }
     /* ... qp-list, qp-item 等样式保持之前的即可 ... */
@@ -659,17 +693,17 @@
       border-radius: 8px; margin-bottom: 8px; cursor: pointer;
       font-size: 14px; color: #444; transition: all 0.2s;
     }
-    .qp-item:hover { background: #fff5f6; border-color: #ffcdd2; color: #d32f2f; }
-    .qp-item:active { transform: scale(0.98); }
+    .qp-item:hover { background: var(--primary-rgba-light); border-color: var(--primary-color); color: var(--primary-dark); }
 
     /* 编辑模式输入框 */
+
     .qp-edit-row { display: flex; gap: 8px; margin-bottom: 8px; }
     .qp-input { flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 6px; }
     .qp-del-btn { width: 30px; background: #ffebee; border:none; color: #c62828; border-radius: 6px; cursor: pointer; }
 
     /* 底部添加/保存按钮 */
     .qp-add-btn { width: 48%; padding: 8px; background: #f5f5f5; border: 1px dashed #ccc; border-radius: 6px; cursor:pointer;}
-    .qp-save-btn { width: 48%; padding: 8px; background: #ffb6b9; color: #fff; border: none; border-radius: 6px; cursor:pointer; font-weight:bold;}
+    .qp-save-btn { width: 48%; padding: 8px; background: var(--primary-color); color: #fff; border: none; border-radius: 6px; cursor:pointer; font-weight:bold;}
 
     /* --- 群聊专属样式 --- */
 
@@ -740,7 +774,38 @@
       display: flex;
       align-items: center; justify-content: center;
     }
+    /* 好感度变动提示 */
+    .affinity-toast {
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      z-index: 10000;
+      pointer-events: none;
+      white-space: nowrap;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+      animation: affinity-toast-in-out 3s ease-in-out forwards;
+    }
+    .affinity-toast.positive {
+      background: rgba(76, 217, 100, 0.75);
+      color: #fff;
+    }
+    .affinity-toast.negative {
+      background: rgba(255, 69, 58, 0.75);
+      color: #fff;
+    }
+    @keyframes affinity-toast-in-out {
+      0% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+      10% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+      80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+      100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+    }
   </style>
+  <!-- 【新增】引入 html2canvas 库用于生成聊天记录图片 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 <body>
 
@@ -887,7 +952,7 @@
     <input type="text" id="stickerUploadNameInput" placeholder="输入表情名称或描述…" style="width:100%; box-sizing:border-box; padding:10px 12px; border:1px solid #ddd; border-radius:8px; font-size:14px;" />
     <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:14px;">
       <button type="button" id="stickerUploadCancelBtn" style="padding:8px 16px; border:none; background:#f0f0f0; border-radius:6px; cursor:pointer;">取消</button>
-      <button type="button" id="stickerUploadConfirmBtn" style="padding:8px 16px; border:none; background:#ffb6b9; color:#fff; border-radius:6px; cursor:pointer;">确定</button>
+      <button type="button" id="stickerUploadConfirmBtn" style="padding:8px 16px; border:none; background:var(--primary-color); color:#fff; border-radius:6px; cursor:pointer;">确定</button>
     </div>
   </div>
 </div>
@@ -899,7 +964,7 @@
     <textarea id="editInput" rows="5" style="width:100%; box-sizing: border-box; border:1px solid #ddd; border-radius:8px; padding:10px; font-size:14px; resize:vertical;"></textarea>
     <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:10px;">
       <button onclick="closeEditModal()" style="padding:6px 12px; border:none; background:#f0f0f0; border-radius:6px; cursor:pointer;">取消</button>
-      <button id="saveEditBtn" style="padding:6px 12px; border:none; background:#ffb6b9; color:#fff; border-radius:6px; cursor:pointer;">保存</button>
+      <button id="saveEditBtn" style="padding:6px 12px; border:none; background:var(--primary-color); color:#fff; border-radius:6px; cursor:pointer;">保存</button>
     </div>
   </div>
 </div>
@@ -909,7 +974,7 @@
   <span id="selectCount" style="color:#666; font-weight:bold;">已选择 0 条</span>
   <div style="display:flex; gap:10px;">
     <button onclick="toggleSelectionMode()" style="padding:8px 16px; border:1px solid #ddd; background:#fff; border-radius:20px; cursor:pointer;">取消</button>
-    <button onclick="exportSelectedMessages()" style="padding:8px 20px; border:none; background:linear-gradient(135deg, #ffb6b9, #ff9b73); color:white; border-radius:20px; cursor:pointer; font-weight:bold;">生成记录</button>
+    <button onclick="exportSelectedMessages()" style="padding:8px 20px; border:none; background:linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color:white; border-radius:20px; cursor:pointer; font-weight:bold;">生成记录</button>
   </div>
 </div>
 
@@ -917,14 +982,42 @@
 <div id="exportResultModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:2000; align-items:center; justify-content:center;">
   <div style="background:#fff; padding:20px; border-radius:12px; width:85%; max-width:600px; height: 60vh; display:flex; flex-direction:column; box-shadow:0 4px 20px rgba(0,0,0,0.2);">
     <h3 style="margin:0 0 10px 0; color:#444; flex-shrink:0;">导出预览</h3>
-    <p style="margin:0 0 10px 0; color:#888; font-size:12px; flex-shrink:0;">您可以直接复制下方内容，或者点击按钮一键复制。</p>
-
-    <!-- 文本域 -->
-    <textarea id="exportResultInput" style="flex:1; width:100%; box-sizing:border-box; border:1px solid #ddd; border-radius:8px; padding:12px; font-size:13px; resize:none; line-height:1.6; background:#fafafa;"></textarea>
-
-    <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:15px; flex-shrink:0;">
-      <button onclick="document.getElementById('exportResultModal').style.display='none'" style="padding:8px 16px; border:none; background:#f0f0f0; border-radius:6px; cursor:pointer;">关闭</button>
-      <button id="copyResultBtn" style="padding:8px 20px; border:none; background:linear-gradient(135deg, #4cd964, #2ac1bc); color:white; border-radius:6px; cursor:pointer; font-weight:bold;">复制全部</button>
+    
+    <!-- 【新增】选项卡切换 -->
+    <div style="display:flex; gap:15px; margin-bottom:15px; flex-shrink:0; border-bottom:1px solid #eee; padding-bottom:10px;">
+      <button id="tabTextBtn" onclick="switchExportTab('text')" style="padding:8px 16px; border:none; background:transparent; color:#444; cursor:pointer; font-weight:bold; border-bottom:3px solid #4cd964;">📄 文字版</button>
+      <button id="tabImageBtn" onclick="switchExportTab('image')" style="padding:8px 16px; border:none; background:transparent; color:#999; cursor:pointer; font-weight:bold; border-bottom:3px solid transparent; transition: all 0.2s;">🖼️ 图片版</button>
+    </div>
+    
+    <!-- 文字版容器 -->
+    <div id="exportTextContainer" style="flex:1; display:flex; flex-direction:column;">
+      <p style="margin:0 0 10px 0; color:#888; font-size:12px; flex-shrink:0;">您可以直接复制下方内容，或者点击按钮一键复制。</p>
+      <textarea id="exportResultInput" style="flex:1; width:100%; box-sizing:border-box; border:1px solid #ddd; border-radius:8px; padding:12px; font-size:13px; resize:none; line-height:1.6; background:#fafafa;"></textarea>
+      <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:15px; flex-shrink:0;">
+        <button onclick="document.getElementById('exportResultModal').style.display='none'" style="padding:8px 16px; border:none; background:#f0f0f0; border-radius:6px; cursor:pointer;">关闭</button>
+        <button id="copyResultBtn" style="padding:8px 20px; border:none; background:linear-gradient(135deg, #4cd964, #2ac1bc); color:white; border-radius:6px; cursor:pointer; font-weight:bold;">复制全部</button>
+      </div>
+    </div>
+    
+    <!-- 图片版容器 -->
+    <div id="exportImageContainer" style="flex:1; display:none; flex-direction:column; min-height:0;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-shrink:0;">
+        <p style="margin:0; color:#888; font-size:12px;">生成的图片预览（与聊天界面一致，可滑动查看全部）</p>
+        <label style="display:flex; align-items:center; gap:6px; color:#666; font-size:12px; cursor:pointer;">
+          <input type="checkbox" id="hideChatNameCheckbox" onchange="regenerateExportImage()" style="cursor:pointer;">
+          <span>不显示角色名</span>
+        </label>
+      </div>
+      <div id="exportImagePreview" style="flex:1; overflow-x:hidden; overflow-y:auto; border:1px solid #ddd; border-radius:8px; background:#f5f5f5; padding:8px; display:flex; justify-content:center; align-items:flex-start; min-height:0;">
+        <div id="exportImageWrapper" style="position:relative; transition:all 0.2s;">
+            <div id="exportImageContent" style="position:absolute; top:0; left:0; background:white; box-shadow:0 2px 10px rgba(0,0,0,0.1); width:430px; overflow:hidden; transform-origin:top left;"></div>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:15px; flex-shrink:0;">
+        <button onclick="document.getElementById('exportResultModal').style.display='none'" style="padding:8px 16px; border:none; background:#f0f0f0; border-radius:6px; cursor:pointer;">关闭</button>
+        <button id="copyImageBtn" style="padding:8px 20px; border:none; background:linear-gradient(135deg, #4cd964, #2ac1bc); color:white; border-radius:6px; cursor:pointer; font-weight:bold;">复制图片</button>
+        <button id="downloadImageBtn" style="padding:8px 20px; border:none; background:linear-gradient(135deg, #5b7cfa, #748ffc); color:white; border-radius:6px; cursor:pointer; font-weight:bold;">下载图片</button>
+      </div>
     </div>
   </div>
 </div>
@@ -948,11 +1041,11 @@
 <!-- 【最终的、绝对正确的 <script> 标签】-->
 <script>
   // --- 1. 核心状态 ---
-  const pathParts = window.location.pathname.split('/');
-  // 判断是否为群聊 (URL包含 /group/)
-  const isGroupMode = pathParts.includes('group');
+  const pathParts = window.location.pathname.split('/').filter(Boolean);
+  // 判断是否为群聊 (URL包含 group)
+  const isGroupMode = window.location.pathname.includes('/group/');
   // 获取 ID (如果是群聊则是 group_id，单聊则是 char_id)
-  const currentId = pathParts.pop();
+  const currentId = pathParts[pathParts.length - 1];
 
   console.log(`Mode: ${isGroupMode ? 'Group' : 'Single'}, ID: ${currentId}`);
 
@@ -964,6 +1057,7 @@
   let aiLanguage = 'ja';  // 拍一拍展示语言：ja=日语 zh=中文
   // 当前用户姓名（从 /api/user/profile_settings 获取）
   let currentUserName = 'User';
+  window.PAGE_LOAD_TIME = Date.now();
 
   // API 路径前缀生成器
   function getApiPrefix() {
@@ -1216,7 +1310,47 @@
         document.getElementById('translation-input-container').style.display = 'none';
       }
 
+      // --- 【新增】加载并应用聊天背景 ---
+      await loadAndApplyChatBackground();
+
     } catch (e) { console.error("UI加载失败", e); }
+  }
+
+  // 【新增】聊天背景应用逻辑
+  async function loadAndApplyChatBackground() {
+    try {
+        const url = isGroupMode ? `/api/group/${currentId}/chat_background` : `/api/${currentId}/chat_background`;
+        const res = await fetch(url);
+        if (res.ok) {
+            const bgConfig = await res.json();
+            if (bgConfig && bgConfig.filename) {
+                const bgUrl = isGroupMode ? `/group_backgrounds/${currentId}/${bgConfig.filename}` : `/char_backgrounds/${currentId}/${bgConfig.filename}`;
+                document.body.style.backgroundImage = `url(${bgUrl})`;
+                document.body.style.backgroundSize = 'cover';
+                document.body.style.backgroundPosition = 'center';
+                document.body.style.backgroundAttachment = 'fixed';
+            } else {
+                // 如果没有角色背景，尝试应用全局背景
+                applyGlobalBackground();
+            }
+        } else {
+            applyGlobalBackground();
+        }
+    } catch (e) {
+        console.warn("Failed to load chat background:", e);
+        applyGlobalBackground();
+    }
+  }
+
+  function applyGlobalBackground() {
+    const globalBg = localStorage.getItem('current_theme_bg');
+    if (globalBg && globalBg !== 'none') {
+        const url = globalBg.includes('/') ? globalBg : `/theme_backgrounds/${globalBg}`;
+        document.body.style.backgroundImage = `url(${url})`;
+        document.body.style.backgroundSize = 'cover';
+        document.body.style.backgroundPosition = 'center';
+        document.body.style.backgroundAttachment = 'fixed';
+    }
   }
 
   function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
@@ -1395,27 +1529,31 @@
     group.dataset.sender = role;
 
     // --- 头像与名字处理 ---
-    let avatarUrl = '/static/avatar_assistant.png'; // 默认
+    let avatarUrl = '/static/default_avatar.png'; // 默认
     let displayName = '';
 
     if (isUser) {
       // 用户自己的头像，走后端 /user_avatar（内部按 user_id 找 users/<user_id>/avatar.*）
-      avatarUrl = '/user_avatar';
+      avatarUrl = '/user_avatar?t=' + (window.PAGE_LOAD_TIME || Date.now());
     } else {
       // 如果是群聊，role 其实是 char_id (比如 'kunigami')
       if (isGroupMode && groupMembers[role]) {
-        avatarUrl = groupMembers[role].avatar;
+        avatarUrl = groupMembers[role].avatar || '/static/default_avatar.png';
         displayName = groupMembers[role].remark || groupMembers[role].name;
       } else if (!isGroupMode) {
         // 单聊
-        avatarUrl = currentConfig.avatar;
+        avatarUrl = currentConfig.avatar || '/static/default_avatar.png';
       }
     }
+
+    // --- 【修正】应用 COS 转换 ---
+    const finalAvatarUrl = window.getCosUrl ? window.getCosUrl(avatarUrl) : avatarUrl;
 
     // 创建头像
     const avatar = document.createElement('img');
     avatar.classList.add('avatar-img');
-    avatar.src = avatarUrl;
+    avatar.setAttribute('crossorigin', 'anonymous'); // 【修复】开启跨域，防止污染画布
+    avatar.src = finalAvatarUrl;
 
     // 【新增】添加点击事件
     avatar.style.cursor = 'pointer'; // 鼠标放上去变手型
@@ -1501,6 +1639,7 @@
         bubble.classList.add('bubble-sticker');
         const img = document.createElement('img');
         img.className = 'sticker-msg-img';
+        img.setAttribute('crossorigin', 'anonymous'); // 【修复】开启跨域，防止污染画布
         
         if (!isSticker) {
             img.style.maxWidth = '200px';
@@ -1738,13 +1877,17 @@
       contentRow.appendChild(avatar);
       contentRow.appendChild(stack);
       if (tickles.length > 0) {
-        const tickleRow = document.createElement('div');
-        tickleRow.className = 'tickle-row';
         const senderRole = isUser ? 'user' : 'assistant';
         const senderId = isUser ? 'user' : role;
-        const tickleText = tickles.map(t => formatTickleText(t, senderRole, senderId)).filter(Boolean).join(' ');
-        tickleRow.appendChild(document.createTextNode(tickleText));
-        group.appendChild(tickleRow);
+        tickles.forEach(t => {
+          const tickleText = formatTickleText(t, senderRole, senderId);
+          if (tickleText) {
+            const tickleRow = document.createElement('div');
+            tickleRow.className = 'tickle-row';
+            tickleRow.appendChild(document.createTextNode(tickleText));
+            group.appendChild(tickleRow);
+          }
+        });
         group.appendChild(contentRow);
       } else {
         group.appendChild(contentRow);
@@ -1790,13 +1933,17 @@
         }
       }
       if (tickles.length > 0) {
-        const tickleRow = document.createElement('div');
-        tickleRow.className = 'tickle-row';
         const senderRole = isUser ? 'user' : 'assistant';
         const senderId = isUser ? 'user' : role;
-        const tickleText = tickles.map(t => formatTickleText(t, senderRole, senderId)).filter(Boolean).join(' ');
-        tickleRow.appendChild(document.createTextNode(tickleText));
-        group.insertBefore(tickleRow, group.firstChild);
+        tickles.forEach(t => {
+          const tickleText = formatTickleText(t, senderRole, senderId);
+          if (tickleText) {
+            const tickleRow = document.createElement('div');
+            tickleRow.className = 'tickle-row';
+            tickleRow.appendChild(document.createTextNode(tickleText));
+            group.appendChild(tickleRow);
+          }
+        });
       }
     }
 
@@ -1969,6 +2116,7 @@
           body: JSON.stringify({message: tickleMsg})
         });
         const data = await res.json();
+        if (data.affinity_delta) showAffinityToast(data.affinity_delta);
         if (data.error === 'consecutive_tickle') {
           userBubbleElement?.remove();
           alert(data.message || '不可连续拍一拍同一人，请稍后再试');
@@ -2066,6 +2214,9 @@
             body: JSON.stringify({message: originalText})
           });
           const data = await res.json();
+
+          // 好感度变动提示
+          if (data.affinity_delta) showAffinityToast(data.affinity_delta);
 
           // 2. 【关键】请求成功后，给刚才抓住的气泡补票
           if (data.user_id && userBubbleElement) {
@@ -2642,7 +2793,7 @@
           if (isGroupMode) {
             // --- 群聊模式：去 groupMembers 里查 ---
             if (groupMembers && groupMembers[senderId]) {
-              name = groupMembers[senderId].name;
+              name = groupMembers[senderId].remark || groupMembers[senderId].name;
             } else {
               name = senderId; // 查不到就显示ID
             }
@@ -2689,8 +2840,245 @@
 
       // --- 【修改】显示弹窗，而不是直接复制 ---
       exportResultInput.value = resultText.trim();
+      
+      // 【新增】同时生成图片版的HTML
+      generateExportImageContent();
+      
       exportResultModal.style.display = 'flex';
     }
+
+    // 【新增】选项卡切换函数
+    function switchExportTab(tab) {
+      const textContainer = document.getElementById('exportTextContainer');
+      const imageContainer = document.getElementById('exportImageContainer');
+      const textBtn = document.getElementById('tabTextBtn');
+      const imageBtn = document.getElementById('tabImageBtn');
+      
+      if (tab === 'text') {
+        textContainer.style.display = 'flex';
+        imageContainer.style.display = 'none';
+        textBtn.style.color = '#444';
+        textBtn.style.borderBottomColor = '#4cd964';
+        imageBtn.style.color = '#999';
+        imageBtn.style.borderBottomColor = 'transparent';
+      } else {
+        textContainer.style.display = 'none';
+        
+        imageContainer.style.visibility = 'hidden';
+        imageContainer.style.display = 'flex';
+        
+        textBtn.style.color = '#999';
+        textBtn.style.borderBottomColor = 'transparent';
+        imageBtn.style.color = '#444';
+        imageBtn.style.borderBottomColor = '#4cd964';
+        
+        regenerateExportImage();
+        setTimeout(() => {
+           imageContainer.style.visibility = 'visible';
+        }, 120);
+      }
+    }
+    
+    // 【新增】重新生成导出图片（用于复选框状态变化）
+    function regenerateExportImage() {
+      const hideCharName = document.getElementById('hideChatNameCheckbox').checked;
+      generateExportImageContent(hideCharName);
+    }
+    
+    // 【新增】应用响应式缩放，使图片等比缩小适应预览框宽度，并修改外层容器高度
+    function applyResponsiveScale() {
+      const preview = document.getElementById('exportImagePreview');
+      const wrapper = document.getElementById('exportImageWrapper');
+      const content = document.getElementById('exportImageContent');
+      
+      if (!preview || !wrapper || !content) return;
+      
+      const containerStyle = window.getComputedStyle(preview);
+      const paddingLeft = parseFloat(containerStyle.paddingLeft);
+      const paddingRight = parseFloat(containerStyle.paddingRight);
+      const availableWidth = preview.clientWidth - (paddingLeft + paddingRight);
+      
+      const contentWidth = 430;
+      let scale = availableWidth / contentWidth;
+      
+      // Allow it to only shrink or grow correctly for the layout, but bound it decently.
+      scale = Math.min(1, Math.max(0.3, scale));
+      
+      // Explicitly center within wrapper with a left adjustment.
+      content.style.transformOrigin = '0 0'; // ensure top-left origin
+      content.style.transform = `scale(${scale})`;
+      
+      const originalHeight = content.scrollHeight; // Use scrollHeight for robust content size
+      if (originalHeight > 0) {
+        wrapper.style.width = (contentWidth * scale) + 'px';
+        wrapper.style.height = (originalHeight * scale) + 'px';
+      }
+    }
+    
+    // 【新增】生成图片版本的HTML内容
+    async function generateExportImageContent(hideCharName = false) {
+      const selectedEls = Array.from(document.querySelectorAll('.message-group.selected'));
+      if (selectedEls.length === 0) return;
+      
+      selectedEls.sort((a, b) => {
+        return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
+      });
+      
+      // 确定要显示的名字
+      let displayName = currentConfig.remark || currentConfig.name || charConfig.name || '聊天';
+      if (hideCharName) {
+        displayName = '●●●●●';
+      }
+      
+      // 获取真实的header元素并克隆
+      const headerEl = document.querySelector('.chat-header');
+      let headerHtml = '';
+      if (headerEl) {
+        const clonedHeader = headerEl.cloneNode(true);
+        const nameEl = clonedHeader.querySelector('.header-name');
+        if (nameEl) nameEl.textContent = displayName;
+        clonedHeader.querySelectorAll('button').forEach(btn => {
+          btn.disabled = true;
+          btn.style.opacity = '0.5';
+        });
+        
+        // 确保 header 中的图片支持 CORS 并强刷缓存
+        clonedHeader.querySelectorAll('img').forEach(img => {
+            img.setAttribute('crossorigin', 'anonymous');
+            if (img.src && !img.src.startsWith('data:')) {
+                const url = new URL(img.src, window.location.href);
+                // 使用更强的随机参数，确保每一次导出都是全新的请求，彻底避开旧缓存
+                url.searchParams.set('x-export-v', Date.now() + Math.random()); 
+                img.src = url.toString();
+            }
+        });
+        
+        const tempDiv = document.createElement('div');
+        tempDiv.appendChild(clonedHeader);
+        headerHtml = tempDiv.innerHTML;
+      }
+      
+      // 获取当前页面的背景设置
+      const currentBg = window.getComputedStyle(document.body).backgroundImage;
+      const currentBgColor = window.getComputedStyle(document.body).backgroundColor;
+
+      // 生成聊天内容区域
+      // 【关键】显式应用背景色和背景图到导出容器，并处理背景图跨域
+      let messagesHtml = `<div style="background-color: ${currentBgColor}; background-image: ${currentBg}; background-size: cover; background-position: center; background-attachment: scroll; padding: 16px; flex: 1; position: relative;">`;
+      
+      let lastDateStr = "";
+      const weekDays = ['日', '月', '火', '水', '木', '金', '土'];
+      
+      selectedEls.forEach((group) => {
+        const ts = group.dataset.timestamp;
+        if (!ts) return;
+        const dateObj = new Date(ts);
+        const dateStr = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+        
+        if (dateStr !== lastDateStr) {
+          const weekDay = weekDays[dateObj.getDay()];
+          messagesHtml += `<div style="text-align: center; color: #999; font-size: 12px; margin: 15px 0 10px 0;">${dateStr}（${weekDay}）</div>`;
+          lastDateStr = dateStr;
+        }
+        
+        const clonedGroup = group.cloneNode(true);
+        clonedGroup.classList.remove('selected');
+        if (hideCharName) {
+          clonedGroup.querySelectorAll('.bubble-name').forEach(bn => bn.style.display = 'none');
+        }
+        
+        // 确保消息中的所有图片支持 CORS 并刷新缓存
+        clonedGroup.querySelectorAll('img').forEach(img => {
+            img.setAttribute('crossorigin', 'anonymous');
+            if (img.src && !img.src.startsWith('data:')) {
+                const url = new URL(img.src, window.location.href);
+                url.searchParams.set('x-export-v', Date.now() + Math.random()); 
+                img.src = url.toString();
+            }
+        });
+
+        const tempDiv = document.createElement('div');
+        tempDiv.appendChild(clonedGroup);
+        messagesHtml += tempDiv.innerHTML;
+      });
+      
+      messagesHtml += '</div>';
+      
+      // 获取真实的input-container并克隆
+      const inputContainerEl = document.querySelector('.input-container');
+      let footerHtml = '';
+      if (inputContainerEl) {
+        const clonedFooter = inputContainerEl.cloneNode(true);
+        clonedFooter.querySelectorAll('button').forEach(btn => btn.style.display = 'none');
+        const textarea = clonedFooter.querySelector('textarea');
+        if (textarea) { textarea.disabled = true; textarea.value = ""; }
+        const tempDiv = document.createElement('div');
+        tempDiv.appendChild(clonedFooter);
+        footerHtml = `<div style="border-top: 1px solid var(--primary-lighter);">${tempDiv.innerHTML}</div>`;
+      }
+      
+      // 组合完整的布局
+      let fullHtml = `<div id="export-capture-target" style="font-family: 'Segoe UI', 'PingFang SC', sans-serif; width: 430px; height: auto; display: flex; flex-direction: column; background: white;">
+        ${headerHtml}
+        ${messagesHtml}
+        ${footerHtml}
+      </div>`;
+      
+      const imageContent = document.getElementById('exportImageContent');
+      imageContent.innerHTML = fullHtml;
+      
+      // 等待图片加载完成后计算高度并缩放，【新增】预将其转换为 Base64，彻底绝杀渲染时由于 COS 没有配置 CORS 导致的 Tainted 错误
+      const images = Array.from(imageContent.querySelectorAll('img'));
+      if (images.length > 0) {
+        Promise.all(images.map(img => {
+          return new Promise(resolve => {
+            if (!img.src || img.src.startsWith('data:')) return resolve();
+            
+            const tempImg = new Image();
+            tempImg.crossOrigin = 'anonymous'; // 尝试跨域加载
+            tempImg.onload = () => {
+              const canvas = document.createElement('canvas');
+              canvas.width = tempImg.width || 40;
+              canvas.height = tempImg.height || 40;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(tempImg, 0, 0);
+              try {
+                img.src = canvas.toDataURL('image/png'); // 提取安全数据
+                img.removeAttribute('crossorigin');      // 移除跨域属性
+              } catch(e) {
+                // 如果仍然由于远端禁用跨域返回污染，将其降级为同源默认头像
+                img.src = '/static/default_avatar.png';
+                img.removeAttribute('crossorigin');
+              }
+              resolve();
+            };
+            tempImg.onerror = () => {
+              // 失败降级
+              img.src = '/static/default_avatar.png';
+              img.removeAttribute('crossorigin');
+              resolve();
+            };
+            // 设置一个随机数强刷避免缓存污染
+            const fetchUrl = new URL(img.src, window.location.href);
+            fetchUrl.searchParams.set('t2', Date.now() + Math.random());
+            tempImg.src = fetchUrl.toString();
+          });
+        })).then(() => {
+          setTimeout(applyResponsiveScale, 150);
+        });
+      } else {
+        setTimeout(applyResponsiveScale, 100);
+      }
+    }
+    
+    // 监听窗口尺寸变化，更新预览缩放
+    window.addEventListener('resize', () => {
+      const modal = document.getElementById('exportResultModal');
+      // 只有在弹窗打开的状态下才重新计算缩放
+      if (modal && modal.style.display !== 'none') {
+        applyResponsiveScale();
+      }
+    });
 
     // 4. 弹窗内的复制按钮事件
     document.getElementById('copyResultBtn').addEventListener('click', () => {
@@ -2953,6 +3341,8 @@
 
             if (!r.ok) throw new Error('Network error');
             const data = await r.json();
+
+            if (data.affinity_delta) showAffinityToast(data.affinity_delta);
             
             if (data.error) {
               if (data.error === 'consecutive_tickle') {
@@ -2994,7 +3384,16 @@
                       timestamp: t
                     }, 'append');
                     chatContainer.scrollTop = chatContainer.scrollHeight;
-                  }
+  }
+
+  function showAffinityToast(delta) {
+    const el = document.createElement('div');
+    el.className = 'affinity-toast ' + (delta > 0 ? 'positive' : 'negative');
+    const sign = delta > 0 ? '+' : '';
+    el.textContent = `亲密度 ${sign}${delta}`;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3000);
+  }
                 } else {
                   await (typeof sleep === 'function' ? sleep(800) : Promise.resolve());
                   renderMessageGroup({
@@ -3166,7 +3565,7 @@
       const uploadLink = document.createElement('a');
       uploadLink.href = '/stickers/upload';
       uploadLink.textContent = '上传表情包至公开';
-      uploadLink.style.cssText = 'flex-shrink:0; margin-left:10px; font-size:12px; color:#ffb6b9;';
+      uploadLink.style.cssText = 'flex-shrink:0; margin-left:10px; font-size:12px; color:var(--primary-color);';
       searchRow.appendChild(uploadLink);
       contentView.appendChild(searchRow);
       const gridWrap = document.createElement('div');
@@ -3420,7 +3819,7 @@
         } else {
           alert('保存失败');
         }
-      } catch(e) { alert('网络错误'); }
+      } catch(e) { alert('网络或异常错误: ' + e.message); console.error(e); }
     }
 
   function goToMemory() {
@@ -3491,6 +3890,8 @@
     try {
       const res = await fetch(`${getApiPrefix()}/regenerate`, { method: 'POST' });
       const data = await res.json();
+
+      if (data.affinity_delta) showAffinityToast(data.affinity_delta);
 
       if (data.status === 'success') {
         // 1. 移除旧的整组消息
@@ -3645,13 +4046,146 @@
     window.location.href = '/'; // 2. 再跳转
   }
 
-  // 当页面隐藏（切后台、关闭、跳转）时，自动触发
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') {
-      markAsRead();
-    }
-  });
+  // 【新增】图片导出相关的按钮事件
+  // 4. 弹窗内的复制按钮事件 (文字版)
+  if (document.getElementById('copyResultBtn')) {
+    document.getElementById('copyResultBtn').addEventListener('click', () => {
+      const text = document.getElementById('exportResultInput').value;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(() => {
+          const originalText = document.getElementById('copyResultBtn').textContent;
+          document.getElementById('copyResultBtn').textContent = "复制成功！";
+          setTimeout(() => {
+            document.getElementById('copyResultBtn').textContent = originalText;
+          }, 1500);
+        });
+      } else {
+        document.getElementById('exportResultInput').select();
+        document.execCommand('copy');
+        alert("已尝试复制，如果失败请手动复制文本框内容。");
+      }
+    });
+  }
+  
+  // 复制图片按钮事件
+  if (document.getElementById('copyImageBtn')) {
+    document.getElementById('copyImageBtn').addEventListener('click', async () => {
+      const imageContent = document.getElementById('exportImageContent');
+      try {
+        if (typeof html2canvas === 'undefined') {
+          alert('图片生成库加载中，请稍候再试');
+          return;
+        }
+        
+        const cloneContent = imageContent.cloneNode(true);
+        cloneContent.style.transform = 'none';
+        cloneContent.style.position = 'absolute';
+        cloneContent.style.top = '-9999px';
+        cloneContent.style.left = '-9999px';
+        document.body.appendChild(cloneContent);
+
+        const canvas = await html2canvas(cloneContent, {
+          scale: 2,
+          logging: false,
+          backgroundColor: null,
+          allowTaint: false,
+          useCORS: true,
+          proxy: null,
+          width: 430,
+          windowWidth: 430,
+          scrollX: 0,
+          scrollY: 0,
+          onclone: (doc) => {
+              doc.querySelectorAll('img').forEach(img => {
+                  img.setAttribute('crossorigin', 'anonymous');
+              });
+          }
+        });
+
+        document.body.removeChild(cloneContent);
+
+        canvas.toBlob(function(blob) {
+          if (!blob) {
+            alert('生成图片失败，请尝试下载后手动使用。');
+            return;
+          }
+          navigator.clipboard.write([
+            new ClipboardItem({
+              'image/png': blob
+            })
+          ]).then(() => {
+            const originalText = document.getElementById('copyImageBtn').textContent;
+            document.getElementById('copyImageBtn').textContent = "复制成功！";
+            setTimeout(() => {
+              document.getElementById('copyImageBtn').textContent = originalText;
+            }, 1500);
+          }).catch(err => {
+            console.error(err);
+            alert('复制失败，请尝试下载后手动使用。');
+          });
+        });
+      } catch (err) {
+        alert('生成图片失败：' + err.message);
+      }
+    });
+  }
+  
+  // 下载图片按钮事件
+  if (document.getElementById('downloadImageBtn')) {
+    document.getElementById('downloadImageBtn').addEventListener('click', async () => {
+      const imageContent = document.getElementById('exportImageContent');
+      try {
+        if (typeof html2canvas === 'undefined') {
+          alert('图片生成库加载中，请稍候再试');
+          return;
+        }
+        
+        const cloneContent = imageContent.cloneNode(true);
+        cloneContent.style.transform = 'none';
+        cloneContent.style.position = 'absolute';
+        cloneContent.style.top = '-9999px';
+        cloneContent.style.left = '-9999px';
+        document.body.appendChild(cloneContent);
+
+        const canvas = await html2canvas(cloneContent, {
+          scale: 2,
+          logging: false,
+          backgroundColor: null,
+          allowTaint: false,
+          useCORS: true,
+          proxy: null,
+          width: 430,
+          windowWidth: 430,
+          scrollX: 0,
+          scrollY: 0,
+          onclone: (doc) => {
+              doc.querySelectorAll('img').forEach(img => {
+                  img.setAttribute('crossorigin', 'anonymous');
+              });
+          }
+        });
+
+        document.body.removeChild(cloneContent);
+        
+        const link = document.createElement('a');
+        link.href = canvas.toDataURL('image/png');
+        link.download = `chat_export_${new Date().getTime()}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        const originalText = document.getElementById('downloadImageBtn').textContent;
+        document.getElementById('downloadImageBtn').textContent = "下载成功！";
+        setTimeout(() => {
+          document.getElementById('downloadImageBtn').textContent = originalText;
+        }, 1500);
+      } catch (err) {
+        alert('下载图片失败：' + err.message);
+      }
+    });
+  }
 </script>
+
 
 </body>
 </html>
