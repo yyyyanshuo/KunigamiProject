@@ -152,7 +152,7 @@ def _update_user_affinity(char_id, delta, current_user_id=None):
         print(f"[Agent Action Error] Update Affinity: {e}")
 
 def _update_sleep_time(char_id, sleep_range, current_user_id=None):
-    """更新睡眠时间段 — 写入 ds_start / ds_end / deep_sleep"""
+    """更新睡眠时间段 — 仅写入 ds_start / ds_end，不动 deep_sleep 开关"""
     try:
         from app import _get_characters_config_file, safe_save_json
         cfg_file = _get_characters_config_file()
@@ -170,7 +170,6 @@ def _update_sleep_time(char_id, sleep_range, current_user_id=None):
         if len(parts) == 2:
             data[char_id]["ds_start"] = parts[0].strip()
             data[char_id]["ds_end"] = parts[1].strip()
-            data[char_id]["deep_sleep"] = True
             safe_save_json(cfg_file, data)
             print(f"[Agent Action] {char_id} deep_sleep {parts[0].strip()}-{parts[1].strip()} written to {cfg_file}")
         else:
