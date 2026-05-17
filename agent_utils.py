@@ -108,50 +108,69 @@ def _update_persona_param(char_id, param_name, value):
     try:
         from app import _get_characters_config_file, safe_save_json
         cfg_file = _get_characters_config_file()
-        if os.path.exists(cfg_file):
-            with open(cfg_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+        if not os.path.exists(cfg_file):
+            print(f"[Agent Action] WARNING: config file not found: {cfg_file}")
+            return
+        with open(cfg_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
 
-            if char_id in data:
-                if param_name == "emotion":
-                    data[char_id]["emotion"] = float(value)
-                elif param_name == "personality":
-                    data[char_id]["moments_index"] = float(value)
-                safe_save_json(cfg_file, data)
+        if char_id not in data:
+            print(f"[Agent Action] WARNING: char_id '{char_id}' not found in {cfg_file}, keys: {list(data.keys())[:5]}")
+            return
+
+        if param_name == "emotion":
+            data[char_id]["emotion"] = float(value)
+            print(f"[Agent Action] {char_id} emotion -> {value} written to {cfg_file}")
+        elif param_name == "personality":
+            data[char_id]["moments_index"] = float(value)
+            print(f"[Agent Action] {char_id} moments_index -> {value} written to {cfg_file}")
+        safe_save_json(cfg_file, data)
     except Exception as e:
-        print(f"Update Persona Param Error: {e}")
+        print(f"[Agent Action Error] Update Persona Param: {e}")
 
 def _update_user_affinity(char_id, delta, current_user_id=None):
     """累加亲密度到 characters.json 中"""
     try:
         from app import _get_characters_config_file, safe_save_json
         cfg_file = _get_characters_config_file()
-        if os.path.exists(cfg_file):
-            with open(cfg_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            
-            if char_id in data:
-                current_intimacy = float(data[char_id].get("intimacy", 60)) # 默认给个60
-                new_intimacy = max(0, min(100, current_intimacy + delta)) # 限制在 0-100 之间
-                data[char_id]["intimacy"] = new_intimacy
-                safe_save_json(cfg_file, data)
+        if not os.path.exists(cfg_file):
+            print(f"[Agent Action] WARNING: config file not found: {cfg_file}")
+            return
+        with open(cfg_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        if char_id not in data:
+            print(f"[Agent Action] WARNING: char_id '{char_id}' not found in {cfg_file}")
+            return
+
+        current_intimacy = float(data[char_id].get("intimacy", 60))
+        new_intimacy = max(0, min(100, current_intimacy + delta))
+        data[char_id]["intimacy"] = new_intimacy
+        safe_save_json(cfg_file, data)
+        print(f"[Agent Action] {char_id} intimacy {current_intimacy} -> {new_intimacy} written to {cfg_file}")
     except Exception as e:
-        print(f"Update Affinity Error: {e}")
+        print(f"[Agent Action Error] Update Affinity: {e}")
 
 def _update_sleep_time(char_id, sleep_range, current_user_id=None):
     """更新睡眠时间段"""
     try:
         from app import _get_characters_config_file, safe_save_json
         cfg_file = _get_characters_config_file()
-        if os.path.exists(cfg_file):
-            with open(cfg_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            
-            if char_id in data:
-                data[char_id]["deep_sleep_range"] = sleep_range
-                safe_save_json(cfg_file, data)
+        if not os.path.exists(cfg_file):
+            print(f"[Agent Action] WARNING: config file not found: {cfg_file}")
+            return
+        with open(cfg_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        if char_id not in data:
+            print(f"[Agent Action] WARNING: char_id '{char_id}' not found in {cfg_file}")
+            return
+
+        data[char_id]["deep_sleep_range"] = sleep_range
+        safe_save_json(cfg_file, data)
+        print(f"[Agent Action] {char_id} deep_sleep_range -> {sleep_range} written to {cfg_file}")
     except Exception as e:
-        print(f"Update Sleep Time Error: {e}")
+        print(f"[Agent Action Error] Update Sleep Time: {e}")
 
 def _update_relationship(char_id, target, value):
     """更新 2_relationship.json"""
