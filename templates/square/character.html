@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>角色详情</title>
+    <script src="/static/theme-loader.js"></script>
+    <style>
+        :root {
+            --primary-color: #ffb6b9;
+            --primary-dark: #f09598;
+            --bg-color: #f5f7fa;
+            --card-bg: #ffffff;
+            --text-main: #2c3e50;
+            --text-muted: #8ca0b3;
+            --border-color: #edf1f5;
+        }
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, sans-serif; background: var(--bg-color); margin: 0; padding-bottom: 60px; overflow-x: hidden; width: 100%; }
+                .cover { width: 100%; min-height: 220px; background: white; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.02); }
+        .avatar { width: 100px; height: 100px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 15px rgba(0,0,0,0.1); object-fit: cover; }
+        .name { font-size: 22px; font-weight: 700; margin-top: 12px; }
+        .ip-tag { background: var(--primary-color); color: white; padding: 2px 12px; border-radius: 15px; font-size: 12px; margin-top: 6px; }
+
+        .section { background: white; margin-top: 10px; padding: 20px; }
+        .section-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; border-left: 4px solid var(--primary-color); padding-left: 10px; color: var(--text-main); }
+        
+        .info-grid { display: grid; grid-template-columns: 70px 1fr; gap: 10px; font-size: 14px; }
+        .info-label { color: var(--text-muted); }
+        .tag-badge { 
+            display: inline-block; 
+            background: #f1f3f5; 
+            color: #666; 
+            padding: 2px 8px; 
+            border-radius: 4px; 
+            font-size: 11px; 
+            margin-right: 5px; 
+            margin-bottom: 5px; 
+        }
+
+        .comments-list { margin-top: 10px; }
+        .comment-item { padding: 12px 0; border-bottom: 1px solid var(--border-color); }
+        .comment-item:last-child { border-bottom: none; }
+        .comment-meta { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; display: flex; justify-content: space-between; }
+        .comment-content { font-size: 14px; line-height: 1.5; color: var(--text-main); }
+
+        .author-chars { display: flex; gap: 12px; overflow-x: auto; padding: 5px 0 10px; scrollbar-width: none; }
+        .author-chars::-webkit-scrollbar { display: none; }
+        .author-char-item { width: 70px; flex-shrink: 0; text-align: center; cursor: pointer; }
+        .author-char-item img { width: 60px; height: 60px; border-radius: 50%; margin-bottom: 5px; object-fit: cover; border: 1px solid var(--border-color); }
+        .author-char-item div { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-main); }
+
+        /* 关系图谱美化 */
+        .rel-list { display: flex; flex-direction: column; gap: 10px; }
+        .rel-item { background: #f8f9fb; padding: 12px; border-radius: 12px; border-left: 4px solid var(--primary-color); }
+        .rel-header { font-size: 13px; font-weight: 700; color: var(--text-main); margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; }
+        .rel-role-label { background: var(--primary-rgba-light); color: var(--primary-dark); font-size: 10px; padding: 1px 6px; border-radius: 4px; margin-left: 6px; }
+        .rel-score-badge { font-size: 10px; color: var(--text-muted); font-weight: normal; }
+        .rel-desc-text { font-size: 13px; color: #666; line-height: 1.4; }
+
+        .bottom-bar { position: fixed; bottom: 0; left: 0; width: 100%; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); border-top: 1px solid var(--border-color); display: flex; padding: 10px 15px; align-items: center; box-shadow: 0 -2px 10px rgba(0,0,0,0.05); z-index: 100; box-sizing: border-box; }
+        .btn-add { background: var(--primary-color); color: white; border: none; padding: 10px 20px; border-radius: 20px; font-weight: 600; font-size: 14px; margin-right: auto; cursor: pointer; transition: all 0.2s; }
+        .btn-add:active { transform: scale(0.95); opacity: 0.9; }
+        
+        .btn-small { 
+            padding: 5px 15px; font-size: 12px; border-radius: 15px; border: 1px solid var(--primary-color); 
+            background: white; color: var(--primary-color); cursor: pointer; font-weight: 600;
+        }
+        .btn-danger { border-color: #ff6b6b; color: #ff6b6b; }
+        .action-btns { display: flex; gap: 18px; }
+        .action-item { display: flex; flex-direction: column; align-items: center; color: var(--text-muted); font-size: 10px; cursor: pointer; min-width: 30px; }
+        .action-item svg { width: 22px; height: 22px; margin-bottom: 2px; }
+        .action-item.active { color: var(--primary-color); }
+        .action-item.active svg { fill: var(--primary-color); }
+
+        pre { background: #f8f9fa; padding: 12px; border-radius: 8px; font-size: 13px; color: #444; overflow-x: auto; margin: 0; border: 1px solid var(--border-color); }
+
+        /* 评论弹窗 */
+        .modal-mask {
+            position: fixed; inset: 0; z-index: 200; display: none;
+            align-items: center; justify-content: center;
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px);
+        }
+        .modal-card {
+            background: #fff; border-radius: 18px; padding: 24px; width: 85%; max-width: 400px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+            animation: modal-fade-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        @keyframes modal-fade-in {
+            to { transform: translateY(0) scale(1); opacity: 1; }
+        }
+        .modal-title { font-size: 18px; font-weight: 700; margin-bottom: 16px; text-align: center; }
+        .modal-textarea {
+            width: 100%; min-height: 100px; padding: 12px;
+            background: #f8f9fb; border: 1px solid var(--border-color);
+            border-radius: 12px; font-size: 15px; resize: vertical; box-sizing: border-box;
+            font-family: inherit; outline: none;
+        }
+        .modal-textarea:focus { background: #fff; border-color: var(--primary-color); }
+        .modal-char-count { font-size: 12px; color: var(--text-muted); text-align: right; margin-top: 6px; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px; }
+        .btn-cancel {
+            padding: 8px 20px; border: none; border-radius: 10px; background: #f1f3f5; color: #666;
+            font-size: 14px; font-weight: 600; cursor: pointer;
+        }
+        .btn-submit {
+            padding: 8px 20px; border: none; border-radius: 10px; background: var(--primary-color); color: white;
+            font-size: 14px; font-weight: 600; cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div style="position: absolute; top: 15px; left: 15px; z-index: 10;">
+        <a href="/square" style="color: var(--text-main); text-decoration: none; font-size: 24px;">←</a>
+    </div>
+
+    <div class="cover">
+        <img id="char-avatar" class="avatar" src="/static/default_avatar.png">
+        <div id="char-name" class="name">加载中...</div>
+        <div id="char-ip" class="ip-tag">加载中...</div>
+        
+        <div id="author-controls" style="display:none; gap:10px; margin-top: 12px;">
+            <button class="btn-small" onclick="editCharacter()">编辑作品</button>
+            <button class="btn-small btn-danger" onclick="deleteCharacter()">删除作品</button>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-title">基础资料</div>
+        <div class="info-grid">
+            <div class="info-label">年龄</div>
+            <div id="char-age">-</div>
+            <div class="info-label">标签</div>
+            <div id="char-tags">-</div>
+            <div class="info-label">角色ID</div>
+            <div id="char-id-display">-</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-title">角色人设</div>
+        <div id="char-base-persona" style="font-size: 14px; line-height: 1.6; white-space: pre-wrap; color: #444;">加载中...</div>
+    </div>
+
+    <div class="section">
+        <div class="section-title">关系图谱</div>
+        <div id="char-rel-graph" class="rel-list">
+            <div style="font-size: 12px; color: var(--text-muted);">暂无数据</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-title">该作者的其他角色</div>
+        <div id="author-chars-container" class="author-chars">
+            <div style="font-size: 12px; color: var(--text-muted);">加载中...</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-title">匿名评论</div>
+        <div id="comments-container" class="comments-list">
+            <div style="font-size: 12px; color: var(--text-muted);">暂无评论</div>
+        </div>
+    </div>
+
+    <div class="bottom-bar">
+        <button class="btn-add" id="add-local-btn" onclick="addToLocal()">添加到本地</button>
+        <div class="action-btns">
+            <div class="action-item" id="like-item" onclick="likeCharacter()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>
+                <span id="like-count">0</span>
+            </div>
+            <div class="action-item" id="fav-item" onclick="toggleFavorite()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
+                <span id="fav-count">0</span>
+            </div>
+            <div class="action-item" onclick="showCommentPrompt()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                <span id="comment-count">0</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 评论弹窗 -->
+    <div class="modal-mask" id="commentModalMask">
+        <div class="modal-card">
+            <div class="modal-title">匿名评论</div>
+            <div class="modal-body">
+                <textarea class="modal-textarea" id="commentTextarea" placeholder="说点什么..." maxlength="500"></textarea>
+                <div class="modal-char-count" id="commentCharCount">0/500</div>
+                <div class="modal-actions">
+                    <button class="btn-cancel" onclick="closeCommentModal()">取消</button>
+                    <button class="btn-submit" onclick="submitComment()">发送</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const charId = "{{ char_id }}";
+        let currentData = null;
+
+        async function loadDetail() {
+            try {
+                const res = await fetch(`/api/square/character/${charId}`);
+                const data = await res.json();
+                if (data.error) { alert(data.error); return; }
+                
+                const char = data.character;
+                currentData = char;
+                
+                if (data.is_author) {
+                    document.getElementById('author-controls').style.display = 'flex';
+                }
+                document.getElementById('char-avatar').src = char.avatar || '/static/default_avatar.png';
+                document.getElementById('char-name').innerText = char.name;
+                document.getElementById('char-ip').innerText = char.ip || '未知作品';
+                document.getElementById('char-age').innerText = `${char.age || '未知'} (${char.no_age_increase ? '不随时间增大' : '随时间增大'})`;
+                
+                const tagContainer = document.getElementById('char-tags');
+                if (char.tags) {
+                    const tags = char.tags.split(',');
+                    tagContainer.innerHTML = tags.map(t => `<span class="tag-badge">${t.trim()}</span>`).join('');
+                } else {
+                    tagContainer.innerText = '无';
+                }
+
+                document.getElementById('char-id-display').innerText = char.id;
+                document.getElementById('char-base-persona').innerText = char.base_persona || '暂无设定';
+                
+                const relContainer = document.getElementById('char-rel-graph');
+                try {
+                    const graph = typeof char.relationship_graph === 'string' ? JSON.parse(char.relationship_graph) : char.relationship_graph;
+                    const names = Object.keys(graph);
+                    if (names.length > 0) {
+                        relContainer.innerHTML = names.map(name => {
+                            const info = graph[name];
+                            const isObj = typeof info === 'object' && info !== null;
+                            const role = isObj ? info.role : '';
+                            const score = isObj ? info.score : 1;
+                            const desc = isObj ? (info.description || info.desc || '') : info;
+                            
+                            return `
+                                <div class="rel-item">
+                                    <div class="rel-header">
+                                        <span>👤 ${name}${role ? `<span class="rel-role-label">${role}</span>` : ''}</span>
+                                        <span class="rel-score-badge">指数: ${score}</span>
+                                    </div>
+                                    <div class="rel-desc-text">${desc || '暂无描述'}</div>
+                                </div>
+                            `;
+                        }).join('');
+                    } else {
+                        relContainer.innerHTML = '<div style="font-size: 12px; color: var(--text-muted); text-align: center;">暂无数据</div>';
+                    }
+                } catch(e) {
+                    relContainer.innerHTML = `<div style="font-size: 12px; color: var(--text-muted);">${char.relationship_graph || '暂无数据'}</div>`;
+                }
+                
+                const commentContainer = document.getElementById('comments-container');
+                if (data.comments && data.comments.length > 0) {
+                    commentContainer.innerHTML = data.comments.map(c => `
+                        <div class="comment-item">
+                            <div class="comment-meta">
+                                <span>匿名用户</span>
+                                <span>${new Date(c.created_at).toLocaleDateString()}</span>
+                            </div>
+                            <div class="comment-content">${c.content}</div>
+                        </div>
+                    `).join('');
+                } else {
+                    commentContainer.innerHTML = '<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 10px;">暂无评论</div>';
+                }
+                
+                const authorCharsContainer = document.getElementById('author-chars-container');
+                if (data.other_characters && data.other_characters.length > 0) {
+                    authorCharsContainer.innerHTML = data.other_characters.map(oc => `
+                        <div class="author-char-item" onclick="location.href='/square/character/${oc.id}'">
+                            <img src="${oc.avatar}" onerror="this.src='/static/default_avatar.png'">
+                            <div>${oc.name}</div>
+                        </div>
+                    `).join('');
+                } else {
+                    authorCharsContainer.innerHTML = '<div style="font-size: 11px; color: var(--text-muted); padding: 5px;">暂无其他发布</div>';
+                }
+                
+                document.getElementById('like-count').innerText = char.likes;
+                document.getElementById('fav-count').innerText = char.favorites;
+                document.getElementById('comment-count').innerText = char.comments;
+                if(data.is_favorited) document.getElementById('fav-item').classList.add('active');
+                if(data.is_liked) document.getElementById('like-item').classList.add('active');
+            } catch(e) { console.error(e); }
+        }
+
+        function editCharacter() {
+            localStorage.setItem('edit_square_char', JSON.stringify(currentData));
+            location.href = '/square/upload?mode=edit';
+        }
+
+        async function deleteCharacter() {
+            if (!confirm("确定要删除这个作品吗？此操作不可撤销。")) return;
+            try {
+                const res = await fetch('/api/square/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: charId })
+                });
+                const data = await res.json();
+                if (data.status === 'success') { alert("删除成功"); location.href = '/square'; }
+                else { alert("删除失败: " + data.error); }
+            } catch(e) { alert("请求失败"); }
+        }
+
+        async function addToLocal() {
+            const btn = document.getElementById('add-local-btn');
+            const originalText = btn.innerText;
+            btn.innerText = "添加中...";
+            btn.disabled = true;
+            try {
+                const res = await fetch('/api/square/add_to_local', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: charId })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    alert("已成功添加到本地联系人列表！");
+                    location.href = '/';
+                } else {
+                    alert("添加失败: " + data.error);
+                }
+            } catch(e) {
+                alert("请求失败");
+            } finally {
+                btn.innerText = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        async function likeCharacter() {
+            const item = document.getElementById('like-item');
+            try {
+                const res = await fetch('/api/square/like', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: charId })
+                });
+                const data = await res.json();
+                if(data.status === 'success') {
+                    const count = document.getElementById('like-count');
+                    if(data.like_status === 'added') {
+                        item.classList.add('active');
+                        count.innerText = parseInt(count.innerText) + 1;
+                    } else {
+                        item.classList.remove('active');
+                        count.innerText = Math.max(0, parseInt(count.innerText) - 1);
+                    }
+                }
+            } catch(e) {}
+        }
+
+        async function toggleFavorite() {
+            try {
+                const res = await fetch('/api/square/favorite', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: charId })
+                });
+                const data = await res.json();
+                if(data.status === 'success') {
+                    const item = document.getElementById('fav-item');
+                    const count = document.getElementById('fav-count');
+                    if(data.favorite_status === 'added') {
+                        item.classList.add('active');
+                        count.innerText = parseInt(count.innerText) + 1;
+                    } else {
+                        item.classList.remove('active');
+                        count.innerText = Math.max(0, parseInt(count.innerText) - 1);
+                    }
+                }
+            } catch(e) {}
+        }
+
+        function showCommentPrompt() {
+            document.getElementById('commentModalMask').style.display = 'flex';
+            document.getElementById('commentTextarea').value = '';
+            document.getElementById('commentCharCount').innerText = '0/500';
+            document.getElementById('commentTextarea').focus();
+        }
+
+        function closeCommentModal() {
+            document.getElementById('commentModalMask').style.display = 'none';
+        }
+
+        async function submitComment() {
+            const content = document.getElementById('commentTextarea').value.trim();
+            if(!content) { alert("请输入内容"); return; }
+            try {
+                const res = await fetch('/api/square/comment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: charId, content })
+                });
+                const data = await res.json();
+                if(data.status === 'success') {
+                    closeCommentModal();
+                    loadDetail();
+                }
+            } catch(e) {}
+        }
+        
+        document.getElementById('commentTextarea').oninput = function() {
+            document.getElementById('commentCharCount').innerText = this.value.length + '/500';
+        };
+
+        loadDetail();
+    </script>
+</body>
+</html>

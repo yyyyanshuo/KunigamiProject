@@ -1,7 +1,7 @@
 <!-- 底部导航栏组件 -->
 <style>
     /* 占位符：防止内容被底部栏挡住 */
-    body { padding-bottom: 70px !important; }
+    body { padding-bottom: 55px !important; }
 
     .tab-bar {
         position: fixed; bottom: 0; left: 0; width: 100%;
@@ -25,8 +25,8 @@
     .tab-item svg { width: 24px; height: 24px; fill: currentColor; margin-bottom: 2px; }
     .tab-item span { font-size: 10px; font-weight: bold; }
 
-    /* 选中状态：变成粉色 */
-    .tab-item.active { color: #ffb6b9; }
+    /* 选中状态：变成主题色 */
+    .tab-item.active { color: var(--primary-color, #ffb6b9); }
     .tab-item:active { transform: scale(0.95); }
 </style>
 
@@ -43,7 +43,13 @@
         <span>朋友圈</span>
     </a>
 
-    <!-- 3. 个人主页图标 -->
+    <!-- 3. 角色广场图标 -->
+    <a href="/square" class="tab-item" id="tab-square">
+        <svg viewBox="0 0 24 24"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg>
+        <span>广场</span>
+    </a>
+
+    <!-- 4. 个人主页图标 -->
     <a href="/profile" class="tab-item" id="tab-profile">
         <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
         <span>我的</span>
@@ -58,6 +64,8 @@
             document.getElementById('tab-contacts').classList.add('active');
         } else if (path.startsWith('/moments')) {
             document.getElementById('tab-moments').classList.add('active');
+        } else if (path.startsWith('/square')) {
+            document.getElementById('tab-square').classList.add('active');
         } else if (path.startsWith('/profile')) {
             document.getElementById('tab-profile').classList.add('active');
         }
@@ -94,7 +102,7 @@
     </div>
     <div style="padding:20px 0; font-size:13px; color:#8ca0b3; line-height:1.6; text-align:center;">
       <p style="margin:0 0 8px 0;">开发者是用爱发电的卑微大学生，为了给大家提供不卡顿的 38ms 极速通道和最聪明的 AI，服务器每天都在疯狂燃烧我的余额😭</p>
-      <p style="margin:8px 0; font-weight:600; color:#ffb6b9;">如果这个角色曾经治愈过你，求老板请我喝瓶可乐续命！</p>
+      <p style="margin:8px 0; font-weight:600; color:var(--primary-color, #ffb6b9);">如果这个角色曾经治愈过你，求老板请我喝瓶可乐续命！</p>
       <p style="margin:8px 0 0 0;">你的每一分钱都会变成新功能开发的代码！</p>
     </div>
     

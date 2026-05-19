@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>上传角色</title>
+    <script src="/static/theme-loader.js"></script>
+    <style>
+        :root {
+            --primary-color: #ffb6b9;
+            --primary-dark: #f09598;
+            --bg-color: linear-gradient(180deg, #fff6f7 0%, #f7f9fc 100%);
+            --card-bg: #ffffff;
+            --text-main: #2c3e50;
+            --text-muted: #8ca0b3;
+            --border-color: #edf1f5;
+            --radius-md: 12px;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+            background: var(--bg-color);
+            margin: 0;
+            min-height: 100vh;
+            padding: 20px;
+            padding-bottom: 80px;
+            color: var(--text-main);
+        }
+        .form-card {
+            background: rgba(255,255,255,0.75);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+
+            border-radius: 24px;
+            padding: 28px;
+
+            box-shadow:
+                0 10px 30px rgba(255, 182, 185, 0.08),
+                0 2px 10px rgba(0,0,0,0.04);
+
+            border: 1px solid rgba(255,255,255,0.6);
+
+            max-width: 640px;
+            margin: 0 auto;
+        }
+        .form-group { margin-bottom: 24px; }
+        small {
+            display:block;
+            margin-top:8px;
+            color:#98a2b3;
+            line-height:1.5;
+        }
+        label {
+            display: block;
+            margin-bottom: 10px;
+
+            font-size: 13px;
+            font-weight: 700;
+
+            color: #5f6b7a;
+            letter-spacing: .3px;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 14px 16px;
+
+            border: 1.5px solid transparent;
+            background: #f7f8fc;
+
+            border-radius: 14px;
+
+            font-size: 14px;
+            transition: all .2s ease;
+
+            outline: none;
+            box-sizing: border-box;
+        }
+        input:focus,
+        textarea:focus {
+            background: white;
+            border-color: rgba(255,182,185,.8);
+
+            box-shadow:
+                0 0 0 4px rgba(255,182,185,.15);
+        }
+        .avatar-upload {
+            width: 110px;
+            height: 110px;
+            border-radius: 50%;
+
+            background:
+                linear-gradient(145deg,#fff,#f7f7f7);
+
+            border: 2px dashed rgba(255,182,185,0.5);
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            cursor: pointer;
+            overflow: hidden;
+            position: relative;
+
+            margin: 0 auto 12px;
+
+            transition: all .25s ease;
+        }
+
+        .avatar-upload:hover {
+            transform: translateY(-2px);
+            border-color: var(--primary-color);
+            box-shadow: 0 8px 24px rgba(255,182,185,.18);
+        }
+        .avatar-upload img { width: 100%; height: 100%; object-fit: cover; }
+        .btn {
+            background:
+                linear-gradient(135deg,#ffb6b9,#ff9ea3);
+
+            color: white;
+            border: none;
+
+            padding: 14px;
+            border-radius: 16px;
+
+            width: 100%;
+
+            font-size: 15px;
+            font-weight: 700;
+
+            cursor: pointer;
+
+            margin-top: 12px;
+
+            transition: all .22s ease;
+
+            box-shadow:
+                0 10px 20px rgba(255,182,185,.18);
+        }
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow:
+                0 14px 28px rgba(255,182,185,.24);
+        }
+        .btn:active {
+            transform: scale(.98);
+        }
+        .btn-secondary {
+            background: #f4f5f7;
+            color: #5f6b7a;
+            box-shadow: none;
+        }
+        .ip-suggestions-container { position: relative; }
+        .suggestions-list { position: absolute; top: 100%; left: 0; width: 100%; background: white; border: 1px solid var(--border-color); border-radius: 8px; z-index: 10; display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .suggestion-item { padding: 10px; cursor: pointer; font-size: 14px; display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); }
+        .suggestion-item:last-child { border-bottom: none; }
+        .suggestion-item:hover { background: var(--bg-color); }
+        .header { display: flex; align-items: center; margin-bottom: 20px; }
+        .back-btn { font-size: 20px; margin-right: 15px; cursor: pointer; text-decoration: none; color: var(--text-main); }
+
+        /* 关系卡片样式 */
+        .rel-edit-card {
+            background: #f8f9fb; border: 1px solid var(--border-color); border-radius: 10px;
+            padding: 12px; margin-bottom: 10px; position: relative;
+        }
+        .rel-edit-row { display: flex; gap: 8px; margin-bottom: 8px; }
+        .rel-edit-row input { flex: 1; padding: 6px 10px; font-size: 13px; }
+        .rel-edit-row .input-score { flex: 0 0 60px; }
+        .rel-edit-card textarea { font-size: 13px; min-height: 50px; padding: 8px; }
+        .btn-del-rel {
+            position: absolute; right: -8px; top: -8px; width: 20px; height: 20px;
+            background: #ff6b6b; color: white; border: none; border-radius: 50%;
+            font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        #importModal {
+            backdrop-filter: blur(8px);
+        }
+
+        #importModal > div {
+            background: rgba(255,255,255,.88);
+
+            backdrop-filter: blur(24px);
+
+            border-radius: 24px;
+
+            padding: 24px;
+
+            box-shadow:
+                0 20px 50px rgba(0,0,0,.15);
+
+            animation: modalPop .25s ease;
+        }
+        @keyframes modalPop {
+            from {
+                transform: scale(.92);
+                opacity: 0;
+            }
+
+            to {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="form-card">
+        <div class="header">
+            <a href="/square" class="back-btn">←</a>
+
+            <div>
+                <h2 id="page-title">创建角色</h2>
+                <p id="page-desc">把你的角色上传到广场</p>
+            </div>
+        </div>
+        
+        <div style="margin-bottom: 20px;" id="import-section">
+            <button type="button" class="btn btn-secondary" onclick="openImportModal()">从私有角色快速导入</button>
+        </div>
+
+        <form id="upload-form">
+            <div class="form-group" style="text-align: center;">
+                <div class="avatar-upload" onclick="document.getElementById('avatar-input').click()">
+                    <img id="avatar-preview" style="display:none">
+                    <span id="upload-placeholder" style="
+                    font-size:14px;
+                    color:#999;
+                    display:flex;
+                    flex-direction:column;
+                    align-items:center;
+                    gap:4px;
+                    ">
+                        <span style="font-size:28px;">＋</span>
+                        上传头像
+                    </span>
+                </div>
+                <input type="file" id="avatar-input" style="display:none" accept="image/*" onchange="previewAvatar(event)">
+                <small style="color: var(--text-muted);">点击上传头像</small>
+            </div>
+
+            <div class="form-group" id="id-group">
+                <label>角色ID (英文/数字/下划线)</label>
+                <input type="text" name="id" id="id-input-field" placeholder="如: kunigami" required pattern="^[a-zA-Z0-9_]+$">
+                <small style="color: var(--text-muted); font-size: 11px;">这是角色的唯一标识，系统会自动处理重复</small>
+            </div>
+
+            <div class="form-group">
+                <label>角色名称</label>
+                <input type="text" name="name" placeholder="角色全名" required>
+            </div>
+
+            <div class="form-group" style="display: flex; gap: 15px; align-items: flex-end;">
+                <div style="flex: 1;">
+                    <label>年龄</label>
+                    <input type="number" name="age" placeholder="数字">
+                </div>
+                <div style="margin-bottom: 10px; display: flex; align-items: center;">
+                    <input type="checkbox" name="no_age_increase" id="no_age_increase" style="width: auto; margin-right: 5px;">
+                    <label for="no_age_increase" style="display: inline; font-weight: normal; margin-bottom: 0;">不随时间增大</label>
+                </div>
+            </div>
+
+            <div class="form-group ip-suggestions-container">
+                <label>所属 IP (作品名)</label>
+                <input type="text" name="ip" id="ip-input" placeholder="输入作品名，如: 蓝色监狱" autocomplete="off">
+                <div class="suggestions-list" id="ip-suggestions"></div>
+            </div>
+
+            <div class="form-group">
+                <label>角色标签 (Tag)</label>
+                <input type="text" name="tags" placeholder="如: 高冷, 努力型, 腹黑">
+                <small style="color: var(--text-muted); font-size: 11px;">多个标签请用逗号或空格分隔</small>
+            </div>
+
+            <div class="form-group">
+                <label>人际关系图谱</label>
+                <div id="rel-graph-container" style="margin-bottom: 10px;">
+                    <!-- 动态生成的关系卡片 -->
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button type="button" class="btn btn-secondary" style="flex: 1; margin-top: 0;" onclick="addRelRow()">+ 添加角色关系</button>
+                    <button type="button" class="btn btn-secondary" style="flex: 1; margin-top: 0;" id="ai-gen-rel-btn" onclick="aiCompleteGraph()">AI 补全关系</button>
+                </div>
+                <textarea name="relationship_graph" id="rel-graph-hidden" style="display:none"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>角色人设 (Base Persona)</label>
+                <textarea name="base_persona" id="base-persona" rows="8" placeholder="详细的角色性格、背景、说话习惯等设定..." required></textarea>
+                <button type="button" class="btn btn-secondary" id="ai-gen-persona-btn" onclick="aiGeneratePersona()">AI 自动编写人设</button>
+            </div>
+
+            <button type="submit" class="btn" id="submit-btn">立即上传</button>
+        </form>
+    </div>
+
+    <div id="importModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
+        <div style="background:white; padding:20px; border-radius:12px; width:90%; max-width:400px; max-height:80vh; overflow-y:auto;">
+            <h3 style="margin-top:0">选择私有角色</h3>
+            <div id="private-char-list">
+                <!-- 角色列表 -->
+            </div>
+            <button class="btn btn-secondary" onclick="closeImportModal()">取消</button>
+        </div>
+    </div>
+
+    <div id="aiPreviewModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1100; align-items:center; justify-content:center;">
+        <div style="background:white; padding:24px; border-radius:20px; width:90%; max-width:500px; max-height:85vh; overflow-y:auto; display:flex; flex-direction:column;">
+            <h3 style="margin-top:0; margin-bottom:15px; text-align:center;">AI 补全预览</h3>
+            <div id="ai-preview-content" style="flex:1; overflow-y:auto; margin-bottom:20px;">
+                <!-- 预览内容 -->
+            </div>
+            <div style="display: flex; gap: 12px;">
+                <button type="button" class="btn btn-secondary" style="flex: 1; margin-top: 0;" onclick="closeAiPreview()">取消</button>
+                <button type="button" class="btn" style="flex: 1; margin-top: 0;" id="apply-ai-btn">确认覆盖</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function openImportModal() {
+            document.getElementById('importModal').style.display = 'flex';
+            loadPrivateCharacters();
+        }
+
+        function closeImportModal() {
+            document.getElementById('importModal').style.display = 'none';
+        }
+
+        async function loadPrivateCharacters() {
+            const list = document.getElementById('private-char-list');
+            list.innerHTML = '<div style="padding:20px; text-align:center;">加载中...</div>';
+            try {
+                const res = await fetch('/api/contacts');
+                const data = await res.json();
+                const chars = data.filter(c => c.type !== 'group');
+                if (chars.length === 0) {
+                    list.innerHTML = '<div style="padding:20px; text-align:center; color:#999;">暂无私有角色</div>';
+                    return;
+                }
+                list.innerHTML = chars.map(c => `
+                    <div style="display:flex; align-items:center; padding:10px; border-bottom:1px solid #eee; cursor:pointer;" onclick="importCharacter('${c.id}', '${c.name}', '${c.avatar}')">
+                        <img src="${c.avatar}" style="width:40px; height:40px; border-radius:50%; margin-right:10px;">
+                        <div>
+                            <div style="font-weight:600;">${c.name}</div>
+                            <div style="font-size:12px; color:#999;">ID: ${c.id}</div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch(e) {
+                list.innerHTML = '<div style="padding:20px; text-align:center; color:red;">加载失败</div>';
+            }
+        }
+
+        function addRelRow(name = '', role = '', score = 1, desc = '') {
+            const container = document.getElementById('rel-graph-container');
+            const card = document.createElement('div');
+            card.className = 'rel-edit-card';
+            card.innerHTML = `
+                <button type="button" class="btn-del-rel" onclick="this.parentElement.remove()">×</button>
+                <div class="rel-edit-row">
+                    <input type="text" class="rel-name" value="${name}" placeholder="对方姓名">
+                    <input type="text" class="rel-role" value="${role}" placeholder="关系(如: 队友)">
+                    <input type="number" class="rel-score" value="${score}" step="0.1" placeholder="指数" title="关系指数">
+                </div>
+                <textarea class="rel-desc" placeholder="详细关系描述...">${desc}</textarea>
+            `;
+            container.appendChild(card);
+        }
+
+        function serializeRelGraph() {
+            const graph = {};
+            document.querySelectorAll('.rel-edit-card').forEach(card => {
+                const name = card.querySelector('.rel-name').value.trim();
+                const role = card.querySelector('.rel-role').value.trim();
+                const score = parseFloat(card.querySelector('.rel-score').value) || 1;
+                const description = card.querySelector('.rel-desc').value.trim();
+                if (name) {
+                    graph[name] = { role, score, description };
+                }
+            });
+            document.getElementById('rel-graph-hidden').value = JSON.stringify(graph);
+        }
+
+        async function importCharacter(id, name, avatar) {
+            document.querySelector('[name="id"]').value = id;
+            document.querySelector('[name="name"]').value = name;
+            window.importedAvatarUrl = avatar; // 保存导入的头像URL
+            
+            // 头像预览
+            const preview = document.getElementById('avatar-preview');
+            preview.src = avatar;
+            preview.style.display = 'block';
+            document.getElementById('upload-placeholder').style.display = 'none';
+            
+            closeImportModal();
+            
+            // 1. 获取基础配置信息 (年龄等)
+            try {
+                const res = await fetch(`/api/${id}/config`);
+                const config = await res.json();
+                if (config.age) {
+                    document.querySelector('[name="age"]').value = config.age;
+                }
+                if (config.no_age_increase) {
+                    document.getElementById('no_age_increase').checked = true;
+                }
+            } catch(e) {
+                console.error("获取基础配置失败", e);
+            }
+
+            // 2. 获取详情信息（关系图谱、人设等）
+            try {
+                const res = await fetch(`/api/${id}/prompts_data`);
+                const data = await res.json();
+                
+                // 清空现有关系
+                document.getElementById('rel-graph-container').innerHTML = '';
+                
+                if (data.relation) {
+                    const relData = typeof data.relation === 'string' ? JSON.parse(data.relation) : data.relation;
+                    for (let n in relData) {
+                        const info = relData[n];
+                        if (typeof info === 'object') {
+                            addRelRow(n, info.role, info.score, info.description || info.desc);
+                        } else {
+                            addRelRow(n, '', 1, info);
+                        }
+                    }
+                }
+                
+                // 导入角色人设
+                if (data.base) {
+                    const personaText = typeof data.base === 'string' ? data.base : (data.base.system_prompt || JSON.stringify(data.base, null, 2));
+                    document.getElementById('base-persona').value = personaText;
+                    
+                    // 尝试从 persona 文本中提取 IP、标签 (作为兜底)
+                    const ipMatch = personaText.match(/(?:来自作品|作品|IP)[:：]\s*(.+)/i);
+                    if (ipMatch) document.getElementById('ip-input').value = ipMatch[1].trim();
+                    
+                    const tagMatch = personaText.match(/(?:标签|Tag)[:：]\s*(.+)/i);
+                    if (tagMatch) document.querySelector('[name="tags"]').value = tagMatch[1].trim();
+                }
+            } catch(e) {
+                console.error("获取详情失败", e);
+            }
+        }
+
+        function previewAvatar(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function() {
+                    const preview = document.getElementById('avatar-preview');
+                    preview.src = reader.result;
+                    preview.style.display = 'block';
+                    document.getElementById('upload-placeholder').style.display = 'none';
+                }
+                reader.readAsDataURL(file);
+            }
+        }
+
+        const ipInput = document.getElementById('ip-input');
+        const ipSuggestions = document.getElementById('ip-suggestions');
+
+        ipInput.oninput = async () => {
+            const q = ipInput.value.trim();
+            if (!q) { ipSuggestions.style.display = 'none'; return; }
+            try {
+                const res = await fetch(`/api/square/search_ip?q=${encodeURIComponent(q)}`);
+                const data = await res.json();
+                if (data.length > 0) {
+                    ipSuggestions.innerHTML = data.map(item => `
+                        <div class="suggestion-item" onclick="selectIp('${item.name}')">
+                            <span>${item.name}</span>
+                            <span style="color:var(--text-muted);font-size:12px;">已有${item.count}角色</span>
+                        </div>
+                    `).join('');
+                    ipSuggestions.style.display = 'block';
+                } else {
+                    ipSuggestions.style.display = 'none';
+                }
+            } catch(e) {}
+        };
+
+        function selectIp(name) {
+            ipInput.value = name;
+            ipSuggestions.style.display = 'none';
+        }
+
+        function closeAiPreview() {
+            document.getElementById('aiPreviewModal').style.display = 'none';
+        }
+
+        async function aiCompleteGraph() {
+            const name = document.querySelector('[name="name"]').value;
+            const ip = ipInput.value;
+            const tags = document.querySelector('[name="tags"]').value;
+            if (!name) { alert("请先填写角色名称"); return; }
+            
+            // 获取当前已填写的关系
+            const currentGraph = {};
+            document.querySelectorAll('.rel-edit-card').forEach(card => {
+                const n = card.querySelector('.rel-name').value.trim();
+                const role = card.querySelector('.rel-role').value.trim();
+                const score = parseFloat(card.querySelector('.rel-score').value) || 1;
+                const description = card.querySelector('.rel-desc').value.trim();
+                if (n) currentGraph[n] = { role, score, description };
+            });
+
+            const btn = document.getElementById('ai-gen-rel-btn');
+            const originalText = btn.innerText;
+            btn.innerText = "AI 正在思考关系...";
+            btn.disabled = true;
+            
+            try {
+                const res = await fetch('/api/square/ai_complete_graph', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, ip, tags, current_graph: JSON.stringify(currentGraph) })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    const relData = typeof data.graph === 'string' ? JSON.parse(data.graph) : data.graph;
+                    
+                    // 生成预览 HTML
+                    const previewContainer = document.getElementById('ai-preview-content');
+                    previewContainer.innerHTML = '';
+                    for (let n in relData) {
+                        const info = relData[n];
+                        const isObj = typeof info === 'object' && info !== null;
+                        const role = isObj ? info.role : '';
+                        const score = isObj ? info.score : 1;
+                        const desc = isObj ? (info.description || info.desc || '') : info;
+                        
+                        const item = document.createElement('div');
+                        item.style.cssText = "background:#f8f9fb; padding:12px; border-radius:12px; border-left:4px solid var(--primary-color); margin-bottom:10px;";
+                        item.innerHTML = `
+                            <div style="font-size:14px; font-weight:700; margin-bottom:4px; display:flex; justify-content:space-between;">
+                                <span>👤 ${n} <small style="background:var(--primary-rgba-light); color:var(--primary-dark); padding:1px 4px; border-radius:4px; margin-left:4px;">${role}</small></span>
+                                <span style="font-size:11px; color:#999;">指数: ${score}</span>
+                            </div>
+                            <div style="font-size:13px; color:#666; line-height:1.4;">${desc}</div>
+                        `;
+                        previewContainer.appendChild(item);
+                    }
+                    
+                    document.getElementById('aiPreviewModal').style.display = 'flex';
+                    
+                    // 绑定确认按钮逻辑
+                    document.getElementById('apply-ai-btn').onclick = () => {
+                        document.getElementById('rel-graph-container').innerHTML = '';
+                        for (let n in relData) {
+                            const info = relData[n];
+                            if (typeof info === 'object') {
+                                addRelRow(n, info.role, info.score, info.description || info.desc);
+                            } else {
+                                addRelRow(n, '', 1, info);
+                            }
+                        }
+                        closeAiPreview();
+                    };
+
+                } else {
+                    alert("AI 补全失败: " + data.error);
+                }
+            } catch(e) {
+                alert("请求失败，请检查网络");
+            } finally {
+                btn.innerText = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        async function aiGeneratePersona() {
+            const name = document.querySelector('[name="name"]').value;
+            const ip = ipInput.value;
+            if (!name) { alert("请先填写角色名称"); return; }
+            
+            const btn = document.getElementById('ai-gen-persona-btn');
+            const originalText = btn.innerText;
+            btn.innerText = "AI 正在编写人设...";
+            btn.disabled = true;
+            
+            try {
+                const res = await fetch('/api/generate_persona', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ char_name: name, source_ip: ip })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    const content = data.content;
+                    if (typeof content === 'string') {
+                        document.getElementById('base-persona').value = content;
+                    } else if (content.system_prompt) {
+                        document.getElementById('base-persona').value = content.system_prompt;
+                    } else {
+                        document.getElementById('base-persona').value = JSON.stringify(content, null, 2);
+                    }
+                } else {
+                    alert("AI 生成失败: " + data.error);
+                }
+            } catch(e) {
+                alert("请求失败，请检查网络");
+            } finally {
+                btn.innerText = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        document.getElementById('upload-form').onsubmit = async (e) => {
+            e.preventDefault();
+            
+            serializeRelGraph(); // 提交前序列化关系图谱
+            
+            const submitBtn = document.getElementById('submit-btn');
+            submitBtn.innerText = "上传中...";
+            submitBtn.disabled = true;
+
+            const formData = new FormData(e.target);
+            const avatarFile = document.getElementById('avatar-input').files[0];
+            if (avatarFile) {
+                formData.append('avatar', avatarFile);
+            } else if (window.importedAvatarUrl) {
+                formData.append('avatar_url', window.importedAvatarUrl);
+            }
+            
+            // 处理 checkbox
+            formData.set('no_age_increase', document.getElementById('no_age_increase').checked);
+            
+            try {
+                const params = new URLSearchParams(window.location.search);
+                const isEdit = params.get('mode') === 'edit';
+                const apiUrl = isEdit ? '/api/square/update' : '/api/square/upload';
+                
+                const res = await fetch(apiUrl, {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    alert(isEdit ? "修改成功！" : "上传成功！");
+                    if (isEdit) localStorage.removeItem('edit_square_char');
+                    location.href = isEdit ? `/square/character/${formData.get('id')}` : '/square';
+                } else {
+                    alert("操作失败: " + data.error);
+                }
+            } catch(e) {
+                alert("发生错误");
+            } finally {
+                submitBtn.innerText = isEdit ? "保存修改" : "立即上传";
+                submitBtn.disabled = false;
+            }
+        };
+
+        // 点击外部隐藏建议列表
+        document.addEventListener('click', (e) => {
+            if (e.target !== ipInput) ipSuggestions.style.display = 'none';
+        });
+
+        // 编辑模式初始化
+        (function initEditMode() {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('mode') === 'edit') {
+                const dataStr = localStorage.getItem('edit_square_char');
+                if (dataStr) {
+                    const data = JSON.parse(dataStr);
+                    document.getElementById('page-title').innerText = '编辑作品';
+                    document.getElementById('page-desc').innerText = '修改已发布在广场的作品';
+                    document.getElementById('import-section').style.display = 'none';
+                    document.getElementById('submit-btn').innerText = '保存修改';
+                    
+                    // 填充数据
+                    const idInput = document.getElementById('id-input-field');
+                    idInput.value = data.id;
+                    idInput.readOnly = true;
+                    idInput.style.background = '#f1f3f5';
+                    
+                    document.querySelector('[name="name"]').value = data.name;
+                    document.querySelector('[name="age"]').value = data.age || '';
+                    document.getElementById('no_age_increase').checked = !!data.no_age_increase;
+                    document.getElementById('ip-input').value = data.ip || '';
+                    
+                    // 标签
+                    if (data.tags) {
+                        document.querySelector('[name="tags"]').value = data.tags;
+                    }
+                    
+                    // 头像预览
+                    if (data.avatar) {
+                        const preview = document.getElementById('avatar-preview');
+                        preview.src = data.avatar;
+                        preview.style.display = 'block';
+                        document.getElementById('upload-placeholder').style.display = 'none';
+                        window.importedAvatarUrl = data.avatar;
+                    }
+                    
+                    // 人设
+                    document.getElementById('base-persona').value = data.base_persona || '';
+                    
+                    // 关系图谱
+                    if (data.relationship_graph) {
+                        const relData = typeof data.relationship_graph === 'string' ? JSON.parse(data.relationship_graph) : data.relationship_graph;
+                        document.getElementById('rel-graph-container').innerHTML = '';
+                        for (let n in relData) {
+                            const info = relData[n];
+                            if (typeof info === 'object') {
+                                addRelRow(n, info.role, info.score, info.description || info.desc);
+                            } else {
+                                addRelRow(n, '', 1, info);
+                            }
+                        }
+                    }
+                }
+            }
+        })();
+    </script>
+</body>
+</html>
