@@ -12,6 +12,17 @@
     <script>
         // 将后端语言设置传递给前端
         window.AI_LANG = "{{ ai_lang }}";
+        window.GLOBAL_COS_BASE_URL = "{{ COS_BASE_URL | default('') }}";
+        window.GLOBAL_USER_PREFIX = "users/{{ session.get('user_id', 1) }}";
+
+        // 【核心】定义 COS URL 转换函数
+        window.getCosUrl = function(path) {
+            if (!path) return "";
+            if (path.startsWith("http")) return path;
+            const baseUrl = window.GLOBAL_COS_BASE_URL;
+            if (!baseUrl) return "/" + path;
+            return baseUrl.endsWith("/") ? (baseUrl + path) : (baseUrl + "/" + path);
+        };
     </script>
     <!-- 【新增】主题加载脚本 -->
     <script src="/static/theme-loader.js"></script>
@@ -111,6 +122,68 @@
             font-weight: 700;
             background: var(--primary-rgba-lighter);
             -webkit-text-fill-color: var(--primary-dark);
+        }
+
+        /* --- 九宫格图片展示逻辑 --- */
+        .moment-photos {
+            display: grid;
+            gap: 4px;
+            margin-top: 8px;
+            width: fit-content;
+        }
+        /* 1张图：大图 */
+        .moment-photos.grid-1 { grid-template-columns: 1fr; max-width: 80%; }
+        .moment-photos.grid-1 img { width: 100%; max-height: 300px; border-radius: 8px; object-fit: cover; }
+        /* 2-4张图：2x2 */
+        .moment-photos.grid-4 { grid-template-columns: repeat(2, 1fr); width: 204px; }
+        .moment-photos.grid-4 .photo-item { width: 100px; height: 100px; }
+        /* 5-9张图：3x3 */
+        .moment-photos.grid-9 { grid-template-columns: repeat(3, 1fr); width: 308px; }
+        .moment-photos.grid-9 .photo-item { width: 100px; height: 100px; }
+        
+        .photo-item { position: relative; border-radius: 4px; overflow: hidden; background: #eee; cursor: pointer; }
+        .photo-item img { width: 100%; height: 100%; object-fit: cover; }
+        
+        /* 第9张覆盖 +N */
+        .photo-more-mask {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.4); color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px; font-weight: bold;
+        }
+
+        /* --- 发布框图片预览 --- */
+        .moment-upload-preview {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin: 10px 0;
+        }
+        .preview-item {
+            aspect-ratio: 1/1;
+            position: relative;
+            background: #f0f2f5;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .preview-item img { width: 100%; height: 100%; object-fit: cover; }
+        .preview-delete {
+            position: absolute; top: 2px; right: 2px;
+            width: 18px; height: 18px; background: rgba(0,0,0,0.5);
+            color: #fff; border-radius: 50%; font-size: 12px;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer;
+        }
+        .upload-add-btn {
+            aspect-ratio: 1/1;
+            border: 1px dashed var(--border-color);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: var(--text-muted);
+            cursor: pointer;
         }
 
         /* @ 自动补全菜单 */
@@ -810,8 +883,16 @@
                             <input type="text" class="moment-compose-trans-input" id="momentComposeTransText" placeholder="输入中文，翻译成日语后填入下方正文">
                             <button type="button" class="moment-compose-trans-btn" id="momentComposeTransBtn">翻译</button>
                         </div>
-                        <textarea class="moment-compose-text" id="momentComposeText" placeholder="分享此刻的想法…" maxlength="1000"></textarea>
-                        <div class="moment-char-count" id="momentCharCount">0/1000</div>
+                        <textarea class="moment-compose-text" id="momentComposeText" placeholder="分享此刻的想法…" maxlength="2000"></textarea>
+                        
+                        <!-- 【新增】多图选择与预览 -->
+                        <input type="file" id="momentImageInput" multiple accept="image/*" style="display:none;">
+                        <div class="moment-upload-preview" id="momentUploadPreview">
+                            <div class="upload-add-btn" id="triggerImageInput">＋</div>
+                        </div>
+                        <div id="uploadTokenWarning" style="font-size: 11px; color: #e57373; margin-bottom: 8px; display: none;">注意：多图上传会消耗较多 tokens 用于识图。</div>
+                        
+                        <div class="moment-char-count" id="momentCharCount">0/2000</div>
                         <div class="moment-modal-actions">
                             <button type="button" class="moment-cancel-btn" id="momentModalCancel">取消</button>
                             <button type="button" class="moment-compose-btn" id="momentComposeBtn">发布</button>
@@ -840,8 +921,8 @@
             <div class="moment-modal" id="editModal">
                 <div class="moment-modal-title" id="editModalTitle">编辑内容</div>
                 <div class="moment-modal-body">
-                    <textarea class="moment-compose-text" id="editModalTextarea" placeholder="编辑内容…" maxlength="1000" style="max-height: 300px;"></textarea>
-                    <div class="moment-char-count" id="editCharCount">0/1000</div>
+                    <textarea class="moment-compose-text" id="editModalTextarea" placeholder="编辑内容…" maxlength="2000" style="max-height: 300px;"></textarea>
+                    <div class="moment-char-count" id="editCharCount">0/2000</div>
                     <div class="moment-modal-actions">
                         <button type="button" class="moment-cancel-btn" id="editModalCancel">取消</button>
                         <button type="button" class="moment-compose-btn" id="editModalSubmit">保存</button>
@@ -879,8 +960,8 @@
                             <input type="text" class="moment-compose-trans-input" id="userReplyTransInput" placeholder="输入中文，翻译成日语后填入下方" style="flex:1;">
                             <button type="button" class="moment-compose-trans-btn" id="userReplyTransBtn">翻译</button>
                         </div>
-                        <textarea class="moment-compose-text" id="userReplyTextarea" placeholder="我也说一句…" maxlength="200" style="height: 100px; margin-bottom: 5px;"></textarea>
-                        <div style="text-align: right; font-size: 11px; color: var(--text-muted); margin-bottom: 10px;" id="userReplyCharCount">0/200</div>
+                        <textarea class="moment-compose-text" id="userReplyTextarea" placeholder="我也说一句…" maxlength="500" style="height: 100px; margin-bottom: 5px;"></textarea>
+                        <div style="text-align: right; font-size: 11px; color: var(--text-muted); margin-bottom: 10px;" id="userReplyCharCount">0/500</div>
                         <div class="moment-modal-actions">
                             <button type="button" class="moment-cancel-btn" id="userReplyCancel">取消</button>
                             <button type="button" class="moment-compose-btn" id="userReplySubmit">发送并引起互动</button>
@@ -965,9 +1046,82 @@
             }
 
             let aiLanguage = 'zh';
+            const TRANSLATION_CACHE_PREFIX = 'kt_mom_';
             const translationCache = {};
+            const momentsHiddenTrans = new Set();
+            (function() {
+                try {
+                    const raw = localStorage.getItem('kt_mom_hidden');
+                    if (raw) { JSON.parse(raw).forEach(k => momentsHiddenTrans.add(k)); }
+                } catch(e) {}
+            })();
+            function _saveMomentsHidden() {
+                try { localStorage.setItem('kt_mom_hidden', JSON.stringify([...momentsHiddenTrans])); } catch(e) {}
+            }
+
+            function _loadTransCache() {
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key && key.startsWith(TRANSLATION_CACHE_PREFIX)) {
+                        translationCache[key.slice(TRANSLATION_CACHE_PREFIX.length)] = localStorage.getItem(key);
+                    }
+                }
+            }
+            _loadTransCache();
+
+            function _saveTransCache(entryKey, value) {
+                try { localStorage.setItem(TRANSLATION_CACHE_PREFIX + entryKey, value); } catch (e) {}
+            }
+
+            function _removeTransCache(entryKey) {
+                localStorage.removeItem(TRANSLATION_CACHE_PREFIX + entryKey);
+            }
 
             function isJaMode() { return aiLanguage === 'ja'; }
+
+            function renderGridImages(mObj) {
+                const content = mObj.content || '';
+                if (!content) return '';
+                const matches = Array.from(content.matchAll(/\[图片\]\(([\s\S]*?)\)\(([\s\S]*?)\)/g));
+                if (matches.length === 0) return '';
+                
+                const count = matches.length;
+                let gridClass = 'grid-9';
+                if (count === 1) gridClass = 'grid-1';
+                else if (count <= 4) gridClass = 'grid-4';
+                
+                let html = '<div class="moment-photos ' + gridClass + '">';
+                matches.slice(0, 9).forEach((m, idx) => {
+                    let path = m[1];
+                    if (path && !path.startsWith('http')) {
+                        if (!path.startsWith('users/')) {
+                            if (!path.includes('/')) {
+                                try {
+                                    const d = new Date(mObj.timestamp.replace(/-/g, '/'));
+                                    const yyyymm = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0');
+                                    path = yyyymm + '/' + path;
+                                } catch (e) {}
+                            }
+                            path = (window.GLOBAL_USER_PREFIX || 'users/1') + '/moments/' + path;
+                        }
+                    }
+                    const url = window.getCosUrl ? window.getCosUrl(path) : path;
+                    const desc = m[2];
+                    html += '<div class="photo-item" onclick="viewImage(\'' + escapeAttr(url) + '\')">';
+                    html += '<img src="' + url + '" alt="' + escapeAttr(desc) + '" loading="lazy" onerror="console.log(\'Failed to load: \', \'' + url + '\'); this.style.display=\'none\'">';
+                    if (idx === 8 && count > 9) {
+                        html += '<div class="photo-more-mask">+' + (count - 9) + '</div>';
+                    }
+                    html += '</div>';
+                });
+                html += '</div>';
+                return html;
+            }
+
+            function viewImage(url) {
+                // 如果有全局预览，可以调用，此处简单打开
+                window.open(url, '_blank');
+            }
 
             async function loadUserLanguage() {
                 try {
@@ -1000,7 +1154,22 @@
                 if (!isJaMode() || !Array.isArray(moments)) return moments || [];
                 return Promise.all(moments.map(async (m) => {
                     const copy = Object.assign({}, m);
-                    copy.display_content = await addFurigana(copy.content || '');
+                    
+                    // 保护图片标签，防止被假名解析器破坏
+                    let text = copy.content || '';
+                    let imgTags = [];
+                    text = text.replace(/\[图片\]\(([\s\S]*?)\)\(([\s\S]*?)\)/g, (match) => {
+                        imgTags.push(match);
+                        return `__IMG_${imgTags.length - 1}__`;
+                    });
+                    
+                    let furiText = await addFurigana(text);
+                    
+                    imgTags.forEach((tag, idx) => {
+                        furiText = furiText.replace(`__IMG_${idx}__`, tag);
+                    });
+                    copy.display_content = furiText;
+
                     copy.comments = await Promise.all((copy.comments || []).map(async (c) => {
                         const cc = Object.assign({}, c);
                         cc.display_content = await addFurigana(cc.content || '');
@@ -1040,6 +1209,7 @@
                             }
                             if (canRegen) {
                                 menuItems += '<button type="button" class="moment-menu-item comment-regen-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">重新生成</button>';
+                                menuItems += '<button type="button" class="moment-menu-item comment-memory-regen-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">重新记忆</button>';
                             }
                             menuItems += '<button type="button" class="moment-menu-item comment-reply-ai-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">回复</button>';
                             menuItems += '<button type="button" class="moment-menu-item comment-edit-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">编辑</button>';
@@ -1086,6 +1256,7 @@
                     }
                     if (m.char_id !== USER_ID) {
                         postMenuItems += '<button type="button" class="moment-menu-item moment-regen-btn">重新生成</button>';
+                        postMenuItems += '<button type="button" class="moment-menu-item moment-memory-regen-btn">重新记忆</button>';
                     }
                     postMenuItems += '<button type="button" class="moment-menu-item post-reply-ai-btn">评论</button>';
                     postMenuItems += '<button type="button" class="moment-menu-item moment-edit-btn">编辑</button>';
@@ -1102,10 +1273,11 @@
                           '<button type="button" class="moment-comment-trans-btn">翻译</button>' +
                           '</div>'
                         : '';
+                    const momentAvatarUrl = window.getCosUrl ? window.getCosUrl(m.avatar || '') : (m.avatar || '');
                     return '<div class="moment-card" data-char-id="' + escapeAttr(m.char_id) + '" data-timestamp="' + escapeAttr(m.timestamp) + '">' +
                         '<div class="moment-avatar-wrap">' +
                         '<a href="' + avatarHref + '">' +
-                        '<img class="moment-avatar" src="' + (m.avatar || '') + '" alt="" onerror="this.src=\'/static/default_avatar.png\'">' +
+                        '<img class="moment-avatar" src="' + momentAvatarUrl + '" alt="" onerror="this.src=\'/static/default_avatar.png\'">' +
                         '</a>' +
                         '</div>' +
                         '<div class="moment-body">' +
@@ -1118,7 +1290,8 @@
                         postActionsMenu +
                         '</div>' +
                         '</div>' +
-                        '<div class="moment-content">' + (m.display_content || escapeHtml(m.content)) + '</div>' +
+                        '<div class="moment-content">' + (m.display_content || escapeHtml(m.content || '')).replace(/\[图片\]\(([\s\S]*?)\)\(([\s\S]*?)\)/g, '').trim() + '</div>' +
+                        renderGridImages(m) +
                         postTransResult +
                         likersHtml +
                         commentsHtml +
@@ -1288,7 +1461,7 @@
 
                     function updateCommentCharCount() {
                         const length = input.value.length;
-                        const maxLength = input.getAttribute('data-max') || 200;
+                        const maxLength = input.getAttribute('data-max') || 500;
                         charCountEl.textContent = length + '/' + maxLength;
                         if (length >= maxLength) {
                             input.classList.add('is-full');
@@ -1346,6 +1519,16 @@
                         if (!card) return;
                         const charId = card.getAttribute('data-char-id');
                         const timestamp = card.getAttribute('data-timestamp');
+                        // 清除该朋友圈及其所有评论的翻译缓存
+                        const postKey = charId + '|' + timestamp;
+                        Object.keys(translationCache).forEach(key => {
+                            if (key.startsWith(postKey)) {
+                                _removeTransCache(key);
+                                delete translationCache[key];
+                                momentsHiddenTrans.delete(key);
+                            }
+                        });
+                        _saveMomentsHidden();
                         regenBtn.disabled = true;
                         fetch('/api/moments/regenerate', {
                             method: 'POST',
@@ -1365,9 +1548,29 @@
                         if (!moment) return;
                         const postKey = postTranslateBtn.getAttribute('data-post-key');
                         postTranslateBtn.disabled = true;
+
+                        // 当前正在显示 → 隐藏
+                        if (translationCache[postKey] && !momentsHiddenTrans.has(postKey)) {
+                            delete translationCache[postKey];
+                            _removeTransCache(postKey);
+                            momentsHiddenTrans.add(postKey);
+                            _saveMomentsHidden();
+                            renderMoments(allMoments, { scrollTo: { char_id: moment.char_id, timestamp: moment.timestamp } });
+                            postTranslateBtn.disabled = false;
+                            return;
+                        }
+
+                        // 之前被隐藏 → 强制重新翻译
+                        if (momentsHiddenTrans.has(postKey)) {
+                            momentsHiddenTrans.delete(postKey);
+                            _saveMomentsHidden();
+                            _removeTransCache(postKey);
+                        }
+
                         requestTranslation(moment.content || '', buildMomentsContext(moment), 'ja_to_zh', moment.char_id)
                             .then((res) => {
                                 translationCache[postKey] = res;
+                                _saveTransCache(postKey, res);
                                 renderMoments(allMoments, { scrollTo: { char_id: moment.char_id, timestamp: moment.timestamp } });
                             })
                             .catch(() => {})
@@ -1463,9 +1666,29 @@
                         const key = commentTranslateBtn.getAttribute('data-comment-key');
                         const context = (buildMomentsContext(moment) + '\n[本条朋友圈] ' + (moment.content || '')).trim();
                         commentTranslateBtn.disabled = true;
+
+                        // 当前正在显示 → 隐藏
+                        if (translationCache[key] && !momentsHiddenTrans.has(key)) {
+                            delete translationCache[key];
+                            _removeTransCache(key);
+                            momentsHiddenTrans.add(key);
+                            _saveMomentsHidden();
+                            renderMoments(allMoments, { scrollTo: { char_id: moment.char_id, timestamp: moment.timestamp } });
+                            commentTranslateBtn.disabled = false;
+                            return;
+                        }
+
+                        // 之前被隐藏 → 强制重新翻译
+                        if (momentsHiddenTrans.has(key)) {
+                            momentsHiddenTrans.delete(key);
+                            _saveMomentsHidden();
+                            _removeTransCache(key);
+                        }
+
                         requestTranslation(comment.content || '', context, 'ja_to_zh', moment.char_id)
                             .then((res) => {
                                 translationCache[key] = res;
+                                _saveTransCache(key, res);
                                 renderMoments(allMoments, { scrollTo: { char_id: moment.char_id, timestamp: moment.timestamp } });
                             })
                             .catch(() => {})
@@ -1479,6 +1702,14 @@
                         const charId = card.getAttribute('data-char-id');
                         const timestamp = card.getAttribute('data-timestamp');
                         const commentIndex = commentRegenBtn.getAttribute('data-comment-index');
+                        // 清除该评论的翻译缓存
+                        const commentKey = charId + '|' + timestamp + '|c|' + commentIndex;
+                        if (translationCache[commentKey]) {
+                            _removeTransCache(commentKey);
+                            delete translationCache[commentKey];
+                            momentsHiddenTrans.delete(commentKey);
+                            _saveMomentsHidden();
+                        }
                         commentRegenBtn.disabled = true;
                         fetch('/api/moments/comment/regenerate', {
                             method: 'POST',
@@ -1489,6 +1720,67 @@
                             .then(() => reloadAndScrollTo({ char_id: charId, timestamp: timestamp }))
                             .catch(() => {})
                             .finally(() => { commentRegenBtn.disabled = false; });
+                        return;
+                    }
+
+                    // ===== 重新记忆（朋友圈自身） =====
+                    const postMemoryRegenBtn = e.target.closest('.moment-memory-regen-btn');
+                    if (postMemoryRegenBtn && !postMemoryRegenBtn.disabled) {
+                        const card = postMemoryRegenBtn.closest('.moment-card');
+                        if (!card) return;
+                        const charId = card.getAttribute('data-char-id');
+                        const timestamp = card.getAttribute('data-timestamp');
+                        postMemoryRegenBtn.disabled = true;
+                        postMemoryRegenBtn.textContent = '生成中…';
+                        fetch('/api/moments/memory/regenerate', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ char_id: charId, timestamp: timestamp })
+                        })
+                            .then(r => r.json())
+                            .then(data => {
+                                if (data.status === 'success') {
+                                    alert('记忆已重新生成');
+                                } else {
+                                    alert('生成失败: ' + (data.error || '未知错误'));
+                                }
+                            })
+                            .catch(() => alert('请求失败'))
+                            .finally(() => {
+                                postMemoryRegenBtn.disabled = false;
+                                postMemoryRegenBtn.textContent = '重新记忆';
+                            });
+                        return;
+                    }
+
+                    // ===== 重新记忆（评论） =====
+                    const commentMemoryRegenBtn = e.target.closest('.comment-memory-regen-btn');
+                    if (commentMemoryRegenBtn && !commentMemoryRegenBtn.disabled) {
+                        const card = commentMemoryRegenBtn.closest('.moment-card');
+                        if (!card) return;
+                        const charId = card.getAttribute('data-char-id');
+                        const timestamp = card.getAttribute('data-timestamp');
+                        const commentIndex = commentMemoryRegenBtn.getAttribute('data-comment-index');
+                        commentMemoryRegenBtn.disabled = true;
+                        commentMemoryRegenBtn.textContent = '生成中…';
+                        fetch('/api/moments/memory/regenerate', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ char_id: charId, timestamp: timestamp, comment_index: commentIndex })
+                        })
+                            .then(r => r.json())
+                            .then(data => {
+                                if (data.status === 'success') {
+                                    alert('记忆已重新生成');
+                                } else {
+                                    alert('生成失败: ' + (data.error || '未知错误'));
+                                }
+                            })
+                            .catch(() => alert('请求失败'))
+                            .finally(() => {
+                                commentMemoryRegenBtn.disabled = false;
+                                commentMemoryRegenBtn.textContent = '重新记忆';
+                            });
                         return;
                     }
 
@@ -1538,7 +1830,7 @@
                         
                         editModalTitle.textContent = '编辑朋友圈';
                         editModalTextarea.value = moment.content;
-                        editModalTextarea.maxLength = 1000;
+                        editModalTextarea.maxLength = 2000;
                         updateEditCharCount();
                         editModalMask.style.display = 'flex';
                         editModalTextarea.focus();
@@ -1567,9 +1859,12 @@
                                 const postKey = charId + '|' + timestamp;
                                 Object.keys(translationCache).forEach(key => {
                                     if (key.startsWith(postKey)) {
+                                        _removeTransCache(key);
                                         delete translationCache[key];
+                                        momentsHiddenTrans.delete(key);
                                     }
                                 });
+                                _saveMomentsHidden();
                                 loadNextPage(true);
                             })
                             .catch(err => alert('删除失败: ' + err));
@@ -1622,9 +1917,12 @@
                                 const postKey = charId + '|' + timestamp;
                                 Object.keys(translationCache).forEach(key => {
                                     if (key.startsWith(postKey + '|c|')) {
+                                        _removeTransCache(key);
                                         delete translationCache[key];
+                                        momentsHiddenTrans.delete(key);
                                     }
                                 });
+                                _saveMomentsHidden();
                                 reloadAndScrollTo({ char_id: charId, timestamp: timestamp });
                             })
                             .catch(err => alert('删除失败: ' + err));
@@ -1683,6 +1981,61 @@
                 const cancelBtn = document.getElementById('momentModalCancel');
                 const charCountEl = document.getElementById('momentCharCount');
 
+                // --- 图片上传相关逻辑 ---
+                const imageInput = document.getElementById('momentImageInput');
+                const triggerBtn = document.getElementById('triggerImageInput');
+                const previewContainer = document.getElementById('momentUploadPreview');
+                const uploadWarn = document.getElementById('uploadTokenWarning');
+                let selectedFiles = [];
+
+                if (triggerBtn && imageInput) {
+                    triggerBtn.addEventListener('click', () => imageInput.click());
+                    imageInput.addEventListener('change', (e) => {
+                        const files = Array.from(e.target.files);
+                        files.forEach(file => {
+                            if (selectedFiles.length < 9) {
+                                selectedFiles.push(file);
+                            }
+                        });
+                        renderUploadPreview();
+                        imageInput.value = ''; // Reset input
+                    });
+                }
+
+                function renderUploadPreview() {
+                    // 清空并保留添加按钮
+                    previewContainer.innerHTML = '';
+                    selectedFiles.forEach((file, idx) => {
+                        const reader = new FileReader();
+                        const div = document.createElement('div');
+                        div.className = 'preview-item';
+                        reader.onload = (e) => {
+                            div.innerHTML = `
+                                <img src="${e.target.result}">
+                                <div class="preview-delete" data-idx="${idx}">×</div>
+                            `;
+                        };
+                        reader.readAsDataURL(file);
+                        previewContainer.appendChild(div);
+                    });
+                    if (selectedFiles.length < 9) {
+                        const addBtn = document.createElement('div');
+                        addBtn.className = 'upload-add-btn';
+                        addBtn.textContent = '＋';
+                        addBtn.onclick = () => imageInput.click();
+                        previewContainer.appendChild(addBtn);
+                    }
+                    if (uploadWarn) uploadWarn.style.display = selectedFiles.length > 0 ? 'block' : 'none';
+                }
+
+                previewContainer.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('preview-delete')) {
+                        const idx = parseInt(e.target.dataset.idx);
+                        selectedFiles.splice(idx, 1);
+                        renderUploadPreview();
+                    }
+                });
+
                 // 新增元素
                 const showUserPostBtn = document.getElementById('showUserPostBtn');
                 const showAiPostBtn = document.getElementById('showAiPostBtn');
@@ -1731,7 +2084,7 @@
                 function updateCharCount() {
                     if (!charCountEl) return;
                     const length = composeText.value.length;
-                    const maxLength = 1000;
+                    const maxLength = 2000;
                     charCountEl.textContent = length + '/' + maxLength;
                     if (length >= maxLength) {
                         composeText.classList.add('is-full');
@@ -1813,7 +2166,7 @@
                     composeText.value = '';
                     if (composeTransText) composeTransText.value = '';
                     if (charCountEl) {
-                        charCountEl.textContent = '0/1000';
+                        charCountEl.textContent = '0/2000';
                         charCountEl.classList.remove('is-full');
                     }
                     composeText.classList.remove('is-full');
@@ -1850,27 +2203,38 @@
 
                 composeBtn.addEventListener('click', function() {
                     const content = (composeText.value || '').trim();
-                    if (!content) return;
+                    if (!content && selectedFiles.length === 0) return;
+                    
                     composeBtn.disabled = true;
                     composeBtn.classList.add('is-loading');
                     composeBtn.innerHTML = '<span class="moment-compose-spinner"></span>发布中…';
+                    
+                    const formData = new FormData();
+                    formData.append('content', content);
+                    selectedFiles.forEach(file => {
+                        formData.append('images', file);
+                    });
+
                     fetch('/api/moments/post', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ content: content })
+                        body: formData
                     })
                         .then(r => r.json())
                         .then(() => {
                             composeText.value = '';
+                            selectedFiles = [];
+                            renderUploadPreview();
                             if (charCountEl) {
-                                charCountEl.textContent = '0/1000';
+                                charCountEl.textContent = '0/2000';
                                 charCountEl.classList.remove('is-full');
                             }
                             composeText.classList.remove('is-full');
                             closeModal();
                             loadNextPage(true, { highlightFirst: true });
                         })
-                        .catch(() => {})
+                        .catch((err) => {
+                            alert('发布失败: ' + err);
+                        })
                         .finally(() => {
                             composeBtn.disabled = false;
                             composeBtn.classList.remove('is-loading');
@@ -1892,7 +2256,7 @@
                 window.updateEditCharCount = function() {
                     if (!editCharCount) return;
                     const length = editModalTextarea.value.length;
-                    const maxLength = editModalTextarea.maxLength || 1000;
+                    const maxLength = editModalTextarea.maxLength || 2000;
                     editCharCount.textContent = length + '/' + maxLength;
                     if (length >= maxLength) {
                         editModalTextarea.classList.add('is-full');
@@ -2061,7 +2425,7 @@
                         replyModalMask.style.display = 'none';
                         replyCharacterSelect.value = '';
                         userReplyTextarea.value = '';
-                        if (userReplyCharCount) userReplyCharCount.innerText = '0/200';
+                        if (userReplyCharCount) userReplyCharCount.innerText = '0/500';
                         userReplyTransInput.value = '';
                         replyModalMask.dataset.charId = '';
                         replyModalMask.dataset.timestamp = '';
@@ -2111,8 +2475,8 @@
                     if (userReplyTextarea && userReplyCharCount) {
                         userReplyTextarea.addEventListener('input', () => {
                             const len = userReplyTextarea.value.length;
-                            userReplyCharCount.innerText = `${len}/200`;
-                            if (len >= 200) {
+                            userReplyCharCount.innerText = `${len}/500`;
+                            if (len >= 500) {
                                 userReplyCharCount.style.color = '#ff4d4f';
                             } else {
                                 userReplyCharCount.style.color = 'var(--text-muted)';
@@ -2125,21 +2489,26 @@
                         userReplyTransBtn.addEventListener('click', () => {
                             const text = userReplyTransInput.value.trim();
                             if (!text) return;
+
+                            const charId = replyModalMask.dataset.charId;
+                            const timestamp = replyModalMask.dataset.timestamp;
+                            const m = (allMoments || []).find(m => String(m.char_id) === String(charId) && String(m.timestamp) === String(timestamp));
+
                             userReplyTransBtn.disabled = true;
                             userReplyTransBtn.innerText = "...";
-                            fetch('/api/translate/zh2jp', {
-                                method: 'POST',
-                                headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({ text: text })
-                            })
-                            .then(r => r.json())
-                            .then(data => {
-                                if (data.translated) {
-                                    userReplyTextarea.value = data.translated;
+                            
+                            requestTranslation(text, m ? buildMomentsContext(m) : '', 'zh_to_ja', charId)
+                            .then(res => {
+                                if (res) {
+                                    userReplyTextarea.value = res;
                                     userReplyTransInput.value = '';
                                     // 翻译后手动触发 input 事件以更新字数
                                     userReplyTextarea.dispatchEvent(new Event('input'));
                                 }
+                            })
+                            .catch(err => {
+                                console.error("Translation failed:", err);
+                                alert("翻译失败，请重试");
                             })
                             .finally(() => {
                                 userReplyTransBtn.disabled = false;
@@ -2257,7 +2626,8 @@
                 function updateAtMenu(textarea) {
                     const text = textarea.value;
                     const pos = textarea.selectionStart;
-                    if (pos === 0) { atMenu.style.display = 'none'; return; }
+                    if (pos === 0) { atMenu.style.display = 'none';                         return;
+                    }
                     
                     const before = text.substring(0, pos);
                     const lastAt = before.lastIndexOf('@');
@@ -2395,6 +2765,11 @@
 
                     // 重新加载数据
                     currentFilterCharId = charId;
+                    
+                    // 【移除相册预览】
+                    const albumSec = document.getElementById('albumEntrySection');
+                    if (albumSec) albumSec.style.display = 'none';
+
                     loadNextPage(true);
                     
                     filterMenu.classList.remove('show');
@@ -2532,5 +2907,7 @@
             });
         })();
     </script>
+  <!-- AI巡航悬浮球 -->
+  <script src="/static/ai-cruise.js"></script>
 </body>
 </html>

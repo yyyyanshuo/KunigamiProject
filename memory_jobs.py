@@ -473,6 +473,9 @@ def _process_single_user_active_messaging(user_id):
             if info.get("light_sleep", False) or info.get("deep_sleep", False):
                 continue
 
+            if info.get("chat_mode", "online") == "offline":
+                continue
+
             db_path, _ = get_paths(char_id)
             if not os.path.exists(db_path):
                 continue

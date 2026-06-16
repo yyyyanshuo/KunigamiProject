@@ -593,6 +593,22 @@
                     <input type="text" id="edit-tickle-input" class="input-full" placeholder="的狐狸脑袋" style="margin:0; text-align:center;">
                 </div>
 
+                <!-- 【新增】回复语言设置 -->
+                <div style="margin-bottom:15px; text-align: left; max-width: 300px; margin: 0 auto;">
+                    <div style="font-size:12px; font-weight:bold; color:#888; margin-bottom:4px;">回复语言 / Reply Language</div>
+                    <input type="text" id="edit-language-input" class="input-full" list="language-options" placeholder="ja, zh, en, English, Spanish..." style="margin:0; text-align:center;">
+                    <datalist id="language-options">
+                        <option value="zh">中文 (Chinese)</option>
+                        <option value="ja">日本語 (Japanese)</option>
+                        <option value="en">English</option>
+                        <option value="ko">한국어 (Korean)</option>
+                        <option value="es">Español (Spanish)</option>
+                        <option value="fr">Français (French)</option>
+                        <option value="de">Deutsch (German)</option>
+                    </datalist>
+                    <div style="font-size:10px; color:#aaa; margin-top:4px; text-align:center;">留空则跟随个人主页设置</div>
+                </div>
+
                 <!-- 【移动到这里】置顶开关 -->
                 <div style="margin-bottom: 15px;">
                     <label style="display: inline-flex; align-items: center; cursor: pointer; color: #555; font-weight: bold; background: #f0f0f0; padding: 8px 15px; border-radius: 20px;">
@@ -608,6 +624,67 @@
                 </div>
             </div>
 
+        </details>
+    </div>
+
+    <!-- 【语音设置模块】 -->
+    <div class="module" id="module-voice">
+        <details>
+            <summary>🔊 语音设置 (Voice Settings)</summary>
+            <div class="content-box" style="padding: 15px 20px;">
+
+                <!-- 1. 上传音频 -->
+                <div style="margin-bottom:20px; padding-bottom:15px; border-bottom:1px solid #eee;">
+                    <div style="font-size:13px; font-weight:bold; color:#555; margin-bottom:6px;">1. 上传音频 / Upload Audio</div>
+                    <div style="font-size:11px; color:#aaa; margin-bottom:8px;">请上传60s以内的音频文件</div>
+                    <input type="file" id="voice-clone-file" accept="audio/*" style="margin-bottom:8px; font-size:12px;">
+                    <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+                        <button class="btn btn-save" onclick="cloneVoice()" id="btn-clone-voice" style="display:inline-block;">生成 / Generate</button>
+                        <span id="clone-status" style="font-size:11px; color:#888;"></span>
+                    </div>
+                    <div id="clone-result" style="display:none; margin-top:6px;">
+                        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                            <input type="text" id="clone-voice-id-result" readonly style="flex:1; min-width:150px; text-align:center; font-size:12px; padding:6px 8px; border:1px solid #ddd; border-radius:6px; background:#f9f9f9;">
+                            <button class="btn" onclick="copyVoiceId('clone-voice-id-result')" style="font-size:11px; padding:4px 12px;">复制 / Copy</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. 填入音色ID -->
+                <div style="margin-bottom:20px; padding-bottom:15px; border-bottom:1px solid #eee;">
+                    <div style="font-size:13px; font-weight:bold; color:#555; margin-bottom:6px;">2. 音色ID / Voice ID</div>
+                    <input type="text" id="voice-id-input" class="input-full" placeholder="fs5rJCTrpRvrfFP8YYoB" style="text-align:center;">
+                    <div style="font-size:10px; color:#aaa; margin-top:6px; text-align:center;">
+                        前往 <a href="https://elevenlabs.io/app/voice-library" target="_blank" style="color:var(--primary-color);">ElevenLabs</a> 寻找合适的音色，或填入上方生成的ID
+                        <span style="display:inline-flex; gap:4px; margin-left:6px;">
+                            <button onclick="copyText('https://elevenlabs.io/app/voice-library')" style="font-size:10px; padding:2px 8px; cursor:pointer; border:1px solid #ddd; border-radius:4px; background:#f5f5f5;">复制链接</button>
+                            <button onclick="window.open('https://elevenlabs.io/app/voice-library','_blank')" style="font-size:10px; padding:2px 8px; cursor:pointer; border:1px solid #ddd; border-radius:4px; background:#f5f5f5;">打开链接</button>
+                        </span>
+                    </div>
+                </div>
+
+                <!-- 3. 当前情绪 -->
+                <div style="margin-bottom:15px;">
+                    <div style="font-size:13px; font-weight:bold; color:#555; margin-bottom:6px;">3. 当前情绪 / Emotion</div>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
+                        <span class="mood-chip" data-mood="平静" onclick="setMood(this)" style="cursor:pointer; background:#e8e8e8; padding:4px 12px; border-radius:12px; font-size:12px; transition:all 0.2s;">平静</span>
+                        <span class="mood-chip" data-mood="开心" onclick="setMood(this)" style="cursor:pointer; background:#e8e8e8; padding:4px 12px; border-radius:12px; font-size:12px; transition:all 0.2s;">开心</span>
+                        <span class="mood-chip" data-mood="悲伤" onclick="setMood(this)" style="cursor:pointer; background:#e8e8e8; padding:4px 12px; border-radius:12px; font-size:12px; transition:all 0.2s;">悲伤</span>
+                        <span class="mood-chip" data-mood="愤怒" onclick="setMood(this)" style="cursor:pointer; background:#e8e8e8; padding:4px 12px; border-radius:12px; font-size:12px; transition:all 0.2s;">愤怒</span>
+                        <span class="mood-chip" data-mood="兴奋" onclick="setMood(this)" style="cursor:pointer; background:#e8e8e8; padding:4px 12px; border-radius:12px; font-size:12px; transition:all 0.2s;">兴奋</span>
+                        <span class="mood-chip" data-mood="害羞" onclick="setMood(this)" style="cursor:pointer; background:#e8e8e8; padding:4px 12px; border-radius:12px; font-size:12px; transition:all 0.2s;">害羞</span>
+                        <span class="mood-chip" data-mood="温柔" onclick="setMood(this)" style="cursor:pointer; background:#e8e8e8; padding:4px 12px; border-radius:12px; font-size:12px; transition:all 0.2s;">温柔</span>
+                        <span class="mood-chip" data-mood="冷淡" onclick="setMood(this)" style="cursor:pointer; background:#e8e8e8; padding:4px 12px; border-radius:12px; font-size:12px; transition:all 0.2s;">冷淡</span>
+                    </div>
+                    <input type="hidden" id="voice-emotion-input" value="">
+                </div>
+
+                <!-- 操作按钮 -->
+                <div class="action-bar" style="justify-content: center; background: transparent; border: none; padding-top: 5px;">
+                    <button class="btn btn-save" onclick="saveVoiceSettings()" style="display: inline-block;">保存语音设置 / Save Voice Settings</button>
+                </div>
+
+            </div>
         </details>
     </div>
 
@@ -676,6 +753,18 @@
                                style="width:60px;"
                                oninput="document.getElementById('intimacy-range').value=this.value; triggerAutoSave()">
                     </div>
+                </div>
+
+                <!-- 聊天模式 -->
+                <div class="status-row">
+                    <div>
+                        <div class="status-label">📡 聊天模式 (Chat Mode)</div>
+                        <div class="status-desc">线上：纯文字即时通讯 / 线下：当面相处，可用括号描述动作</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="chat-mode-chk" onchange="onChatModeChange()">
+                        <span class="slider"></span>
+                    </label>
                 </div>
 
                 <!-- 2. 浅睡眠 (修改了描述) -->
@@ -850,10 +939,12 @@
         });
     }
 
-    const charId = window.location.pathname.split('/').pop();
+    const pathParts = window.location.pathname.split('/').filter(Boolean);
+    const charId = pathParts[pathParts.length - 1];
 
     // 【新增】用于缓存浅睡眠的原始状态
     let cachedLightSleep = true;
+    let cachedDeepSleep = false;
 
     // ========================= 【新增】背景管理函数 =========================
     
@@ -916,10 +1007,11 @@
                 // 保存配置到服务器
                 saveChatBgConfig();
             } else {
-                alert('上传失败: ' + result.error);
+                alert('上传失败: ' + (result.error || '未知错误'));
             }
         } catch(e) {
-            alert('网络错误');
+            console.error("Upload error:", e);
+            alert('网络错误或服务器异常: ' + e.message);
         } finally {
             previewEl.style.opacity = '1';
             input.value = '';
@@ -1023,6 +1115,27 @@
                 // 回显拍一拍后缀：没有配置时展示为空，由 placeholder 做提示
                 document.getElementById('edit-tickle-input').value = data.tickle_suffix || '';
 
+                // 【新增】回显语言设置
+                document.getElementById('edit-language-input').value = data.language || '';
+
+                // 【新增】回显语音模块
+                const voiceModule = document.getElementById('module-voice');
+                if (voiceModule) {
+                    document.getElementById('voice-id-input').value = data.voice_id || '';
+                    const voiceEmotion = data.voice_emotion || '平静';
+                    document.getElementById('voice-emotion-input').value = voiceEmotion;
+                    console.log('[loadCharMeta] voice_id=' + (data.voice_id || '') + ' voice_emotion=' + voiceEmotion + ' raw=' + JSON.stringify(data.voice_emotion));
+                    document.querySelectorAll('#module-voice .mood-chip').forEach(function(c) {
+                        if (c.dataset.mood === voiceEmotion) {
+                            c.style.background = 'var(--primary-color)';
+                            c.style.color = '#fff';
+                        } else {
+                            c.style.background = '#e8e8e8';
+                            c.style.color = '';
+                        }
+                    });
+                }
+
                 // --- 【新增】回显状态 ---
                 // 情绪
                 const emo = data.emotion !== undefined ? data.emotion : 1;
@@ -1058,6 +1171,7 @@
                 // === 【核心修改：睡眠状态回显】 ===
                 // 1. 读取数据库里真实的浅睡眠设定 (如果是 undefined 默认为 true)
                 cachedLightSleep = (data.light_sleep !== undefined) ? data.light_sleep : true;
+                cachedDeepSleep = data.deep_sleep || false;
 
                 const deepSleepOn = data.deep_sleep || false;
                 const lightChk = document.getElementById('light-sleep-chk');
@@ -1075,6 +1189,15 @@
                     lightChk.disabled = false;
                 }
                 // ===================================
+
+                // 聊天模式回显
+                const isOffline = (data.chat_mode === 'offline');
+                document.getElementById('chat-mode-chk').checked = isOffline;
+                if (isOffline) {
+                    // 线下模式：仅锁定双睡眠开关（保持原值不动）
+                    document.getElementById('light-sleep-chk').disabled = true;
+                    document.getElementById('deep-sleep-chk').disabled = true;
+                }
             }
         } catch(e) { console.error("加载失败", e); }
     }
@@ -1094,6 +1217,7 @@
         const newAge = document.getElementById('edit-age-input').value.trim();
         const ageToSend = newAge === '' ? null : parseInt(newAge, 10);
         const tickleSuffix = document.getElementById('edit-tickle-input').value.trim(); // 允许为空
+        const language = document.getElementById('edit-language-input').value.trim(); // 【修改】
 
         try {
             const res = await fetch(`/api/${charId}/update_meta`, {
@@ -1103,7 +1227,8 @@
                     remark: newRemark,
                     pinned: isPinned,
                     age: ageToSend,
-                    tickle_suffix: tickleSuffix
+                    tickle_suffix: tickleSuffix,
+                    language: language // 【修改】
                 })
             });
             const result = await res.json();
@@ -1168,6 +1293,116 @@
         }
     }
 
+    // --- 【新增】声音克隆 ---
+    async function cloneVoice() {
+        const fileInput = document.getElementById('voice-clone-file');
+        const statusEl = document.getElementById('clone-status');
+        const resultDiv = document.getElementById('clone-result');
+        const resultInput = document.getElementById('clone-voice-id-result');
+        const btn = document.getElementById('btn-clone-voice');
+
+        if (!fileInput.files.length) {
+            alert('请先选择一个音频文件');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+        formData.append('name', charId + '_voice');
+
+        btn.disabled = true;
+        btn.textContent = '生成中...';
+        statusEl.textContent = '正在上传并克隆声音...';
+        statusEl.style.color = '#888';
+        resultDiv.style.display = 'none';
+
+        try {
+            const res = await fetch('/api/voice_clone', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await res.json();
+            if (data.status === 'success' && data.voice_id) {
+                resultInput.value = data.voice_id;
+                resultDiv.style.display = 'block';
+                document.getElementById('voice-id-input').value = data.voice_id;
+                statusEl.textContent = '生成成功！已自动填入下方ID框';
+                statusEl.style.color = '#4cd964';
+            } else {
+                statusEl.textContent = '失败: ' + (data.error || '未知错误');
+                statusEl.style.color = '#ff3b30';
+            }
+        } catch (e) {
+            statusEl.textContent = '网络错误: ' + e.message;
+            statusEl.style.color = '#ff3b30';
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '生成 / Generate';
+        }
+    }
+
+    function copyVoiceId(elementId) {
+        const input = document.getElementById(elementId);
+        if (!input || !input.value) return;
+        input.select();
+        input.setSelectionRange(0, 99999);
+        navigator.clipboard.writeText(input.value).then(() => {
+            alert('已复制: ' + input.value);
+        }).catch(() => {
+            alert('复制失败，请手动复制');
+        });
+    }
+
+    function copyText(text) {
+        navigator.clipboard.writeText(text).then(() => {
+            alert('已复制链接');
+        }).catch(() => {
+            prompt('请手动复制链接:', text);
+        });
+    }
+
+    // --- 【新增】语音设置函数 ---
+    function setMood(chip) {
+        document.getElementById('voice-emotion-input').value = chip.dataset.mood;
+        document.querySelectorAll('#module-voice .mood-chip').forEach(function(c) {
+            if (c === chip) {
+                c.style.background = 'var(--primary-color)';
+                c.style.color = '#fff';
+            } else {
+                c.style.background = '#e8e8e8';
+                c.style.color = '';
+            }
+        });
+    }
+
+    async function saveVoiceSettings() {
+        const voiceId = document.getElementById('voice-id-input').value.trim();
+        const voiceEmotion = document.getElementById('voice-emotion-input').value.trim();
+        const btn = document.querySelector('#module-voice .btn-save');
+        const originalText = btn.textContent;
+        btn.textContent = '保存中...';
+        btn.disabled = true;
+        console.log('[saveVoiceSettings] voice_id=' + voiceId + ' voice_emotion=' + voiceEmotion);
+        try {
+            const res = await fetch(`/api/${charId}/update_meta`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ voice_id: voiceId, voice_emotion: voiceEmotion })
+            });
+            const result = await res.json();
+            if (result.status === 'success') {
+                alert('语音设置保存成功！\n语音ID: ' + voiceId + '\n情绪: ' + (voiceEmotion || '未设置'));
+            } else {
+                alert('保存失败: ' + (result.error || '未知错误'));
+            }
+        } catch (e) {
+            alert('网络错误: ' + e.message);
+        } finally {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    }
+
     // --- 初始化部分 ---
     loadCharMeta(); // <--- 【关键】页面加载时执行这个
     initChatBackground(); // 【新增】初始化聊天背景
@@ -1194,6 +1429,11 @@
     // ================= 渲染视图逻辑 (View Mode) =================
 
     function renderView(key, data) {
+        // 【防御】如果传入了对象（如base的{system_prompt,visual_descriptions}），自动提取文本
+        if (data && typeof data === 'object' && data.system_prompt !== undefined) {
+            data = data.system_prompt || '';
+        }
+
         const container = document.querySelector(`#module-${key} .view-mode`);
         
         // 1. Markdown 渲染
@@ -1475,17 +1715,34 @@
     }
 
     function buildEditor(key, container) {
-        const data = GLOBAL_DATA[key];
+        let data = GLOBAL_DATA[key];
+        // 【防御】如果base存成了对象，自动提取文本
+        if (data && typeof data === 'object' && data.system_prompt !== undefined) {
+            data = data.system_prompt || '';
+        }
+        
         const module = container.closest('.module');
         const viewMode = module.querySelector('.view-mode');
         container.innerHTML = ''; // 清空
 
-        // 1. Markdown 编辑器
+        // 1. Markdown 编辑器 (包括 Base)
         if(CONFIG[key].method === 'renderMD') {
             let extraHtml = '';
             // 【新增】只在角色人设(base)模块显示 AI生成按钮
             if (key === 'base') {
-                extraHtml = `<button class="btn" style="background:#e1bee7; color:#4a148c; margin-bottom:10px; width:100%;" onclick="openGenModal()">✨ AI 自动编写人设</button>`;
+                extraHtml = `
+                <div class="base-meta-editor" style="background:#f9f9f9; padding:15px; border-radius:12px; margin-bottom:15px; border:1px solid #eee;">
+                    <div style="font-size:13px; font-weight:bold; margin-bottom:10px; color:var(--primary-color);">🎨 生图外貌设定 (Visual Descriptions)</div>
+                    <div style="margin-bottom:10px;">
+                        <label style="font-size:12px; color:#666;">生图 Tags (英文):</label>
+                        <input type="text" id="visual-tags" class="field-input" style="width:100%; margin-top:5px;" value="${(GLOBAL_DATA.visual_descriptions && GLOBAL_DATA.visual_descriptions.tags) || ''}" placeholder="e.g. 1girl, black hair, glasses">
+                    </div>
+                    <div>
+                        <label style="font-size:12px; color:#666;">中文外貌简述:</label>
+                        <input type="text" id="visual-desc" class="field-input" style="width:100%; margin-top:5px;" value="${(GLOBAL_DATA.visual_descriptions && GLOBAL_DATA.visual_descriptions.description) || ''}" placeholder="用于识图或简单描述...">
+                    </div>
+                </div>
+                <button class="btn" style="background:#e1bee7; color:#4a148c; margin-bottom:10px; width:100%;" onclick="openGenModal()">✨ AI 自动编写人设 (JSON版)</button>`;
             }
 
             container.innerHTML = `${extraHtml}<textarea class="md-editor">${data || ''}</textarea>`;
@@ -1683,6 +1940,11 @@
                 <div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">
                     <button class="mode-btn ${!isReverse ? 'active' : ''}" onclick="switchRelationMode('${key}', 'normal')">我的视角</button>
                     <button class="mode-btn ${isReverse ? 'active' : ''}" onclick="switchRelationMode('${key}', 'reverse')">对方视角</button>
+                    
+                    ${!isReverse ? `
+                        <button class="btn" style="background: #e1bee7; color: #4a148c; margin-left: auto;" 
+                                onclick="aiCompleteRelation()">✨ AI 补全关系</button>
+                    ` : ''}
                 </div>
             `;
             
@@ -1695,6 +1957,7 @@
                 }
                 const revData = JSON.parse(viewMode.dataset.reverseBody || '{}');
                 const listDiv = document.createElement('div');
+                listDiv.className = 'edit-list-container';
                 Object.keys(revData).forEach(sourceCid => {
                     const info = revData[sourceCid];
                     const score = info.score != null ? info.score : 1;
@@ -1723,6 +1986,7 @@
             } else {
                 const names = Object.keys(data);
                 const listDiv = document.createElement('div');
+                listDiv.className = 'edit-list-container';
                 names.forEach(name => {
                     const info = data[name];
                     const score = info.score != null ? info.score : 1;
@@ -1875,12 +2139,13 @@
                 if (c.id === 'user') return; // 再次确保
 
                 const displayName = (c.remark && c.remark !== c.name) ? `${c.remark} (${c.name})` : c.name;
+                const avatarUrl = window.getCosUrl ? window.getCosUrl(c.avatar || '/static/default_avatar.png') : (c.avatar || '/static/default_avatar.png');
 
                 if (c.id !== charId && c.type !== 'group' && !existingNames.includes(name)) {
                     html += `
                         <div style="padding:12px; border-bottom:1px solid #f9f9f9; border-top:none; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="appendRelRowByName('${name.replace(/'/g, "\\'")}')">
                             <div style="display:flex; align-items:center;">
-                                <img src="${c.avatar || '/static/default_avatar.png'}" style="width:30px; height:30px; border-radius:50%; margin-right:10px; object-fit:cover;">
+                                <img src="${avatarUrl}" style="width:30px; height:30px; border-radius:50%; margin-right:10px; object-fit:cover;">
                                 <span style="font-size:14px; color:#444;">${displayName}</span>
                             </div>
                             <span style="color:var(--primary-color); font-size:12px;">+ 选择</span>
@@ -1979,11 +2244,12 @@
                     const name = c.name; 
                     // 【优化】只有当备注存在且与原名不同时才显示括号
                     const displayName = (c.remark && c.remark !== c.name) ? `${c.remark} (${c.name})` : c.name;
+                    const avatarUrl = window.getCosUrl ? window.getCosUrl(c.avatar || '/static/default_avatar.png') : (c.avatar || '/static/default_avatar.png');
 
                     html += `
                         <div style="padding:12px; border-bottom:1px solid #f9f9f9; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="addReverseMemberRow('${c.id}', '${name.replace(/'/g, "\\'")}')">
                             <div style="display:flex; align-items:center;">
-                                <img src="${c.avatar || '/static/default_avatar.png'}" style="width:30px; height:30px; border-radius:50%; margin-right:10px; object-fit:cover;">
+                                <img src="${avatarUrl}" style="width:30px; height:30px; border-radius:50%; margin-right:10px; object-fit:cover;">
                                 <span style="font-size:14px; color:#444;">${displayName}</span>
                             </div>
                             <span style="color:var(--primary-color); font-size:12px;">+ 添加</span>
@@ -2064,7 +2330,18 @@
 
         // 1. Markdown 保存
         if(CONFIG[key].method === 'renderMD') {
-            newData = container.querySelector('textarea').value;
+            if (key === 'base') {
+                // 如果是 base，我们需要构造 JSON 结构
+                newData = {
+                    "system_prompt": container.querySelector('textarea').value,
+                    "visual_descriptions": {
+                        "tags": document.getElementById('visual-tags').value,
+                        "description": document.getElementById('visual-desc').value
+                    }
+                };
+            } else {
+                newData = container.querySelector('textarea').value;
+            }
         }
 
         // 2. Short 保存 (特殊：只更新了那一天，需要合并回 GLOBAL_DATA)
@@ -2194,9 +2471,16 @@
             const result = await res.json();
             if(result.status === 'success') {
                 // 更新本地缓存
-                GLOBAL_DATA[key] = newData;
-                // 重新渲染视图
-                renderView(key, newData);
+                if (key === 'base' && typeof newData === 'object') {
+                    GLOBAL_DATA[key] = newData.system_prompt || '';
+                    GLOBAL_DATA['visual_descriptions'] = newData.visual_descriptions || {};
+                    // 重新渲染视图时传入纯文本
+                    renderView(key, GLOBAL_DATA[key]);
+                } else {
+                    GLOBAL_DATA[key] = newData;
+                    // 重新渲染视图
+                    renderView(key, newData);
+                }
                 // 退出编辑模式
                 module.classList.remove('editing');
                 btn.textContent = '保存 / Save';
@@ -2234,8 +2518,8 @@
             let count = 0;
 
             contacts.forEach(c => {
-                // 排除自己 (charId 是全局变量)
-                if (c.id !== charId) {
+                // 排除自己 (charId 是全局变量) 以及群组
+                if (c.id !== charId && c.type !== 'group') {
                     html += `<option value="${c.id}">${c.remark || c.name}</option>`;
                     count++;
                 }
@@ -2319,9 +2603,14 @@
             const result = await res.json();
 
             if(result.status === 'success') {
-                // 关闭输入框，打开预览框
+                // 【修复】Base的人设部分，后台回复可能是Object，直接JSON显示预览
+                const previewText = document.getElementById('gen-preview-text');
+                if (typeof result.content === 'object') {
+                    previewText.value = JSON.stringify(result.content, null, 2);
+                } else {
+                    previewText.value = result.content;
+                }
                 document.getElementById('genInputModal').style.display = 'none';
-                document.getElementById('gen-preview-text').value = result.content;
                 document.getElementById('genPreviewModal').style.display = 'flex';
             } else {
                 alert("生成失败: " + result.error);
@@ -2335,14 +2624,31 @@
     }
 
     function applyGeneratedPersona() {
-        const content = document.getElementById('gen-preview-text').value;
+        // 修改这里的解析逻辑以支持 JSON 格式
+        let content = document.getElementById('gen-preview-text').value;
         if(!content) return;
 
-        // 1. 把内容填入主编辑器的文本框
-        // 我们需要找到当前展开的 base 模块的 textarea
+        // 尝试解析 JSON
+        let jsonObj = null;
+        try {
+            // 清理可能的 Markdown 包裹
+            let clean = content.replace(/^```json\s*|\s*```$/g, '').trim();
+            jsonObj = JSON.parse(clean);
+        } catch(e) {}
+
         const editor = document.querySelector('#module-base .md-editor');
         if(editor) {
-            editor.value = content;
+            if (jsonObj && jsonObj.system_prompt) {
+                editor.value = jsonObj.system_prompt;
+                if (jsonObj.visual_descriptions) {
+                    const tagsInput = document.getElementById('visual-tags');
+                    const descInput = document.getElementById('visual-desc');
+                    if (tagsInput) tagsInput.value = jsonObj.visual_descriptions.tags || '';
+                    if (descInput) descInput.value = jsonObj.visual_descriptions.description || '';
+                }
+            } else {
+                editor.value = content;
+            }
             // 2. 关闭弹窗
             document.getElementById('genPreviewModal').style.display = 'none';
             alert("已填入编辑器！\n请检查无误后，点击下方的「保存」按钮写入文件。");
@@ -2769,6 +3075,28 @@
         saveStatusDirect();
     }
 
+    // 3. 点击"聊天模式"时触发
+    function onChatModeChange() {
+        const isOffline = document.getElementById('chat-mode-chk').checked;
+        const lightChk = document.getElementById('light-sleep-chk');
+        const deepChk = document.getElementById('deep-sleep-chk');
+
+        if (isOffline) {
+            // 切换到线下：锁定双睡眠开关（保持原值不动，仅禁止手动修改）
+            if (!lightChk.disabled) cachedLightSleep = lightChk.checked;
+            cachedDeepSleep = deepChk.checked;
+            lightChk.disabled = true;
+            deepChk.disabled = true;
+        } else {
+            // 切换到线上：解锁开关，恢复到缓存值
+            lightChk.disabled = false;
+            deepChk.disabled = false;
+            lightChk.checked = cachedLightSleep;
+            deepChk.checked = cachedDeepSleep;
+        }
+        saveStatusDirect();
+    }
+
     // --- 情绪模式逻辑 ---
 
     // 切换模式 (0-1 vs 1-20)
@@ -2904,7 +3232,8 @@
                     light_sleep: lightSleepToSave, // <--- 传这个修正后的值
                     deep_sleep: deepSleep,
                     ds_start: dsStart,
-                    ds_end: dsEnd
+                    ds_end: dsEnd,
+                    chat_mode: document.getElementById('chat-mode-chk').checked ? 'offline' : 'online'
                 })
             });
 
@@ -2917,6 +3246,124 @@
             console.error(e);
             showSaveStatus('error');
         }
+    }
+
+    // --- 【新增】AI 关系图谱补全前端逻辑 ---
+    async function aiCompleteRelation() {
+        // 1. 采集当前编辑器的数据
+        const currentGraph = {};
+        const cards = document.querySelectorAll('#module-relation .rel-edit-card');
+        cards.forEach(card => {
+            const name = card.querySelector('.input-key')?.value.trim();
+            const role = card.querySelector('.input-val')?.value.trim();
+            const scoreInput = card.querySelector('.input-score');
+            const score = scoreInput ? parseFloat(scoreInput.value) : 1;
+            const description = card.querySelector('.input-full')?.value.trim();
+            if (name) {
+                currentGraph[name] = { role, score, description };
+            }
+        });
+
+        const charName = document.getElementById('view-remark').textContent.trim();
+        // 尝试从 Base 获取 Tags
+        const baseContent = GLOBAL_DATA.base || '';
+        let charTags = '';
+        if (typeof baseContent === 'string') {
+             const tagMatch = baseContent.match(/标签[:：]\s*(.*)/);
+             if (tagMatch) charTags = tagMatch[1];
+        }
+
+        const btn = document.querySelector('[onclick="aiCompleteRelation()"]');
+        const originalText = btn.innerHTML;
+        btn.innerHTML = "✨ 正在补全...";
+        btn.disabled = true;
+
+        try {
+            const res = await fetch("/api/memory/ai_complete_relation", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    char_id: charId,
+                    name: charName,
+                    tags: charTags,
+                    current_graph: JSON.stringify(currentGraph)
+                })
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                let relData = data.graph;
+                if (typeof relData === 'string') relData = JSON.parse(relData);
+                showRelationAiPreview(relData, currentGraph);
+            } else {
+                alert("AI 补全失败: " + data.error);
+            }
+        } catch(e) {
+            console.error(e);
+            alert("请求失败，请检查网络");
+        } finally {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+    }
+
+    function showRelationAiPreview(relData, oldData) {
+        const modal = document.getElementById('aiPreviewModal');
+        const content = document.getElementById('ai-preview-content');
+        content.innerHTML = '';
+
+        for (let n in relData) {
+            const info = relData[n];
+            const isObj = typeof info === 'object' && info !== null;
+            const role = isObj ? info.role : '未知';
+            const score = isObj ? info.score : 1;
+            const desc = isObj ? (info.description || info.desc || '') : info;
+
+            const item = document.createElement('div');
+            item.style.cssText = "background:#f8f9fb; padding:15px; border-radius:16px; border-left:4px solid var(--primary-color); margin-bottom:12px; box-shadow: 0 2px 8px rgba(0,0,0,0.03);";
+            item.innerHTML = `
+                <div style="font-size:14px; font-weight:700; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
+                    <span>👤 ${n} <small style="background:var(--primary-rgba-light); color:var(--primary-dark); padding:2px 6px; border-radius:6px; margin-left:6px; font-weight:normal;">${role}</small></span>
+                    <span style="font-size:11px; color:#aaa;">指数: ${score}</span>
+                </div>
+                <div style="font-size:13px; color:#666; line-height:1.5;">${desc}</div>
+            `;
+            content.appendChild(item);
+        }
+
+        document.getElementById('apply-ai-btn').onclick = () => {
+             // 确认应用逻辑：清空当前列表并重新填充
+             const editMode = document.querySelector('#module-relation .edit-mode');
+             // 找到列表容器
+             const listDiv = editMode.querySelector('.edit-list-container') || editMode.querySelector('div:has(> .rel-edit-card)');
+             if (listDiv) {
+                 listDiv.innerHTML = '';
+                 // 重新渲染全部
+                 for (let name in relData) {
+                     const info = relData[name];
+                     const score = info.score != null ? info.score : 1;
+                     listDiv.innerHTML += `
+                       <div class="rel-edit-card">
+                           <div class="input-group">
+                               <input type="text" class="input-key" value="${name}" placeholder="姓名">
+                               <input type="text" class="input-val" value="${info.role}" placeholder="关系定位">
+                               <label class="rel-score-wrap" title="该角色认为自己与此人关系的程度">
+                                   <span class="rel-score-label">指数</span>
+                                   <input type="number" class="input-score" value="${score}" min="0" step="0.1" placeholder="1">
+                               </label>
+                               <button class="btn-del" onclick="this.closest('.rel-edit-card').remove()">×</button>
+                           </div>
+                           <textarea class="input-full" rows="2" placeholder="详细描述">${info.description || info.desc || ''}</textarea>
+                       </div>`;
+                 }
+             }
+             closeAiPreview();
+        };
+
+        modal.style.display = 'flex';
+    }
+
+    function closeAiPreview() {
+        document.getElementById('aiPreviewModal').style.display = 'none';
     }
 
     // C. 视觉反馈小工具
@@ -2942,5 +3389,21 @@
     }
 </script>
 
+    <!-- AI 关系图谱补全预览 Modal -->
+    <div id="aiPreviewModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1100; align-items:center; justify-content:center; backdrop-filter: blur(4px);">
+        <div style="background:white; padding:24px; border-radius:24px; width:90%; max-width:500px; max-height:80vh; overflow-y:hidden; display:flex; flex-direction:column; box-shadow: 0 10px 40px rgba(0,0,0,0.2);">
+            <h3 style="margin-top:0; margin-bottom:15px; text-align:center; color:var(--primary-color);">✨ AI 补全预览</h3>
+            <p style="font-size:12px; color:#888; text-align:center; margin-bottom:15px;">以下是 AI 为您生成的补充建议，确认为替换当前表单内容。</p>
+            <div id="ai-preview-content" style="flex:1; overflow-y:auto; margin-bottom:20px; padding-right:5px;">
+                <!-- 动态填充 -->
+            </div>
+            <div style="display: flex; gap: 12px;">
+                <button type="button" class="btn" style="flex: 1; background: #eee; color: #666;" onclick="closeAiPreview()">取消</button>
+                <button type="button" class="btn" style="flex: 1; background: var(--primary-color); color: white;" id="apply-ai-btn">确认应用</button>
+            </div>
+        </div>
+    </div>
+  <!-- AI巡航悬浮球 -->
+  <script src="/static/ai-cruise.js"></script>
 </body>
 </html>

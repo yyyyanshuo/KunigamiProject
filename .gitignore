@@ -46,3 +46,13 @@ output.txt
 QUICK_REFERENCE.md
 verify_fixes.py
 verify_modifications.py
+check_identity.py
+debug_v2_prompt.py
+diagnose_all_users.py
+diagnose_prompt_instructions.txt
+diagnose_prompt.py
+fix_all_user_prompts.py
+push_log.txt
+SYSTEM_PROMPT_FIX_REPORT.md
+test_user4_prompt.py
+UPDATE_SUMMARY.md

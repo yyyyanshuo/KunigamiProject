@@ -13,10 +13,15 @@
     <link rel="apple-touch-icon" href="/static/logo.png">
 
     <title>消息列表</title>
+    <!-- 【新增】主题加载脚本 -->
+    <script src="/static/theme-loader.js"></script>
+  <script>
+    window.GLOBAL_COS_BASE_URL = "{{ COS_BASE_URL | default('') }}";
+    window.GLOBAL_USER_PREFIX = "users/{{ session.get('user_id', 1) }}";
+  </script>
     <style>
         :root {
-            --primary: #ffb6b9;
-            --primary-light: #fff0f2;
+            --primary-color: #ffb6b9;
             --primary-dark: #f09598;
             --bg-color: #f5f7fa;
             --card-bg: #ffffff;
@@ -59,7 +64,7 @@
             background: var(--primary-light); color: var(--primary-dark);
             cursor: pointer; transition: all 0.2s;
         }
-        .header-add-btn:active { transform: scale(0.9); background: var(--primary); color: #fff; }
+        .header-add-btn:active { transform: scale(0.9); background: var(--primary-color); color: #fff; }
         .header-add-btn svg { width: 16px; height: 16px; stroke-width: 2.5px; }
 
         /* 消息列表区 */
@@ -78,7 +83,7 @@
         .contact-item.pinned { background: #fdfdfd; }
         .contact-item.pinned::before {
             content: ''; position: absolute; left: 0; top: 18%; bottom: 18%; width: 3px;
-            background: linear-gradient(to bottom, var(--primary), #ffa1a5);
+            background: linear-gradient(to bottom, var(--primary-color), var(--primary-dark));
             border-top-right-radius: 3px; border-bottom-right-radius: 3px;
         }
 
@@ -130,7 +135,7 @@
             cursor: pointer; font-size: 14px; font-weight: 500; color: var(--text-main);
             white-space: nowrap; transition: all 0.2s; display: flex; align-items: center; gap: 6px;
         }
-        #plusMenu div:hover, #plusMenu div:active { background-color: var(--primary-light); color: var(--primary-dark); }
+        #plusMenu div:hover, #plusMenu div:active { background-color: var(--primary-rgba-light); color: var(--primary-dark); }
         #plusMenu div:last-child { border-bottom: none; }
 
         /* --- 弹窗美化 (Modals) --- */
@@ -157,7 +162,7 @@
             background: #f0f2f5; border-radius: var(--radius-md); font-size: 14px; color: var(--text-main);
             transition: all 0.2s; outline: none; box-sizing: border-box; font-family: inherit;
         }
-        .input-field:focus { background: #fff; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(255,182,185,0.15); }
+        .input-field:focus { background: #fff; border-color: var(--primary-color); box-shadow: 0 0 0 3px var(--primary-rgba-lighter); }
 
         #char-selection-list {
             max-height: 180px; overflow-y: auto; border: 1px solid var(--border-color);
@@ -171,21 +176,21 @@
         }
         .btn-cancel:hover { background: #e4e6eb; color: var(--text-main); }
         .btn-submit {
-            flex: 1; padding: 12px; border: none; background: linear-gradient(135deg, var(--primary), #ffa1a5); color: #fff;
+            flex: 1; padding: 12px; border: none; background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color: #fff;
             border-radius: 24px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s;
-            box-shadow: 0 4px 12px rgba(255, 182, 185, 0.4);
+            box-shadow: 0 4px 12px var(--primary-rgba-dark);
         }
-        .btn-submit:active { transform: scale(0.96); box-shadow: 0 2px 6px rgba(255, 182, 185, 0.4); }
+        .btn-submit:active { transform: scale(0.96); box-shadow: 0 2px 6px var(--primary-rgba-dark); }
 
         /* --- 多选模式 --- */
         .header-actions .header-add-wrap { display: flex; align-items: center; gap: 8px; }
         .header-actions.select-mode .header-add-wrap { display: none; }
         .contact-item .select-checkbox { display: none; margin-right: 12px; flex-shrink: 0; width: 22px; height: 22px; cursor: pointer; border-radius: 50%; -webkit-appearance: none; appearance: none; border: 2px solid #ccc; background: #fff; box-sizing: border-box; position: relative; }
-        .contact-item .select-checkbox:checked { background: var(--primary); border-color: var(--primary); }
+        .contact-item .select-checkbox:checked { background: var(--primary-color); border-color: var(--primary-color); }
         .contact-item .select-checkbox:checked::after { content: ''; position: absolute; left: 5px; top: 2px; width: 6px; height: 11px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
         .select-mode .contact-item .select-checkbox { display: block; }
         .select-mode .contact-item { cursor: pointer; }
-        .select-mode .contact-item:active { background: var(--primary-light); }
+        .select-mode .contact-item:active { background: var(--primary-rgba-light); }
         .multi-select-bar {
             display: none; position: fixed; bottom: 0; left: 0; right: 0;
             background: rgba(255,255,255,0.98); backdrop-filter: blur(10px);
@@ -204,28 +209,37 @@
             width: 22px; height: 22px; cursor: pointer; border-radius: 50%;
             -webkit-appearance: none; appearance: none; border: 2px solid #ccc; background: #fff; box-sizing: border-box; position: relative; flex-shrink: 0;
         }
-        .multi-select-bar .select-all-checkbox:checked { background: var(--primary); border-color: var(--primary); }
+        .multi-select-bar .select-all-checkbox:checked { background: var(--primary-color); border-color: var(--primary-color); }
         .multi-select-bar .select-all-checkbox:checked::after { content: ''; position: absolute; left: 5px; top: 2px; width: 6px; height: 11px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
         .multi-select-bar .btn-third { flex: 1; min-width: 0; padding: 10px 8px; border-radius: 20px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; }
         .multi-select-bar .action-dropdown-wrap { position: relative; flex: 1; min-width: 0; }
         .multi-select-bar .btn-action {
             width: 100%; padding: 10px 8px; border-radius: 20px; font-size: 13px; font-weight: 600;
-            background: var(--primary-light); color: var(--primary-dark); border: none;
+            background: var(--primary-rgba-light); color: var(--primary-dark); border: none;
             cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
         }
         .multi-select-bar .btn-action:active { transform: scale(0.96); }
         .multi-select-bar .btn-cancel-bar { flex: 1; min-width: 0; padding: 10px 8px; border-radius: 20px; background: #f0f2f5; color: var(--text-muted); border: none; font-weight: 600; cursor: pointer; font-size: 13px; }
-        .multi-select-bar .btn-save-bar { flex: 1; min-width: 0; padding: 10px 8px; border-radius: 20px; background: linear-gradient(135deg, var(--primary), #ffa1a5); color: #fff; border: none; font-weight: 600; cursor: pointer; font-size: 13px; }
+        .multi-select-bar .btn-save-bar { flex: 1; min-width: 0; padding: 10px 8px; border-radius: 20px; background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color: #fff; border: none; font-weight: 600; cursor: pointer; font-size: 13px; }
         #actionDropdown { display: none; position: absolute; bottom: 100%; left: 0; margin-bottom: 6px; background: #fff; box-shadow: 0 6px 20px rgba(0,0,0,0.15); border-radius: 12px; min-width: 180px; max-height: 60vh; overflow-y: auto; z-index: 1000; border: 1px solid var(--border-color); }
         #actionDropdown.show { display: block; }
         #actionDropdown div { padding: 12px 16px; cursor: pointer; font-size: 14px; color: var(--text-main); border-bottom: 1px solid #f5f5f5; }
         #actionDropdown div:last-child { border-bottom: none; }
-        #actionDropdown div:hover, #actionDropdown div:active { background: var(--primary-light); color: var(--primary-dark); }
+        #actionDropdown div:hover, #actionDropdown div:active { background: var(--primary-rgba-light); color: var(--primary-dark); }
         #actionDropdown div.disabled { color: #bbb; cursor: not-allowed; }
     </style>
 </head>
 
 <body>
+
+<!-- 【新增】主题加载屏幕 -->
+<div id="theme-loading-screen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:#f5f5f5;display:flex;align-items:center;justify-content:center;z-index:10000;opacity:1;">
+  <div style="text-align:center;">
+    <div style="width:40px;height:40px;border:3px solid #ddd;border-top:3px solid #999;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 20px;"></div>
+    <div style="color:#999;font-size:14px;">加载中...</div>
+  </div>
+  <style>@keyframes spin { to { transform:rotate(360deg); } }</style>
+</div>
 
 <div class="header">
     <span class="header-title" id="headerTitle">消息</span>
@@ -248,6 +262,7 @@
             </div>
         </div>
         <div id="plusMenu">
+            <div onclick="location.href='/square'"><span style="font-size:14px;">🌟</span> 角色广场</div>
             <div onclick="openAddCharModal()"><span style="font-size:14px;">👤</span> 新建联系人</div>
             <div onclick="openAddGroupModal()"><span style="font-size:14px;">👥</span> 新建群聊</div>
         </div>
@@ -281,6 +296,9 @@
         <div class="modal-actions">
             <button onclick="closeAddModal()" class="btn-cancel">取消</button>
             <button onclick="submitNewChar()" class="btn-submit">创建</button>
+        </div>
+        <div style="text-align: center; margin-top: 15px; font-size: 13px;">
+            <a href="/square" style="color: var(--primary-color, #ffb6b9); text-decoration: none;">没有灵感？去角色广场看看 →</a>
         </div>
     </div>
 </div>
@@ -391,13 +409,14 @@
         const listDiv = document.getElementById('char-selection-list');
         listDiv.innerHTML = '';
 
-        // 遍历缓存的联系人数据，只显示单人角色(type='char')
+        // 遍历缓存的联系人数据，只显示单人角色(type='chat')
         allContactsData.forEach(c => {
-            if (c.type === 'char') {
+            if (c.type === 'chat') {
+                const avatarUrl = window.getCosUrl ? window.getCosUrl(c.avatar) : c.avatar;
                 listDiv.innerHTML += `
                   <label style="display:flex; align-items:center; padding:8px; border-bottom:1px solid #f9f9f9;">
                       <input type="checkbox" value="${c.id}" class="char-checkbox" style="margin-right:10px;">
-                      <img src="${c.avatar}" style="width:24px; height:24px; border-radius:4px; margin-right:8px;">
+                      <img src="${avatarUrl}" style="width:24px; height:24px; border-radius:4px; margin-right:8px;">
                       <span>${c.remark}</span>
                   </label>
               `;
@@ -470,11 +489,14 @@
             const escapedMsg = (c.last_msg || '暂无消息').replace(/"/g, '&quot;').replace(/</g, '&lt;');
             const escapedTime = (c.last_time || '').replace(/"/g, '&quot;');
 
+            const avatarValue = c.avatar || (type === 'group' ? '/static/default_group.png' : '/static/default_avatar.png');
+            const avatarUrl = window.getCosUrl ? window.getCosUrl(avatarValue) : avatarValue;
+            const fallbackAvatar = type === 'group' ? '/static/default_group.png' : '/static/default_avatar.png';
             html += `
           <div class="contact-item ${pinnedClass}" data-id="${c.id}" data-type="${type}" data-pinned="${!!c.pinned}"
                onclick="handleContactItemClick(this, event, '${jumpUrl}')">
               <input type="checkbox" class="select-checkbox" onclick="event.stopPropagation(); handleCheckboxClick(this)">
-              <img src="${c.avatar}" class="avatar" onerror="this.src='/static/default_avatar.png'">
+              <img src="${avatarUrl}" class="avatar" onerror="this.src='${fallbackAvatar}'">
               <div class="info">
                   <div class="top-row">
                       <span class="name">${escapedRemark} ${unreadHtml}</span>
@@ -815,15 +837,17 @@
     </div>
     <div style="padding:20px 0; font-size:13px; color:#8ca0b3; line-height:1.6; text-align:center;">
       <p style="margin:0 0 8px 0;">开发者是用爱发电的卑微大学生，为了给大家提供不卡顿的 38ms 极速通道和最聪明的 AI，服务器每天都在疯狂燃烧我的余额😭</p>
-      <p style="margin:8px 0; font-weight:600; color:#ffb6b9;">如果这个角色曾经治愈过你，求老板请我喝瓶可乐续命！</p>
+      <p style="margin:8px 0; font-weight:600; color:var(--primary-color);">如果这个角色曾经治愈过你，求老板请我喝瓶可乐续命！</p>
       <p style="margin:8px 0 0 0;">你的每一分钱都会变成新功能开发的代码！</p>
     </div>
     <div style="display:flex; gap:12px; margin:20px 0 0 0;">
       <button onclick="document.getElementById('daily-donate-modal').style.display='none'; localStorage.setItem('last_donate_show', new Date().toISOString().split('T')[0]);" style="flex:1; background:#f5f5f5; color:#555; border:none; padding:10px; border-radius:10px; cursor:pointer; font-weight:600;">稍后再说</button>
-      <a href="/profile" style="flex:1; background:#ffb6b9; color:white; border:none; text-decoration:none; text-align:center; padding:10px; border-radius:10px; font-weight:600;">查看收款码</a>
+      <a href="/profile" style="flex:1; background:var(--primary-color); color:white; border:none; text-decoration:none; text-align:center; padding:10px; border-radius:10px; font-weight:600;">查看收款码</a>
     </div>
   </div>
 </div>
 
+  <!-- AI巡航悬浮球 -->
+  <script src="/static/ai-cruise.js"></script>
 </body>
 </html>

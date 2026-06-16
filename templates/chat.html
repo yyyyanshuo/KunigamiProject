@@ -315,6 +315,40 @@
     .message-group.user .message-content-row .avatar-spacer { margin-left: 10px; }
     .message-group.assistant .message-content-row .avatar-spacer { margin-right: 10px; }
 
+    /* 【新增】AI 巡航行样式 */
+    .cruise-row {
+      flex: 0 0 auto;
+      width: 100%;
+      order: -1; /* 始终在最上方 */
+      text-align: center;
+      font-size: 12px;
+      color: #999;
+      margin: 4px 0 8px 0;
+      padding: 2px 0;
+      cursor: pointer;
+      line-height: 1.4;
+      transition: color 0.2s;
+      box-sizing: border-box;
+    }
+    .cruise-row:hover { color: #666; }
+    .cruise-content {
+      display: none;
+      text-align: center;
+      font-size: 11px;
+      color: #777;
+      margin-top: 4px;
+      padding: 8px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      background: none;
+      border-radius: 8px;
+    }
+    .cruise-row.expanded .cruise-content { display: block; }
+    .cruise-row.expanded .cruise-toggle-icon { transform: rotate(180deg); }
+    .cruise-summary { display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .cruise-toggle-icon { font-size: 10px; transition: transform 0.2s; }
+    .cruise-url { color: var(--primary-color); text-decoration: underline; margin-bottom: 4px; word-break: break-all; }
+
     /* 3. 外部控制容器 (修改版：一直显示 + 水平对齐) */
     .controls-container {
       display: flex;
@@ -671,6 +705,10 @@
     .bubble-sticker { cursor: pointer; padding: 4px; }
     .bubble-sticker .sticker-msg-img { max-width: 120px; max-height: 120px; display: block; border-radius: 8px; }
 
+    .bubble-voice { padding: 10px 14px; min-width: 180px; }
+    .bubble-voice .voice-play-btn:hover { background: var(--primary-color) !important; }
+    .bubble-voice .voice-play-btn:hover svg { fill: #fff !important; }
+
     /* 其它内部样式保持不变 */
     .qp-header {
       padding: 8px 15px; background: #fafafa; border-bottom: 1px solid #eee;
@@ -715,7 +753,7 @@
 
     /* 助手消息容器微调 */
     .message-group.assistant {
-      /* 保持原样，但注意我们稍后会动态修改里面的头像 */
+      display: flex; /* 补充规则避免空规则警告 */
     }
 
     /* --- @提及栏样式 --- */
@@ -895,6 +933,10 @@
       <div class="more-btn"><span>💬</span></div>
       <span class="more-label">常用语</span>
     </div>
+    <div class="more-item" data-action="cruise" onclick="morePanelAction('cruise')">
+      <div class="more-btn"><span>🌐</span></div>
+      <span class="more-label">AI巡航</span>
+    </div>
   </div>
 </div>
 
@@ -1041,6 +1083,12 @@
 <!-- 【最终的、绝对正确的 <script> 标签】-->
 <script>
   // --- 1. 核心状态 ---
+  const currentUserId = parseInt("{{ session.get('user_id', 1) }}") || 1;
+  // 【新增】设置全局 COS 变量供 theme-loader.js 使用
+  window.GLOBAL_USER_PREFIX = 'users/' + currentUserId;
+  // 如果后端有传 cos_base_url 可以填在这，否则 theme-loader 会去查 localStorage
+  // window.GLOBAL_COS_BASE_URL = '...'; 
+
   const pathParts = window.location.pathname.split('/').filter(Boolean);
   // 判断是否为群聊 (URL包含 group)
   const isGroupMode = window.location.pathname.includes('/group/');
@@ -1058,6 +1106,10 @@
   // 当前用户姓名（从 /api/user/profile_settings 获取）
   let currentUserName = 'User';
   window.PAGE_LOAD_TIME = Date.now();
+
+  // 翻译输入框：记录上次中译X的源文，用于发送后自动显示原文翻译
+  let pendingUserTransSource = null;
+  let pendingSentTranslation = null;
 
   // API 路径前缀生成器
   function getApiPrefix() {
@@ -1157,7 +1209,10 @@
   }
 
   async function getFuriganaDisplay(text) {
-    if (!text || aiLanguage !== 'ja') return text;
+    if (!text) return text;
+    // 检查是否为日语环境：'ja' 或者 包含 '日' 或 'ja'
+    const isJapanese = aiLanguage === 'ja' || (aiLanguage && (aiLanguage.toLowerCase().includes('ja') || aiLanguage.includes('日')));
+    if (!isJapanese) return text;
     
     // 【新增】提取 emoji，先注音再加回
     // JavaScript emoji 正则：支持常见 emoji 范围
@@ -1289,6 +1344,11 @@
           if (ud.tickle_suffix) userTickleSuffix = ud.tickle_suffix;
           if (ud.ai_language) aiLanguage = ud.ai_language;
           if (ud.name) currentUserName = ud.name;
+
+          // 【新增】如果角色有单独设置语言，则覆盖全局设置
+          if (data && data.language) {
+            aiLanguage = data.language;
+          }
         } catch(e) {}
       }
       // 群聊也加载用户拍一拍配置、AI 语言及用户姓名
@@ -1299,16 +1359,26 @@
           if (ud.tickle_suffix) userTickleSuffix = ud.tickle_suffix;
           if (ud.ai_language) aiLanguage = ud.ai_language;
           if (ud.name) currentUserName = ud.name;
+
+          // 【新增】如果群聊有单独设置语言，则覆盖全局设置
+          if (currentConfig && currentConfig.language) {
+            aiLanguage = currentConfig.language;
+          }
         } catch(e) {}
       }
       // 进入页面时，标记为已读
       fetch(`/api/${currentId}/mark_read`, { method: 'POST' });
 
       // 根据语言模式显示翻译框
-      if (aiLanguage === 'ja') {
+      if (aiLanguage && aiLanguage !== 'zh') {
         document.getElementById('translation-input-container').style.display = 'flex';
         const transInputEl = document.getElementById('transInput');
         if (transInputEl) {
+          // 更新 placeholder
+          const langNames = { 'ja': '日语', 'en': '英语' };
+          const langName = langNames[aiLanguage] || aiLanguage;
+          transInputEl.placeholder = `输入中文，翻译为${langName}...`;
+
           // 之前可能在 display:none 状态被计算过高度，这里显示后强制重算
           transInputEl.style.height = 'auto';
           const h = Math.max(30, Math.min(transInputEl.scrollHeight, 120));
@@ -1369,7 +1439,7 @@
   const DEF_SUFFIX_ZH = '';       // 默认后缀为空，由用户/角色配置决定
   const DEF_SUFFIX_JA = '狐の頭';
   function formatTickleText(tag, senderRole, senderId) {
-    const isJa = aiLanguage === 'ja';
+    const isJa = aiLanguage === 'ja' || (aiLanguage && (aiLanguage.toLowerCase().includes('ja') || aiLanguage.includes('日')));
     const subZh = senderRole === 'user' ? '我' : (groupMembers[senderId] || currentConfig || {}).remark || (groupMembers[senderId] || currentConfig || {}).name || 'TA';
     const sub = isJa ? (senderRole === 'user' ? '私' : subZh) : subZh;
     let obj, suffix;
@@ -1397,13 +1467,45 @@
     return `${sub}拍了拍${obj}${suffix}`;
   }
 
+  // 【新增】提取 AI 巡航信息
+  function extractCruiseFromContent(text) {
+    if (!text) return { cleanText: '', cruises: [] };
+    const regex = /\[WEB_CRUISE:([^\]]+)\]([\s\S]*?)\[\/WEB_CRUISE\]/g;
+    let cruises = [];
+    let cleanText = text.replace(regex, (match, url, inner) => {
+      // 提取核心网页快照部分
+      let displayContent = inner.trim();
+      const snapshotStart = displayContent.indexOf('【当前页面文本】');
+      const promptStart = displayContent.indexOf('请根据你的性格和当前页面');
+      
+      if (snapshotStart !== -1) {
+        // 如果找到了快照标识，截取快照内容
+        let content = displayContent.substring(snapshotStart);
+        // 如果后续有“请根据你的性格...”引导词，将其及其后的内容切掉，只保留快照
+        if (promptStart !== -1 && promptStart > snapshotStart) {
+          content = displayContent.substring(snapshotStart, promptStart);
+        }
+        displayContent = content.replace('【当前页面文本】', '').trim();
+      }
+
+      // 如果内容有效才添加，避免空标签产生幽灵行
+      if (displayContent || url) {
+        cruises.push({ url, summary: displayContent });
+      }
+      return '';
+    });
+    // 清理可能产生的双换行
+    return { cleanText: cleanText.replace(/\n{3,}/g, '\n\n').trim(), cruises };
+  }
+
   function extractTicklesFromContent(text) {
     if (!text || typeof text !== 'string') return { tickles: [], rest: '' };
     const re = /\[(tickle(?:_\w+)?)\]/g;
     const tickles = [];
     let m;
     while ((m = re.exec(text)) !== null) tickles.push(m[1]);
-    const rest = text.replace(re, '/').replace(/\/+/g, '/').replace(/^\/|\/$/g, '').trim();
+    // 仅将 [tickle] 替换为 /，不再进行全局的多斜杠合并 (以免破坏 http://)
+    const rest = text.replace(re, '/').trim();
     return { tickles, rest };
   }
 
@@ -1444,11 +1546,24 @@
 
   function renderMessageGroup({ id, content, role, timestamp, rawContent }, mode = 'append') {
     const isAssistant = role !== 'user';
-    const fullText = content != null ? String(content) : '';
-    const originalRawText = rawContent != null ? String(rawContent) : fullText;
-    const { tickles, rest } = extractTicklesFromContent(fullText);
+    // 优先使用 rawContent，因为 content 可能已经由于 history/v2 接口转换失去了原始标签
+    const textToProcess = rawContent != null ? String(rawContent) : (content != null ? String(content) : '');
+    
+    // 【新增】提取 AI 巡航信息与拍一拍
+    const { cleanText: textAfterCruise, cruises } = extractCruiseFromContent(textToProcess);
+    const { tickles, rest } = extractTicklesFromContent(textAfterCruise);
 
-    // 分段：按 " / " 分割，且保证 [图片](地址)(描述) 整段不被打断（描述中可能含 /），并且不分割 HTML 标签内部的 / (如 </ruby>)
+    const fullText = rest;
+    const originalRawText = textToProcess;
+
+    // 分段：按 "/" 分类气泡，但跳过 URL 内部的斜杠和 HTML 标签内的斜杠
+    const urlMatches = [];
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    let m_url;
+    while ((m_url = urlRegex.exec(rest)) !== null) {
+      urlMatches.push({ start: m_url.index, end: m_url.index + m_url[0].length });
+    }
+
     const rawParts = [];
     let current = '';
     let inTag = false;
@@ -1456,7 +1571,9 @@
       if (rest[i] === '<') inTag = true;
       else if (rest[i] === '>') inTag = false;
       
-      if (rest[i] === '/' && !inTag) {
+      const isInsideUrl = urlMatches.some(match => i >= match.start && i < match.end);
+
+      if (rest[i] === '/' && !inTag && !isInsideUrl) {
         rawParts.push(current);
         current = '';
       } else {
@@ -1491,7 +1608,7 @@
       }
     }
 
-    if (displayItems.length === 0 && !tickles.length) {
+    if (displayItems.length === 0 && !tickles.length && !cruises.length) {
       if (mode === 'append') {
         displayItems.push({ type: 'bubble', text: rest || (content != null ? content : '') });
       } else if (isAssistant && id) {
@@ -1526,10 +1643,10 @@
 
     const group = document.createElement('div');
     group.classList.add('message-group', cssClass);
-    if (tickles.length > 0) group.classList.add('has-tickle');
+    if (tickles.length > 0 || cruises.length > 0) group.classList.add('has-tickle');
     if (hasRecall) group.classList.add('has-recall');
     const hasContentBubbles = rows.some(r => r.type === 'content' && r.bubbles.length > 0);
-    if (tickles.length > 0 && !hasContentBubbles) group.classList.add('tickle-only');
+    if ((tickles.length > 0 || cruises.length > 0) && !hasContentBubbles) group.classList.add('tickle-only');
     group.dataset.timestamp = date.toISOString();
     group.dataset.id = id;
     group.dataset.originalContent = originalRawText;
@@ -1541,28 +1658,41 @@
     let avatarUrl = '/static/default_avatar.png'; // 默认
     let displayName = '';
 
+    // 优先处理用户场景，但在单聊中如果消息看起来像是来自角色（例如巡航标签），
+    // 我们应显示角色的备注而不是“我”。
     if (isUser) {
-      // 用户自己的头像，走后端 /user_avatar（内部按 user_id 找 users/<user_id>/avatar.*）
+      displayName = currentUserName || '我';
       avatarUrl = '/user_avatar?t=' + (window.PAGE_LOAD_TIME || Date.now());
     } else {
-      // 如果是群聊，role 其实是 char_id (比如 'kunigami')
+      // 非用户（角色）场景
       if (isGroupMode && groupMembers[role]) {
         avatarUrl = groupMembers[role].avatar || '/static/default_avatar.png';
         displayName = groupMembers[role].remark || groupMembers[role].name;
       } else if (!isGroupMode) {
-        // 单聊
-        avatarUrl = currentConfig.avatar || '/static/default_avatar.png';
+        // 单聊中的角色
+        avatarUrl = currentConfig?.avatar || charConfig?.avatar || '/static/default_avatar.png';
+        displayName = (currentConfig && (currentConfig.remark || currentConfig.name)) || (charConfig && (charConfig.remark || charConfig.name)) || '';
       }
     }
 
     // --- 【修正】应用 COS 转换 ---
+    // 确保 avatarUrl 是绝对路径（以 / 开头），防止在 /chat/xxx 下产生相对路径错误
+    if (!avatarUrl.startsWith('/') && !avatarUrl.startsWith('http') && !avatarUrl.startsWith('data:')) {
+      avatarUrl = '/' + avatarUrl;
+    }
     const finalAvatarUrl = window.getCosUrl ? window.getCosUrl(avatarUrl) : avatarUrl;
 
     // 创建头像
     const avatar = document.createElement('img');
     avatar.classList.add('avatar-img');
-    avatar.setAttribute('crossorigin', 'anonymous'); // 【修复】开启跨域，防止污染画布
+    // avatar.setAttribute('crossorigin', 'anonymous'); // 移除跨域设置
     avatar.src = finalAvatarUrl;
+    avatar.onerror = () => {
+      console.error("Avatar failed to load:", finalAvatarUrl);
+      if (avatar.src !== location.origin + '/static/default_avatar.png') {
+         avatar.src = '/static/default_avatar.png';
+      }
+    };
 
     // 【新增】添加点击事件
     avatar.style.cursor = 'pointer'; // 鼠标放上去变手型
@@ -1593,6 +1723,27 @@
     avatar.onerror = function() {
       this.src = '/static/default_avatar.png';
     };
+
+    // --- 巡航处理 ---
+    if (cruises && cruises.length > 0) {
+      cruises.forEach(cr => {
+        const cruiseRow = document.createElement('div');
+        cruiseRow.classList.add('cruise-row');
+        // 如果当前消息是由用户角色发出，但在单聊中实际是由角色触发的巡航，
+        // 我们希望显示角色备注而不是“我”。上面的 displayName 已做部分处理，
+        // 这里额外容错：优先使用角色配置中的备注。
+        const cruiseDisplayName = (!isUser && displayName) ? displayName : ((currentConfig && (currentConfig.remark || currentConfig.name)) || (charConfig && (charConfig.remark || charConfig.name)) || displayName);
+        cruiseRow.innerHTML = `
+          <div class="cruise-summary" onclick="this.parentElement.classList.toggle('expanded')">
+            <span>${cruiseDisplayName} 正在阅读 ${cr.url || '网页'}</span>
+          </div>
+          <div class="cruise-detail">
+            <div class="cruise-content">${cr.summary}</div>
+          </div>
+        `;
+        group.appendChild(cruiseRow);
+      });
+    }
 
     // --- 气泡栈 ---
     const stack = document.createElement('div');
@@ -1634,11 +1785,168 @@
       const bubble = document.createElement('div');
       bubble.classList.add('bubble');
       const stickerMatch = text && text.match(/^\[表情\](.+)$/);
-      // 新格式 [图片](地址)(描述)：只显示图片，复制/编辑用整段（描述用 [\s\S]+ 支持换行等）
       const imageMatchNew = text && text.match(/^\[图片\]\(([^)]+)\)\(([\s\S]*)$/);
       const imageMatchOld = text && !imageMatchNew && text.match(/^\[图片\](.+)$/);
       const isImage = !!(imageMatchNew || imageMatchOld);
       const imagePath = imageMatchNew ? imageMatchNew[1].trim() : (imageMatchOld ? imageMatchOld[1].trim() : '');
+      const voiceMatch = text && text.match(/^\[voice\]\(([^)]+)\)\(([\s\S]*)\)$/);
+      const isVoice = !!voiceMatch;
+      
+      if (isVoice) {
+        const voiceText = voiceMatch[1].trim().replace(/<ruby>([^<]*)<rt>[^<]*<\/rt><\/ruby>/g, '$1');
+        const voiceTone = voiceMatch[2].trim().replace(/<ruby>([^<]*)<rt>[^<]*<\/rt><\/ruby>/g, '$1');
+        bubble.classList.add('bubble-voice');
+        
+        const voiceContent = document.createElement('div');
+        voiceContent.style.cssText = 'display:flex;align-items:center;gap:8px;';
+        
+        const playBtn = document.createElement('button');
+        playBtn.className = 'voice-play-btn';
+        playBtn.style.cssText = 'width:36px;height:36px;border-radius:50%;border:2px solid var(--primary-color);background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.2s;';
+        playBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" style="fill:var(--primary-color);margin-left:2px;"><path d="M8 5v14l11-7z"/></svg>';
+        playBtn.title = '播放语音';
+        
+        const voiceInfo = document.createElement('div');
+        voiceInfo.style.cssText = 'flex:1;min-width:0;';
+        const voiceTextEl = document.createElement('div');
+        voiceTextEl.style.cssText = 'font-size:14px;color:#333;line-height:1.4;word-break:break-word;';
+        voiceTextEl.textContent = voiceText;
+        const voiceToneEl = document.createElement('div');
+        voiceToneEl.style.cssText = 'font-size:11px;color:#999;margin-top:2px;';
+        voiceToneEl.textContent = voiceTone;
+        voiceInfo.appendChild(voiceTextEl);
+        voiceInfo.appendChild(voiceToneEl);
+        voiceContent.appendChild(playBtn);
+        voiceContent.appendChild(voiceInfo);
+        bubble.appendChild(voiceContent);
+        
+        (function() {
+          let isPlaying = false;
+          let audioEl = null;
+          let cachedUrl = null;
+          playBtn.onclick = async function(e) {
+            e.stopPropagation();
+            if (isPlaying) {
+              if (audioEl) { audioEl.pause(); audioEl.remove(); }
+              isPlaying = false;
+              audioEl = null;
+              playBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" style="fill:var(--primary-color);margin-left:2px;"><path d="M8 5v14l11-7z"/></svg>';
+              playBtn.style.borderColor = 'var(--primary-color)';
+              return;
+            }
+            if (cachedUrl) {
+              playBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" style="fill:#fff;margin-left:0;"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
+              playBtn.style.background = 'var(--primary-color)';
+              playBtn.style.borderColor = 'var(--primary-color)';
+              const audio = new Audio(cachedUrl);
+              audioEl = audio;
+              isPlaying = true;
+              audio.onended = function() {
+                isPlaying = false;
+                audioEl = null;
+                playBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" style="fill:var(--primary-color);margin-left:2px;"><path d="M8 5v14l11-7z"/></svg>';
+                playBtn.style.background = '#fff';
+              };
+              audio.onerror = function() {
+                isPlaying = false;
+                audioEl = null;
+                playBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" style="fill:var(--primary-color);margin-left:2px;"><path d="M8 5v14l11-7z"/></svg>';
+                playBtn.style.background = '#fff';
+              };
+              await audio.play();
+              return;
+            }
+            playBtn.style.cursor = 'wait';
+            try {
+              const ttsText = '[' + voiceTone + ']' + voiceText;
+              const res = await fetch(`/api/${currentId}/tts_voice`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: ttsText })
+              });
+              if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || 'TTS request failed');
+              }
+              const blob = await res.blob();
+              cachedUrl = URL.createObjectURL(blob);
+              const audio = new Audio(cachedUrl);
+              audioEl = audio;
+              isPlaying = true;
+              playBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" style="fill:#fff;margin-left:0;"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
+              playBtn.style.background = 'var(--primary-color)';
+              playBtn.style.borderColor = 'var(--primary-color)';
+              audio.onended = function() {
+                isPlaying = false;
+                audioEl = null;
+                playBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" style="fill:var(--primary-color);margin-left:2px;"><path d="M8 5v14l11-7z"/></svg>';
+                playBtn.style.background = '#fff';
+              };
+              audio.onerror = function() {
+                isPlaying = false;
+                audioEl = null;
+                playBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" style="fill:var(--primary-color);margin-left:2px;"><path d="M8 5v14l11-7z"/></svg>';
+                playBtn.style.background = '#fff';
+              };
+              await audio.play();
+              playBtn.style.cursor = '';
+            } catch (err) {
+              console.error('Voice TTS error:', err);
+              isPlaying = false;
+              audioEl = null;
+              playBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" style="fill:var(--primary-color);margin-left:2px;"><path d="M8 5v14l11-7z"/></svg>';
+              playBtn.style.background = '#fff';
+              playBtn.style.borderColor = 'var(--primary-color)';
+              playBtn.style.cursor = '';
+              alert('语音生成失败: ' + (err.message || '未知错误'));
+            }
+          };
+        })();
+        
+        wrapper.appendChild(bubble);
+        if (attachControls && isLastInGroup) {
+          wrapper.dataset.fulltext = fullText;
+          const controls = document.createElement('div');
+          controls.classList.add('controls-container');
+          if (role === 'assistant' && !isGroupMode) {
+            const regenBtn = document.createElement('button');
+            regenBtn.classList.add('regen-btn');
+            regenBtn.title = "重新生成 (删除此条并重试)";
+            regenBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>';
+            regenBtn.onclick = () => doRegenerate(wrapper);
+            controls.appendChild(regenBtn);
+          }
+          const timestampEl = document.createElement('div');
+          timestampEl.classList.add('timestamp');
+          timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const editBtn = document.createElement('button');
+          editBtn.className = 'action-btn';
+          editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+          editBtn.onclick = () => openEditModal(id, fullText, group);
+          const delBtn = document.createElement('button');
+          delBtn.className = 'action-btn';
+          delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+          delBtn.onclick = () => deleteMessage(id, group);
+          const copyBtn = document.createElement('button');
+          copyBtn.className = 'action-btn';
+          copyBtn.innerHTML = `<img src="${copyIconPath}" style="width:14px;height:14px;opacity:0.6;">`;
+          copyBtn.onclick = () => {
+            var textToCopy = group.dataset.originalContent || group.dataset.resolvedFulltext || fullText;
+            textToCopy = stripRubyTags(textToCopy);
+            if (navigator.clipboard && window.isSecureContext) {
+              navigator.clipboard.writeText(textToCopy).then(() => showCopySuccess(copyBtn, copyIconPath)).catch(() => fallbackCopyTextToClipboard(textToCopy, copyBtn, copyIconPath));
+            } else {
+              fallbackCopyTextToClipboard(textToCopy, copyBtn, copyIconPath);
+            }
+          };
+          controls.appendChild(timestampEl);
+          if (id) { controls.appendChild(editBtn); controls.appendChild(delBtn); }
+          controls.appendChild(copyBtn);
+          wrapper.appendChild(controls);
+        }
+        st.appendChild(wrapper);
+        return;
+      }
       
       if (stickerMatch || isImage) {
         let isSticker = !!stickerMatch;
@@ -1729,6 +2037,99 @@
             regenBtn.onclick = () => doRegenerate(wrapper);
             controls.appendChild(regenBtn);
           }
+          // 【语音播放按钮】
+          if (isAssistant) {
+            (function() {
+              const rawText = group.dataset.originalContent || group.dataset.resolvedFulltext || fullText || wrapper.dataset.fulltext || '';
+              const ttsText = rawText
+                .replace(/<ruby>([^<]*)<rt>[^<]*<\/rt><\/ruby>/g, '$1')
+                .replace(/<[^>]+>/g, '')
+                .replace(/\[表情\][\s\S]*?(?=\s*\/\s*|$)/g, '')
+                .replace(/\[图片\]\([^\)]+\)(\([^\)]*\))?/g, '')
+                .replace(/\[图片\]/g, '')
+                .replace(/\[表情\]/g, '')
+                .replace(/\[CLICK:.*?\]/g, '')
+                .replace(/\[TYPE:.*?\]/g, '')
+                .replace(/\[GOTO:.*?\]/g, '')
+                .replace(/\[BACK\]/g, '')
+                .replace(/\[FINISH\]/g, '')
+                .replace(/\[.*?\]/g, '')
+                .replace(/\[ruby\][^[]*\[\/ruby\]/g, '')
+                .replace(/\//g, '。')
+                .replace(/\s+/g, ' ')
+                .trim();
+              if (!ttsText) return;
+              const voiceBtn = document.createElement('button');
+              voiceBtn.className = 'action-btn tts-btn';
+              voiceBtn.title = '语音播放';
+              voiceBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>';
+              voiceBtn.onclick = async function() {
+                if (voiceBtn.classList.contains('playing')) {
+                  const audioEl = voiceBtn._audioEl;
+                  if (audioEl) { audioEl.pause(); audioEl.remove(); }
+                  voiceBtn.classList.remove('playing');
+                  voiceBtn.style.color = '';
+                  return;
+                }
+                if (voiceBtn._cachedAudioUrl) {
+                  const audio = new Audio(voiceBtn._cachedAudioUrl);
+                  voiceBtn._audioEl = audio;
+                  audio.onended = function() {
+                    voiceBtn.classList.remove('playing');
+                    voiceBtn.style.color = '';
+                    voiceBtn._audioEl = null;
+                  };
+                  audio.onerror = function() {
+                    voiceBtn.classList.remove('playing');
+                    voiceBtn.style.color = '';
+                    voiceBtn._audioEl = null;
+                  };
+                  voiceBtn.classList.add('playing');
+                  voiceBtn.style.color = '#4cd964';
+                  await audio.play();
+                  return;
+                }
+                voiceBtn.classList.add('playing');
+                voiceBtn.style.color = '#4cd964';
+                voiceBtn.style.cursor = 'wait';
+                try {
+                   const res = await fetch(`/api/${isGroupMode ? role : currentId}/tts`, {
+                     method: 'POST',
+                     headers: { 'Content-Type': 'application/json' },
+                     body: JSON.stringify({ text: ttsText })
+                   });
+                  if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.error || 'TTS request failed');
+                  }
+                  const blob = await res.blob();
+                  const audioUrl = URL.createObjectURL(blob);
+                  voiceBtn._cachedAudioUrl = audioUrl;
+                  const audio = new Audio(audioUrl);
+                  voiceBtn._audioEl = audio;
+                  audio.onended = function() {
+                    voiceBtn.classList.remove('playing');
+                    voiceBtn.style.color = '';
+                    voiceBtn._audioEl = null;
+                  };
+                  audio.onerror = function() {
+                    voiceBtn.classList.remove('playing');
+                    voiceBtn.style.color = '';
+                    voiceBtn._audioEl = null;
+                  };
+                  await audio.play();
+                  voiceBtn.style.cursor = '';
+                } catch (err) {
+                  console.error('TTS error:', err);
+                  voiceBtn.classList.remove('playing');
+                  voiceBtn.style.color = '';
+                  voiceBtn.style.cursor = '';
+                  alert('语音生成失败: ' + (err.message || '未知错误'));
+                }
+              };
+              controls.appendChild(voiceBtn);
+            })();
+          }
           const timestampEl = document.createElement('div');
           timestampEl.classList.add('timestamp');
           timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -1771,7 +2172,7 @@
             .replace(/\[表情\]/g, '')
             .trim();
           const hasTextContent = contentWithoutMedia.replace(/[\s\/]+/g, '') !== '';
-          if (aiLanguage === 'ja' && hasTextContent) {
+          if (aiLanguage && aiLanguage !== 'zh' && hasTextContent) {
             translateBtn = document.createElement('button');
             translateBtn.className = 'action-btn';
             translateBtn.title = '翻译';
@@ -1795,7 +2196,21 @@
         bubble.classList.add('bubble-empty');
         bubble.innerHTML = '<span class="empty-placeholder">（空消息）</span>';
       } else {
-        bubble.innerHTML = text.replace(/\n/g, "<br>");
+        // Identify URLs and linkify them, plus add an agent button
+        const urlRegex = /(https?:\/\/[^\s]+)/g;
+        let html = text.replace(/\n/g, "<br>");
+        
+        // 【新增】处理角色指令相关展示 (用斜体提示)
+        html = html.replace(/\[CLICK:(.*?)\]/g, "<i>点击了 '$1'</i>");
+        html = html.replace(/\[TYPE:(.*?)\|(.*?)\]/g, "<i>在 '$1' 输入了 '$2'</i>");
+        html = html.replace(/\[GOTO:(.*?)\]/g, "<i>正在前往 '$1'</i>");
+        html = html.replace(/\[BACK\]/g, "<i>执行了后退操作</i>");
+        html = html.replace(/\[FINISH\]/g, "<i>操作已完成</i>");
+
+        html = html.replace(urlRegex, (url) => {
+          return `<a href="${url}" target="_blank" class="chat-link">${url}</a> <button class="agent-btn" onclick="triggerAgent('${url}')" style="background:none; border:1px solid #ddd; border-radius:4px; padding:0 4px; cursor:pointer;" title="让TA去看看">🤖</button>`;
+        });
+        bubble.innerHTML = html;
       }
       wrapper.appendChild(bubble);
       if (attachControls && isLastInGroup) {
@@ -1811,64 +2226,155 @@
           controls.appendChild(regenBtn);
         }
         
-        // 翻译按钮
-        let translateBtn = null;
-        const fullMessageText = (group.dataset.originalContent || group.dataset.resolvedFulltext || fullText || wrapper.dataset.fulltext || '').trim();
-        const contentWithoutMedia = fullMessageText
-          .replace(/\[表情\][\s\S]*?(?=\s*\/\s*|$)/g, '')
-          .replace(/\[图片\]\([^\)]+\)(\([^\)]*\))?/g, '')
-          .replace(/\[图片\]/g, '')
-          .replace(/\[表情\]/g, '')
-          .trim();
-        const hasTextContent = contentWithoutMedia.replace(/[\s\/]+/g, '') !== '';
-        if (aiLanguage === 'ja' && hasTextContent) {
-          translateBtn = document.createElement('button');
-          translateBtn.className = 'action-btn';
-          translateBtn.title = '翻译';
-          translateBtn.innerHTML = '<span style="font-size: 10px; font-weight: bold;">文</span>';
-          translateBtn.onclick = () => {
-            const dynamicId = parseInt(group.dataset.id, 10);
-            translateMessage(wrapper, Number.isNaN(dynamicId) ? id : dynamicId, group);
-          };
-        }
-
-        const timestampEl = document.createElement('div');
-        timestampEl.classList.add('timestamp');
-        timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        
-        const editBtn = document.createElement('button');
-        editBtn.className = 'action-btn';
-        editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
-        editBtn.onclick = () => openEditModal(id, fullText, group);
-        const delBtn = document.createElement('button');
-        delBtn.className = 'action-btn';
-        delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
-        delBtn.onclick = () => deleteMessage(id, group);
-        const copyBtn = document.createElement('button');
-        copyBtn.className = 'action-btn';
-        copyBtn.innerHTML = `<img src="${copyIconPath}" style="width:14px;height:14px;opacity:0.6;">`;
-        copyBtn.onclick = () => {
-          var textToCopy = group.dataset.originalContent || group.dataset.resolvedFulltext || fullText;
-          textToCopy = stripRubyTags(textToCopy);
-          if (navigator.clipboard && window.isSecureContext) {
-            navigator.clipboard.writeText(textToCopy).then(() => showCopySuccess(copyBtn, copyIconPath)).catch(() => fallbackCopyTextToClipboard(textToCopy, copyBtn, copyIconPath));
-          } else {
-            fallbackCopyTextToClipboard(textToCopy, copyBtn, copyIconPath);
-          }
-        };
-        controls.appendChild(timestampEl);
-        if (translateBtn) controls.appendChild(translateBtn);
-        const firstStickerPath = (fullText && fullText.match(/\[表情\]([^\]]+)/)) ? fullText.match(/\[表情\]([^\]]+)/)[1].trim() : '';
-        if (firstStickerPath) {
-          const likeBtn = document.createElement('button');
-          likeBtn.className = 'action-btn';
-          likeBtn.title = '喜欢';
-          likeBtn.innerHTML = '❤';
-          likeBtn.onclick = () => addStickerToFavorites(firstStickerPath);
-          controls.appendChild(likeBtn);
-        }
-        if (id) { controls.appendChild(editBtn); controls.appendChild(delBtn); }
-        controls.appendChild(copyBtn);
+        // 【语音播放按钮】
+        if (isAssistant) {
+          (function() {
+            const rawText = group.dataset.originalContent || group.dataset.resolvedFulltext || fullText || wrapper.dataset.fulltext || '';
+              const ttsText = rawText
+                .replace(/<ruby>([^<]*)<rt>[^<]*<\/rt><\/ruby>/g, '$1')
+                .replace(/<[^>]+>/g, '')
+                .replace(/\[表情\][\s\S]*?(?=\s*\/\s*|$)/g, '')
+                .replace(/\[图片\]\([^\)]+\)(\([^\)]*\))?/g, '')
+                .replace(/\[图片\]/g, '')
+                .replace(/\[表情\]/g, '')
+                .replace(/\[CLICK:.*?\]/g, '')
+                .replace(/\[TYPE:.*?\]/g, '')
+                .replace(/\[GOTO:.*?\]/g, '')
+                .replace(/\[BACK\]/g, '')
+                .replace(/\[FINISH\]/g, '')
+                .replace(/\[.*?\]/g, '')
+                .replace(/\[ruby\][^[]*\[\/ruby\]/g, '')
+                .replace(/\//g, '。')
+                .replace(/\s+/g, ' ')
+                .trim();
+              if (!ttsText) return;
+              const voiceBtn = document.createElement('button');
+              voiceBtn.className = 'action-btn tts-btn';
+              voiceBtn.title = '语音播放';
+              voiceBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>';
+              voiceBtn.onclick = async function() {
+                if (voiceBtn.classList.contains('playing')) {
+                  const audioEl = voiceBtn._audioEl;
+                  if (audioEl) { audioEl.pause(); audioEl.remove(); }
+                  voiceBtn.classList.remove('playing');
+                  voiceBtn.style.color = '';
+                  return;
+                }
+                if (voiceBtn._cachedAudioUrl) {
+                  const audio = new Audio(voiceBtn._cachedAudioUrl);
+                  voiceBtn._audioEl = audio;
+                  audio.onended = function() {
+                    voiceBtn.classList.remove('playing');
+                    voiceBtn.style.color = '';
+                    voiceBtn._audioEl = null;
+                  };
+                  audio.onerror = function() {
+                    voiceBtn.classList.remove('playing');
+                    voiceBtn.style.color = '';
+                    voiceBtn._audioEl = null;
+                  };
+                  voiceBtn.classList.add('playing');
+                  voiceBtn.style.color = '#4cd964';
+                  await audio.play();
+                  return;
+                }
+                voiceBtn.classList.add('playing');
+                voiceBtn.style.color = '#4cd964';
+                voiceBtn.style.cursor = 'wait';
+                try {
+                   const res = await fetch(`/api/${isGroupMode ? role : currentId}/tts`, {
+                     method: 'POST',
+                     headers: { 'Content-Type': 'application/json' },
+                     body: JSON.stringify({ text: ttsText })
+                   });
+                  if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.error || 'TTS request failed');
+                  }
+                  const blob = await res.blob();
+                  const audioUrl = URL.createObjectURL(blob);
+                  voiceBtn._cachedAudioUrl = audioUrl;
+                  const audio = new Audio(audioUrl);
+                  voiceBtn._audioEl = audio;
+                  audio.onended = function() {
+                    voiceBtn.classList.remove('playing');
+                    voiceBtn.style.color = '';
+                    voiceBtn._audioEl = null;
+                  };
+                  audio.onerror = function() {
+                    voiceBtn.classList.remove('playing');
+                    voiceBtn.style.color = '';
+                    voiceBtn._audioEl = null;
+                  };
+                  await audio.play();
+                  voiceBtn.style.cursor = '';
+                } catch (err) {
+                  console.error('TTS error:', err);
+                  voiceBtn.classList.remove('playing');
+                  voiceBtn.style.color = '';
+                  voiceBtn.style.cursor = '';
+                  alert('语音生成失败: ' + (err.message || '未知错误'));
+                }
+              };
+           controls.appendChild(voiceBtn);
+             })();
+           }
+         // 翻译按钮
+         let translateBtn = null;
+         const fullMessageText = (group.dataset.originalContent || group.dataset.resolvedFulltext || fullText || wrapper.dataset.fulltext || '').trim();
+         const contentWithoutMedia = fullMessageText
+           .replace(/\[表情\][\s\S]*?(?=\s*\/\s*|$)/g, '')
+           .replace(/\[图片\]\([^\)]+\)(\([^\)]*\))?/g, '')
+           .replace(/\[图片\]/g, '')
+           .replace(/\[表情\]/g, '')
+           .trim();
+         const hasTextContent = contentWithoutMedia.replace(/[\s\/]+/g, '') !== '';
+         if (aiLanguage && aiLanguage !== 'zh' && hasTextContent) {
+           translateBtn = document.createElement('button');
+           translateBtn.className = 'action-btn';
+           translateBtn.title = '翻译';
+           translateBtn.innerHTML = '<span style="font-size: 10px; font-weight: bold;">文</span>';
+           translateBtn.onclick = () => {
+             const dynamicId = parseInt(group.dataset.id, 10);
+             translateMessage(wrapper, Number.isNaN(dynamicId) ? id : dynamicId, group);
+           };
+         }
+         const timestampEl = document.createElement('div');
+         timestampEl.classList.add('timestamp');
+         timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+         const editBtn = document.createElement('button');
+         editBtn.className = 'action-btn';
+         editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+         editBtn.onclick = () => openEditModal(id, fullText, group);
+         const delBtn = document.createElement('button');
+         delBtn.className = 'action-btn';
+         delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+         delBtn.onclick = () => deleteMessage(id, group);
+         const copyBtn = document.createElement('button');
+         copyBtn.className = 'action-btn';
+         copyBtn.innerHTML = `<img src="${copyIconPath}" style="width:14px;height:14px;opacity:0.6;">`;
+         copyBtn.onclick = () => {
+           var textToCopy = group.dataset.originalContent || group.dataset.resolvedFulltext || fullText;
+           textToCopy = stripRubyTags(textToCopy);
+           if (navigator.clipboard && window.isSecureContext) {
+             navigator.clipboard.writeText(textToCopy).then(() => showCopySuccess(copyBtn, copyIconPath)).catch(() => fallbackCopyTextToClipboard(textToCopy, copyBtn, copyIconPath));
+           } else {
+             fallbackCopyTextToClipboard(textToCopy, copyBtn, copyIconPath);
+           }
+         };
+         controls.appendChild(timestampEl);
+         if (translateBtn) controls.appendChild(translateBtn);
+         const firstStickerPath = (fullText && fullText.match(/\[表情\]([^\]]+)/)) ? fullText.match(/\[表情\]([^\]]+)/)[1].trim() : '';
+         if (firstStickerPath) {
+           const likeBtn = document.createElement('button');
+           likeBtn.className = 'action-btn';
+           likeBtn.title = '喜欢';
+           likeBtn.innerHTML = '❤';
+           likeBtn.onclick = () => addStickerToFavorites(firstStickerPath);
+           controls.appendChild(likeBtn);
+         }
+         if (id) { controls.appendChild(editBtn); controls.appendChild(delBtn); }
+         controls.appendChild(copyBtn);
         wrapper.appendChild(controls);
       }
       st.appendChild(wrapper);
@@ -1885,6 +2391,7 @@
       contentRow.className = 'message-content-row';
       contentRow.appendChild(avatar);
       contentRow.appendChild(stack);
+
       if (tickles.length > 0) {
         const senderRole = isUser ? 'user' : 'assistant';
         const senderId = isUser ? 'user' : role;
@@ -1941,6 +2448,30 @@
           contentRowIdx++;
         }
       }
+      
+      // 【新增】渲染巡航行 (对于带有撤回的消息组)
+      if (cruises && cruises.length > 0) {
+        cruises.forEach(c => {
+          const cruiseRow = document.createElement('div');
+          cruiseRow.className = 'cruise-row';
+          const charName = isGroupMode ? (groupMembers[role]?.remark || groupMembers[role]?.name || role) : (currentConfig.remark || currentConfig.name || 'AI');
+          let displayHost = '';
+          try { displayHost = new URL(c.url).hostname; } catch(e) { displayHost = '网页'; }
+          cruiseRow.innerHTML = `<span>${charName} 正在阅读网页</span><span class="cruise-url">${displayHost}</span>`;
+          
+          const cruiseContent = document.createElement('div');
+          cruiseContent.className = 'cruise-content';
+          cruiseContent.textContent = c.content;
+          cruiseRow.appendChild(cruiseContent);
+          
+          cruiseRow.onclick = (e) => {
+            e.stopPropagation();
+            cruiseRow.classList.toggle('expanded');
+          };
+          group.appendChild(cruiseRow);
+        });
+      }
+
       if (tickles.length > 0) {
         const senderRole = isUser ? 'user' : 'assistant';
         const senderId = isUser ? 'user' : role;
@@ -2074,8 +2605,37 @@
           setTimeout(() => { chatContainer.scrollTop = chatContainer.scrollHeight; }, 400);
         });
       }
+      showCachedTranslations();
     } catch (e) { console.error("Failed to load history:", e); }
     finally { isLoading = false; loadMoreBtn.textContent = '加載更早的記錄'; }
+  }
+
+  // --- 向下滚动加载更多下方消息 (与上划逻辑对称) ---
+  async function loadMoreBelow() {
+    if (isLoading) return;
+    const lastMsg = chatContainer.querySelector('.message-group:last-child');
+    const afterId = lastMsg ? lastMsg.dataset.id : null;
+    if (!afterId || afterId > 1600000000000) return;
+
+    isLoading = true;
+    try {
+      const url = `${getApiPrefix()}/history?after_id=${afterId}&limit=${messagesPerPage}`;
+      const res = await fetch(url);
+      const data = await res.json();
+
+      if (data.messages && data.messages.length > 0) {
+        totalMessages = data.total;
+        data.messages.forEach(msg => {
+          const exists = chatContainer.querySelector(`.message-group[data-id="${msg.id}"]`);
+          if (!exists) {
+            checkAndAppendDateSeparator(new Date(msg.timestamp));
+            renderMessageGroup(msg, 'append');
+          }
+        });
+        showCachedTranslations();
+      }
+    } catch(e) { console.warn("Scroll-down load failed:", e); }
+    finally { isLoading = false; }
   }
 
   // --- 键盘弹起优化 ---
@@ -2095,8 +2655,8 @@
     }, 300);
   });
 
-    // --- 通用 fetch 超时封装（默认 120 秒） ---
-    async function fetchWithTimeout(url, options = {}, timeoutMs = 120000) {
+    // --- 通用 fetch 超时封装（默认 300 秒） ---
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 300000) {
       const controller = new AbortController();
       const id = setTimeout(() => controller.abort(), timeoutMs);
       try {
@@ -2115,9 +2675,7 @@
       btn.textContent = '拍一拍…';
       const userMsgTime = new Date();
       checkAndAppendDateSeparator(userMsgTime);
-      const userMsgObj = { content: tickleMsg, role: 'user', timestamp: userMsgTime };
-      const userBubbleElement = renderMessageGroup(userMsgObj, 'append');
-      chatContainer.scrollTop = chatContainer.scrollHeight;
+      
       try {
         const res = await fetchWithTimeout(`${getApiPrefix()}/chat`, {
           method: 'POST',
@@ -2127,67 +2685,23 @@
         const data = await res.json();
         if (data.affinity_delta) showAffinityToast(data.affinity_delta);
         if (data.error === 'consecutive_tickle') {
-          userBubbleElement?.remove();
           alert(data.message || '不可连续拍一拍同一人，请稍后再试');
           return;
         }
         if (data.error) {
-          userBubbleElement?.remove();
           alert(data.message || data.error);
           return;
         }
-        if (data.user_id && userBubbleElement) {
-          userBubbleElement.dataset.id = data.user_id;
-          const controls = userBubbleElement.querySelector('.controls-container');
-          if (controls) {
-            const editBtn = document.createElement('button');
-            editBtn.className = 'action-btn';
-            editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
-            editBtn.onclick = () => openEditModal(data.user_id, tickleMsg, userBubbleElement);
-            const delBtn = document.createElement('button');
-            delBtn.className = 'action-btn';
-            delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
-            delBtn.onclick = () => deleteMessage(data.user_id, userBubbleElement);
-            controls.insertBefore(delBtn, controls.lastChild);
-            controls.insertBefore(editBtn, delBtn);
-          }
-        }
-        if (data.replies && data.replies.length > 0) {
-          if (typeof data.replies[0] === 'object') {
-            for (const reply of data.replies) {
-              await sleep(800);
-              const aiTime = reply.timestamp ? new Date(reply.timestamp) : new Date();
-              checkAndAppendDateSeparator(aiTime);
-              renderMessageGroup({
-                id: reply.id || Date.now(),
-                content: reply.content,
-                role: reply.char_id,
-                timestamp: aiTime
-              }, 'append');
-              chatContainer.scrollTop = chatContainer.scrollHeight;
-            }
-          } else {
-            const fullReplyText = data.replies.join(' / ');
-            const aiTime = new Date();
-            checkAndAppendDateSeparator(aiTime);
-            await sleep(1000);
-            renderMessageGroup({
-              id: data.id,
-              content: fullReplyText,
-              role: 'assistant',
-              timestamp: aiTime
-            }, 'append');
-          }
-        }
+        
         if (data.memory_sync_warning) showMemorySyncWarning(data.memory_sync_warning);
-        chatContainer.scrollTop = chatContainer.scrollHeight;
       } catch (e) {
-        userBubbleElement?.remove();
         alert('发送失败');
       } finally {
         btn.disabled = false;
         btn.textContent = '发送';
+        await pollNewMessages();
       }
+      chatContainer.scrollTop = chatContainer.scrollHeight;
     }
 
     async function sendMessage() {
@@ -2196,6 +2710,13 @@
         
         // 按钮变灰，提示正在抽取表情
         btn.disabled = true; btn.textContent = "处理中…";
+
+        // 检查是否由翻译输入框直发（未修改过译文）
+        const pendingSource = pendingUserTransSource;
+        pendingUserTransSource = null;
+        if (pendingSource) {
+          pendingSentTranslation = { text: pendingSource };
+        }
 
         // 【新增】拦截并随机替换输入框里的 [表情]开心
         originalText = await randomizeStickersInText(originalText);
@@ -2209,12 +2730,6 @@
       // 【关键】渲染用户气泡前，先检查是否需要加日期
       checkAndAppendDateSeparator(userMsgTime);
 
-      const displayText = await getFuriganaDisplay(originalText);
-      const userMsgObj = { content: displayText, rawContent: originalText, role: 'user', timestamp: userMsgTime }
-      // 这里拿到返回的 DOM 元素
-      const userBubbleElement = renderMessageGroup(userMsgObj, 'append');
-      chatContainer.scrollTop = chatContainer.scrollHeight;
-
       try {
           // 【修改】使用 getApiPrefix() + 120 秒超时
           const res = await fetchWithTimeout(`${getApiPrefix()}/chat`, {
@@ -2227,89 +2742,20 @@
           // 好感度变动提示
           if (data.affinity_delta) showAffinityToast(data.affinity_delta);
 
-          // 2. 【关键】请求成功后，给刚才抓住的气泡补票
-          if (data.user_id && userBubbleElement) {
-            // A. 补上身份证号
-            userBubbleElement.dataset.id = data.user_id;
-
-            // B. 动态插入编辑/删除按钮 (找到控制栏)
-            const controls = userBubbleElement.querySelector('.controls-container');
-            if (controls) {
-              // 创建编辑按钮
-              const editBtn = document.createElement('button');
-              editBtn.className = 'action-btn';
-              editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
-              editBtn.onclick = () => openEditModal(data.user_id, originalText, userBubbleElement);
-
-              // 创建删除按钮
-              const delBtn = document.createElement('button');
-              delBtn.className = 'action-btn';
-              delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
-              delBtn.onclick = () => deleteMessage(data.user_id, userBubbleElement);
-
-              // 插入到时间戳后面 (controls 的第二个位置)
-              // 结构: [时间戳] [编辑] [删除] [复制]
-              // 现在的 controls 里是 [Timestamp, CopyBtn]
-              controls.insertBefore(delBtn, controls.lastChild); // 插在复制按钮前
-              controls.insertBefore(editBtn, delBtn);        // 插在删除按钮前
-            }
-          }
-
-          if (data.replies && data.replies.length > 0) {
-            // --- 【修正】区分 单聊(字符串) 和 群聊(对象) ---
-
-            // 1. 判断是否为群聊格式 (数组里第一项是对象)
-            if (typeof data.replies[0] === 'object') {
-              // 群聊模式：可能有多个人回复，我们需要循环渲染
-              for (const reply of data.replies) {
-                // 模拟一点打字延迟，更有真实感
-                await sleep(800);
-
-                const aiTime = reply.timestamp ? new Date(reply.timestamp) : new Date();
-
-                // 【关键】渲染每一条 AI 气泡前，都检查一次日期
-                // (防止 AI 回复太慢跨过了午夜，或者群聊接龙跨天)
-                checkAndAppendDateSeparator(aiTime);
-
-                renderMessageGroup({
-                  id: reply.id || Date.now(),
-                  content: reply.content,
-                  role: reply.char_id,
-                  timestamp: aiTime
-                }, 'append');
-
-                // 滚到底部
-                chatContainer.scrollTop = chatContainer.scrollHeight;
-              }
-            }
-            // 2. 单聊模式 (旧逻辑，数组里是字符串)
-            else {
-              const fullReplyText = data.replies.join(' / ');
-              const aiTime = new Date();
-
-              // 【关键】单聊 AI 回复前检查
-              checkAndAppendDateSeparator(aiTime);
-
-              const aiMsg = {
-                id: data.id,
-                content: fullReplyText,
-                role: 'assistant',
-                timestamp: aiTime
-              };
-              await sleep(1000);
-              renderMessageGroup(aiMsg, 'append');
-            }
-          }
           if (data.memory_sync_warning) showMemorySyncWarning(data.memory_sync_warning);
         } catch (e) { console.error(e);
-          // 【修正这里】不要用 displayBubbleGroup
           renderMessageGroup({
             content: '[连接失败，请稍后重试]',
             role: 'assistant',
             timestamp: new Date()
           }, 'append');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '发送';
+          await pollNewMessages();
+          _applyPendingTranslation();
         }
-        finally { btn.disabled = false; btn.textContent = "发送"; chatContainer.scrollTop = chatContainer.scrollHeight; }
+        chatContainer.scrollTop = chatContainer.scrollHeight;
     }
 
     window.addEventListener('DOMContentLoaded', async () => {
@@ -2332,6 +2778,7 @@
             renderMessageGroup(msg, 'prepend');
           }
           refreshDateSeparators();
+          showCachedTranslations();
 
           setTimeout(() => {
             const el = document.querySelector(`.message-group[data-id="${jumpId}"]`);
@@ -2355,6 +2802,8 @@
         // === 普通模式 ===
         await loadHistory('initial');
       }
+      
+      startPolling(); // 启动新消息轮询
 
       // 从表情包详情页跳回并带 sticker 参数时，自动发送该表情
       const urlParams = new URLSearchParams(window.location.search);
@@ -2372,15 +2821,70 @@
     });
     loadMoreBtn.addEventListener('click', () => loadHistory(currentPage + 1));
     chatContainer.addEventListener('scroll', () => {
-      if (chatContainer.scrollTop === 0 && !isLoading) {
-        // 只有当还有数据没加载完时才触发
-        // 这里做一个简单的判断：只要 loadMoreContainer 是显示的，就说明可能还有
+      if (isLoading) return;
+      if (chatContainer.scrollTop === 0) {
         if (loadMoreContainer.style.display !== 'none') {
-          loadHistory('scroll'); // 传入 'scroll' 模式
+          loadHistory('scroll');
+        }
+        return;
+      }
+      // 向下滚动到底部附近时，加载更多下方消息
+      const scrollBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight;
+      if (scrollBottom < 100) {
+        const loadedCount = chatContainer.querySelectorAll('.message-group').length;
+        if (loadedCount < totalMessages) {
+          loadMoreBelow();
         }
       }
     });
     btn.addEventListener('click', sendMessage);
+
+    // --- 【新增】实现自动轮询最新消息 ---
+    let pollingTimer = null;
+
+    async function pollNewMessages() {
+      // 如果正在加载（滚动加载等），跳过本次轮询
+      if (isLoading) return;
+      
+      // 获取当前页面中最新的一条消息 ID 作为 after_id
+      const lastMsg = chatContainer.querySelector('.message-group:last-child');
+      let afterId = lastMsg ? lastMsg.dataset.id : null;
+      
+      // 如果还没有消息 ID，或者 ID 是临时生成的（Date.now()），则跳过
+      if (!afterId || afterId > 1600000000000) return;
+
+      try {
+        const url = `${getApiPrefix()}/history?after_id=${afterId}&limit=9999`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (data.messages && data.messages.length > 0) {
+          let shouldScroll = (chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 100);
+
+          if (shouldScroll) {
+            data.messages.forEach(msg => {
+              const exists = chatContainer.querySelector(`.message-group[data-id="${msg.id}"]`);
+              if (!exists) {
+                checkAndAppendDateSeparator(new Date(msg.timestamp));
+                renderMessageGroup(msg, 'append');
+              }
+            });
+            if (pendingSentTranslation) {
+              _applyPendingTranslation();
+            }
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+          }
+        }
+      } catch (err) {
+        console.warn("[Polling] 失败:", err);
+      }
+    }
+
+    // 启动轮询
+    function startPolling() {
+      if (pollingTimer) clearInterval(pollingTimer);
+      pollingTimer = setInterval(pollNewMessages, 3000);
+    }
 
     // 输入框自适应高度（达到上限后内部滚动）
     function autoResizeTextarea(el, maxHeightPx, minHeightPx) {
@@ -2426,7 +2930,7 @@
             body: JSON.stringify({
               text: txt,
               context: contextStr,
-              direction: 'zh_to_ja',
+              direction: `zh_to_${aiLanguage || 'ja'}`,
               char_id: isGroupMode ? null : currentId,
               group_id: isGroupMode ? currentId : null
             })
@@ -2435,6 +2939,7 @@
           if (data.result) {
             // 将翻译结果填入正式输入框
             input.value = data.result;
+            pendingUserTransSource = txt;
             autoResizeTextarea(input, MESSAGE_INPUT_MAX_HEIGHT, MESSAGE_INPUT_MIN_HEIGHT);
             // 清空翻译框
             transInput.value = '';
@@ -2460,7 +2965,12 @@
       });
     }
     input.addEventListener('keypress', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
-    input.addEventListener('input', () => autoResizeTextarea(input, MESSAGE_INPUT_MAX_HEIGHT, MESSAGE_INPUT_MIN_HEIGHT));
+    input.addEventListener('input', () => {
+      if (pendingUserTransSource !== null) {
+        pendingUserTransSource = null;
+      }
+      autoResizeTextarea(input, MESSAGE_INPUT_MAX_HEIGHT, MESSAGE_INPUT_MIN_HEIGHT);
+    });
     // 初始化一次
     autoResizeTextarea(input, MESSAGE_INPUT_MAX_HEIGHT, MESSAGE_INPUT_MIN_HEIGHT);
 
@@ -2994,6 +3504,9 @@
         clonedGroup.classList.remove('selected');
         if (hideCharName) {
           clonedGroup.querySelectorAll('.bubble-name').forEach(bn => bn.style.display = 'none');
+          clonedGroup.querySelectorAll('.avatar-img').forEach(av => {
+            av.src = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="#cccccc" rx="10"/></svg>');
+          });
         }
         
         // 确保消息中的所有图片支持 CORS 并刷新缓存
@@ -3219,13 +3732,12 @@
           targetEl = document.querySelector(`.message-group[data-id="${id}"]`);
           if (targetEl) {
             highlightAndScroll(targetEl);
-            // 定位成功后，强制显示加载更多，允许用户继续上滑
             loadMoreContainer.style.display = 'block';
           } else {
-            // 这一次应该不会找不到了
             alert("定位失败 (可能消息已被物理删除)");
           }
         }, 300);
+        showCachedTranslations();
 
       } catch (e) {
         console.error(e);
@@ -3334,13 +3846,8 @@
             const desc = (uploadData.description || '无').replace(/\)/g, '）'); // 避免描述里的 ) 破坏解析
             const messageContent = `[图片](${path})(${desc})`;
 
-            const endpoint = isGroupMode ? `/api/group/${encodeURIComponent(chatGroupId)}/chat` : `/api/${encodeURIComponent(charId)}/chat`;
+            const endpoint = isGroupMode ? `/api/group/${encodeURIComponent(currentId)}/chat` : `/api/${encodeURIComponent(charId)}/chat`;
             
-            // 手动在前端追加用户发的图片气泡，并保留引用以便成功后补上编辑/删除
-            const now = new Date();
-            const userBubbleElement = renderMessageGroup({id: null, content: messageContent, role: 'user', timestamp: now.toISOString()}, 'append');
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-
             // 3. 复用发送消息逻辑，发给当前聊天对象
             const r = await fetch(endpoint, {
               method: 'POST',
@@ -3360,51 +3867,6 @@
                 alert('发送失败: ' + data.error);
               }
             } else {
-              // 为刚发的图片消息补上 id 与编辑/删除按钮
-              if (data.user_id && userBubbleElement) {
-                userBubbleElement.dataset.id = data.user_id;
-                const controls = userBubbleElement.querySelector('.controls-container');
-                if (controls) {
-                  const editBtn = document.createElement('button');
-                  editBtn.className = 'action-btn';
-                  editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
-                  editBtn.onclick = () => openEditModal(data.user_id, messageContent, userBubbleElement);
-                  const delBtn = document.createElement('button');
-                  delBtn.className = 'action-btn';
-                  delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
-                  delBtn.onclick = () => deleteMessage(data.user_id, userBubbleElement);
-                  controls.insertBefore(delBtn, controls.lastChild);
-                  controls.insertBefore(editBtn, delBtn);
-                }
-              }
-              // 立即渲染 AI 回复，与普通发送一致
-              if (data.replies && data.replies.length > 0) {
-                const aiTime = new Date();
-                checkAndAppendDateSeparator(aiTime);
-                if (typeof data.replies[0] === 'object') {
-                  for (const reply of data.replies) {
-                    await (typeof sleep === 'function' ? sleep(800) : Promise.resolve());
-                    const t = reply.timestamp ? new Date(reply.timestamp) : aiTime;
-                    checkAndAppendDateSeparator(t);
-                    renderMessageGroup({
-                      id: reply.id || Date.now(),
-                      content: reply.content,
-                      role: isGroupMode ? (reply.role || reply.char_id) : charId,
-                      timestamp: t
-                    }, 'append');
-                    chatContainer.scrollTop = chatContainer.scrollHeight;
-  }
-                } else {
-                  await (typeof sleep === 'function' ? sleep(800) : Promise.resolve());
-                  renderMessageGroup({
-                    id: data.id,
-                    content: data.replies.join(' / '),
-                    role: charId,
-                    timestamp: aiTime
-                  }, 'append');
-                }
-                chatContainer.scrollTop = chatContainer.scrollHeight;
-              }
               if (data.memory_sync_warning && typeof showMemorySyncWarning === 'function') showMemorySyncWarning(data.memory_sync_warning);
             }
           } catch (err) {
@@ -3414,6 +3876,7 @@
             btn.innerText = originalBtnText;
             btn.disabled = false;
             document.body.removeChild(fileInput);
+            pollNewMessages();
           }
         };
 
@@ -3432,6 +3895,13 @@
       if (action === 'sticker') {
         morePanel.classList.remove('open');
         openStickerPanel();
+      }
+      if (action === 'cruise') {
+        const url = prompt("请输入要让 AI 查看的网址 (包含 http/https):", "https://www.google.com");
+        if (url && url.startsWith('http')) {
+          closeAllPanels();
+          triggerAgent(url);
+        }
       }
     };
 
@@ -3873,6 +4343,32 @@
     document.body.removeChild(textArea);
   }
 
+  // --- 【新增】触发AI Agent执行任务 ---
+  async function triggerAgent(url) {
+    if (confirm(`让当前角色打开并查看这个网址吗？\n${url}`)) {
+      try {
+        const response = await fetch('/api/run_agent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            url: url, 
+            char_id: charId,
+            user_id: currentUserId 
+          })
+        });
+        const data = await response.json();
+        if (data.status) {
+          alert('Agent已启动！请查看终端或稍后查看聊天报告。');
+        } else {
+          alert('启动失败：' + (data.error || '未知错误'));
+        }
+      } catch (err) {
+        console.error('Agent Trigger Error:', err);
+        alert('启动失败，请检查Agent API服务器（run_agent_api.py）是否正在运行。');
+      }
+    }
+  }
+
   // --- 【修正版】执行重新生成 (支持日期分隔符检测) ---
   async function doRegenerate(wrapperElement) {
     if (isLoading) return;
@@ -3896,55 +4392,6 @@
       if (data.status === 'success') {
         // 1. 移除旧的整组消息
         if (messageGroup) messageGroup.remove();
-
-        // 2. 渲染新的回复
-        if (data.replies && data.replies.length > 0) {
-          // 判断单群聊格式
-          const replies = (typeof data.replies[0] === 'object') ? data.replies : [{
-            id: data.id,
-            content: data.replies.join(' / '),
-            role: 'assistant', // 单聊默认角色
-            timestamp: new Date() // 这里其实应该后端传回 timestamp，如果没有就用当前时间
-          }];
-
-          for (const reply of replies) {
-            await sleep(800);
-
-            // === 【新增】日期检查逻辑 ===
-            // 找到当前页面最底部的一条消息 (也就是新消息的前一条)
-            const lastGroup = chatContainer.querySelector('.message-group:last-child');
-
-            if (lastGroup && lastGroup.dataset.timestamp) {
-              const prevDate = new Date(lastGroup.dataset.timestamp);
-              // 使用后端返回的时间，如果没有则用当前时间
-              const newDate = reply.timestamp ? new Date(reply.timestamp) : new Date();
-
-              // 比较年月日是否相同
-              if (prevDate.getFullYear() !== newDate.getFullYear() ||
-                      prevDate.getMonth() !== newDate.getMonth() ||
-                      prevDate.getDate() !== newDate.getDate()) {
-
-                // 如果跨天了，插入日期分隔符
-                const separator = document.createElement('div');
-                separator.classList.add('date-separator');
-                separator.textContent = newDate.toLocaleDateString([], {
-                  year: 'numeric', month: 'long', day: 'numeric', weekday: 'long'
-                });
-                chatContainer.appendChild(separator);
-              }
-            }
-            // ============================
-
-            renderMessageGroup({
-              id: reply.id || Date.now(),
-              content: reply.content,
-              role: reply.char_id || reply.role, // 兼容单群聊
-              timestamp: reply.timestamp || new Date()
-            }, 'append');
-
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-          }
-        }
       } else {
         alert("重生成失败: " + data.error);
         if(messageGroup) {
@@ -3961,29 +4408,155 @@
       }
     } finally {
       isLoading = false;
+      pollNewMessages();
     }
   }
 
   // ==============================
   // 翻译消息功能（上下文由后端从数据库读取前 20 条）
   // ==============================
-  async function translateMessage(wrapper, id, group) {
-    let transDiv = wrapper.querySelector('.translation-result');
-    if (!transDiv) {
-      transDiv = document.createElement('div');
+  const chatHiddenTrans = new Set();
+  (function() {
+    try {
+      const raw = localStorage.getItem('kt_chat_hidden');
+      if (raw) { JSON.parse(raw).forEach(k => chatHiddenTrans.add(k)); }
+    } catch(e) {}
+  })();
+  function _saveChatHidden() {
+    try { localStorage.setItem('kt_chat_hidden', JSON.stringify([...chatHiddenTrans])); } catch(e) {}
+  }
+
+  function _applyPendingTranslation() {
+    if (!pendingSentTranslation) return;
+    const text = pendingSentTranslation.text;
+    pendingSentTranslation = null;
+    const userGroup = chatContainer.querySelector('.message-group.user:last-of-type');
+    if (!userGroup) return;
+    const msgId = parseInt(userGroup.dataset.id, 10);
+    if (!msgId || msgId > 1600000000000) return;
+    const cacheKey = `kt_chat_${isGroupMode ? 'g' : 'c'}_${currentId}_${msgId}`;
+    try { localStorage.setItem(cacheKey, text); } catch (e) {}
+    if (!userGroup.querySelector('.translation-result')) {
+      const lastWrapper = userGroup.querySelector('.message-wrapper:last-of-type');
+      const target = lastWrapper || userGroup.querySelector('.bubble-stack');
+      if (target) {
+        const transDiv = document.createElement('div');
+        transDiv.className = 'translation-result';
+        transDiv.style.cssText = 'margin-top: 8px; font-size: 13px; color: #555; background: rgba(0,0,0,0.05); padding: 6px 10px; border-radius: 6px; border-left: 3px solid #666;';
+        transDiv.textContent = text;
+        target.appendChild(transDiv);
+      }
+    }
+  }
+
+  function _getChatTransCacheKey(msgId, group) {
+    const chatType = isGroupMode ? 'g' : 'c';
+    if (!Number.isNaN(msgId) && msgId > 0) {
+      return `kt_chat_${chatType}_${currentId}_${msgId}`;
+    }
+    const rawText = (group.dataset.originalContent || group.dataset.resolvedFulltext || '').trim();
+    if (rawText) {
+      let hash = 0;
+      for (let i = 0; i < rawText.length; i++) {
+        const ch = rawText.charCodeAt(i);
+        hash = ((hash << 5) - hash) + ch;
+        hash |= 0;
+      }
+      return `kt_chat_${chatType}_${currentId}_txt_${Math.abs(hash)}`;
+    }
+    return null;
+  }
+
+  function _chatTransToggleKey(msgId) {
+    return (isGroupMode ? 'g' : 'c') + '|' + currentId + '|' + msgId;
+  }
+
+  function showCachedTranslations() {
+    const groups = document.querySelectorAll('.message-group');
+    groups.forEach(group => {
+      const msgId = parseInt(group.dataset.id, 10);
+      const cacheKey = _getChatTransCacheKey(msgId, group);
+      if (!cacheKey) return;
+      const cached = localStorage.getItem(cacheKey);
+      if (!cached) return;
+      const toggleKey = _chatTransToggleKey(msgId);
+      if (chatHiddenTrans.has(toggleKey)) return;
+      const existing = group.querySelector('.translation-result');
+      if (existing) return;
+      const lastWrapper = group.querySelector('.message-wrapper:last-of-type');
+      const bubbleStack = group.querySelector('.bubble-stack');
+      const target = lastWrapper || bubbleStack;
+      if (!target) return;
+      const transDiv = document.createElement('div');
       transDiv.className = 'translation-result';
       transDiv.style.cssText = 'margin-top: 8px; font-size: 13px; color: #555; background: rgba(0,0,0,0.05); padding: 6px 10px; border-radius: 6px; border-left: 3px solid #666;';
-      wrapper.appendChild(transDiv);
-    }
-    transDiv.textContent = '正在翻译...';
+      transDiv.textContent = cached;
+      target.appendChild(transDiv);
+    });
+  }
+
+  async function translateMessage(wrapper, id, group) {
     const msgId = parseInt(group.dataset.id || id, 10);
-    const payload = { direction: 'ja_to_zh' };
+    const cacheKey = _getChatTransCacheKey(msgId, group);
+    const toggleKey = _chatTransToggleKey(msgId);
+
+    let transDiv = wrapper.querySelector('.translation-result');
+
+    // 当前正在显示 → 隐藏
+    if (transDiv && !chatHiddenTrans.has(toggleKey)) {
+      transDiv.style.display = 'none';
+      chatHiddenTrans.add(toggleKey);
+      _saveChatHidden();
+      return;
+    }
+
+    // 之前被隐藏 → 清除缓存，强制重新翻译
+    if (chatHiddenTrans.has(toggleKey)) {
+      chatHiddenTrans.delete(toggleKey);
+      _saveChatHidden();
+      if (cacheKey) { try { localStorage.removeItem(cacheKey); } catch (e) {} }
+    }
+
+    // 移除旧的翻译 div
+    if (transDiv) { transDiv.remove(); transDiv = null; }
+
+    // 创建新的翻译 div
+    transDiv = document.createElement('div');
+    transDiv.className = 'translation-result';
+    transDiv.style.cssText = 'margin-top: 8px; font-size: 13px; color: #555; background: rgba(0,0,0,0.05); padding: 6px 10px; border-radius: 6px; border-left: 3px solid #666;';
+
+    // 首次翻译：先尝试从缓存加载
+    if (!chatHiddenTrans.has(toggleKey) && cacheKey) {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        transDiv.textContent = cached;
+        wrapper.appendChild(transDiv);
+        return;
+      }
+    }
+
+    transDiv.textContent = '正在翻译...';
+    wrapper.appendChild(transDiv);
+
+    // 【修改】动态确定翻译方向
+    let fromLang = 'ja';
+    if (!isGroupMode && aiLanguage) {
+      fromLang = aiLanguage;
+    } else if (isGroupMode) {
+        const senderId = group.dataset.senderId || group.dataset.role;
+        if (senderId && groupMembers[senderId] && groupMembers[senderId].language) {
+            fromLang = groupMembers[senderId].language;
+        } else {
+            fromLang = aiLanguage || 'ja';
+        }
+    }
+    const payload = { direction: `${fromLang}_to_zh` };
+    
     if (!Number.isNaN(msgId) && msgId > 0) {
       payload.message_id = msgId;
       if (isGroupMode) payload.group_id = currentId;
       else payload.char_id = currentId;
     } else {
-      // 新发送且尚未拿到 message_id 时兜底：用前端文本临时翻译
       const allGroups = Array.from(document.querySelectorAll('.message-group'));
       const currentIndex = allGroups.indexOf(group);
       const start = Math.max(0, currentIndex - 5);
@@ -4008,6 +4581,9 @@
       const data = await res.json();
       if (data.result) {
         transDiv.textContent = data.result;
+        if (cacheKey) {
+          try { localStorage.setItem(cacheKey, data.result); } catch (e) {}
+        }
       } else {
         transDiv.textContent = '翻译失败：' + (data.error || '未知错误');
       }
@@ -4025,6 +4601,7 @@
 
       // 1. 刷新头像、名字、在线状态 (这是最轻量的)
       await initUI();
+      showCachedTranslations();
 
       // 2. (可选) 如果您希望聊天记录也刷新（比如刚才删了消息），可以把下面这行注释打开
       // chatContainer.innerHTML = '';
@@ -4187,5 +4764,7 @@
 </script>
 
 
+  <!-- AI巡航悬浮球 -->
+  <script src="/static/ai-cruise.js"></script>
 </body>
 </html>

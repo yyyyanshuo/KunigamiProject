@@ -492,6 +492,20 @@
             document.getElementById('aiPreviewModal').style.display = 'none';
         }
 
+        // --- 通用 fetch 超时封装（默认 300 秒） ---
+        async function fetchWithTimeout(url, options = {}, timeoutMs = 300000) {
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                const resp = await fetch(url, { ...options, signal: controller.signal });
+                clearTimeout(id);
+                return resp;
+            } catch (err) {
+                clearTimeout(id);
+                throw err;
+            }
+        }
+
         async function aiCompleteGraph() {
             const name = document.querySelector('[name="name"]').value;
             const ip = ipInput.value;
@@ -514,14 +528,25 @@
             btn.disabled = true;
             
             try {
-                const res = await fetch('/api/square/ai_complete_graph', {
+                const apiUrl = "/api/square/ai_complete_graph";
+                const res = await fetchWithTimeout(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include', // 关键：强制发送 Cookie
                     body: JSON.stringify({ name, ip, tags, current_graph: JSON.stringify(currentGraph) })
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
-                    const relData = typeof data.graph === 'string' ? JSON.parse(data.graph) : data.graph;
+                    let relData = data.graph;
+                    if (typeof relData === 'string') {
+                        try {
+                            relData = JSON.parse(relData);
+                        } catch(e) {
+                            console.error("Malformed AI JSON:", relData);
+                            alert("AI 返回的格式不完整，请尝试再次补全或手动修改。");
+                            return;
+                        }
+                    }
                     
                     // 生成预览 HTML
                     const previewContainer = document.getElementById('ai-preview-content');
@@ -583,7 +608,7 @@
             btn.disabled = true;
             
             try {
-                const res = await fetch('/api/generate_persona', {
+                const res = await fetchWithTimeout('/api/generate_persona', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ char_name: name, source_ip: ip })
@@ -716,5 +741,7 @@
             }
         })();
     </script>
+  <!-- AI巡航悬浮球 -->
+  <script src="/static/ai-cruise.js"></script>
 </body>
 </html>

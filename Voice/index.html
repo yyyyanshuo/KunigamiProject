@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Clone - ElevenLabs</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f4f7f6;
+        }
+        .container {
+            background-color: #fff;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 400px;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 1.5rem;
+        }
+        .upload-section {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        input[type="file"] {
+            border: 1px solid #ddd;
+            padding: 0.5rem;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 0.75rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        #status {
+            margin-top: 1rem;
+            padding: 1rem;
+            border-radius: 4px;
+            display: none;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        pre {
+            font-size: 0.8rem;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>声音克隆</h1>
+        <div class="upload-section">
+            <input type="file" id="audioUpload" accept="audio/*">
+            <button id="uploadBtn" onclick="uploadVoice()">上传声音</button>
+        </div>
+        <div id="status"></div>
+        
+        <hr style="margin: 2rem 0; border: 0; border-top: 1px solid #eee;">
+        
+        <h1 style="margin-top: 0">TTS 测试</h1>
+        <div class="upload-section">
+            <input type="text" id="voiceId" value="fs5rJCTrpRvrfFP8YYoB" placeholder="输入 voice_id">
+            <textarea id="ttsText" rows="4" placeholder="输入你想让克隆声音说的话..." style="padding: 0.5rem; border-radius: 4px; border: 1px solid #ddd; resize: vertical; font-family: inherit;">你好！我是刚刚被克隆出来的声音。</textarea>
+            <button id="ttsBtn" onclick="testTTS()">生成语音</button>
+            <audio id="ttsAudio" controls style="display: none; width: 100%; margin-top: 1rem;"></audio>
+        </div>
+    </div>
+
+    <script>
+        async function uploadVoice() {
+            const fileInput = document.getElementById("audioUpload");
+            const btn = document.getElementById("uploadBtn");
+            const statusDiv = document.getElementById("status");
+
+            if (!fileInput.files.length) {
+                showStatus("请选择一个音频文件", "error");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("file", fileInput.files[0]);
+
+            btn.disabled = true;
+            btn.innerText = "上传中...";
+            showStatus("正在上传并处理...", "");
+
+            try {
+                // 注意：这里使用相对路径，server.py 需要配置静态文件服务或 CORS
+                const res = await fetch("/clone_voice", {
+                    method: "POST",
+                    body: formData
+                });
+
+                const data = await res.json();
+                
+                if (res.ok) {
+                    showStatus("克隆成功！\n" + JSON.stringify(data, null, 2), "success");
+                } else {
+                    showStatus("上传失败: " + (data.detail || JSON.stringify(data)), "error");
+                }
+            } catch (error) {
+                console.error(error);
+                showStatus("网络请求失败，请检查后端服务是否开启", "error");
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "上传声音";
+            }
+        }
+
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById("status");
+            statusDiv.style.display = "block";
+            statusDiv.className = type;
+            statusDiv.innerHTML = `<pre>${message}</pre>`;
+        }
+
+        async function testTTS() {
+            const voiceId = document.getElementById("voiceId").value;
+            const text = document.getElementById("ttsText").value;
+            const btn = document.getElementById("ttsBtn");
+            const audioEl = document.getElementById("ttsAudio");
+
+            if (!voiceId || !text) {
+                alert("请先填写 Voice ID 和你要转换的文本！");
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerText = "生成中...";
+
+            try {
+                const response = await fetch("/tts", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        voice_id: voiceId,
+                        text: text
+                    })
+                });
+
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const audioUrl = window.URL.createObjectURL(blob);
+                    
+                    audioEl.src = audioUrl;
+                    audioEl.style.display = "block";
+                    audioEl.play();
+                } else {
+                    alert("语音生成失败: " + response.statusText);
+                }
+            } catch (error) {
+                alert("请求出错: " + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "生成语音";
+            }
+        }
+    </script>
+</body>
+</html>

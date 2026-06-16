@@ -7,8 +7,20 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-    // 保持透传，不缓存
-    e.respondWith(fetch(e.request));
+    // 网络请求失败时处理
+    e.respondWith(
+        fetch(e.request)
+            .catch(() => {
+                // 网络不可用时，返回离线提示或缓存的响应
+                return new Response('网络离线，请检查连接', {
+                    status: 503,
+                    statusText: 'Service Unavailable',
+                    headers: new Headers({
+                        'Content-Type': 'text/plain'
+                    })
+                });
+            })
+    );
 });
 
 // --- 【新增】监听推送事件 ---

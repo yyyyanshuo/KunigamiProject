@@ -8,13 +8,22 @@
     <meta name="theme-color" content="#e6eeff">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <!-- 【新增】主题加载脚本 -->
+    <script src="/static/theme-loader.js"></script>
     <style>
         :root {
-            /* 专属冷色调主题 */
+            /* 专属冷色调主题 (降级使用) */
             --primary: #7e8ce0; 
             --primary-light: #eff1fc;
             --primary-dark: #5a6abf;
             --bg-gradient: linear-gradient(135deg, #e6eeff 0%, #f0e6ff 100%);
+            
+            /* 使用全局主题变量 (如果可用) */
+            --primary: var(--primary-color, #7e8ce0);
+            --primary-dark: var(--primary-dark, #5a6abf);
+            --primary-light: var(--primary-rgba-light, #eff1fc);
+            --bg-gradient: linear-gradient(135deg, var(--primary-rgba-light, #e6eeff) 0%, var(--bg-color, #f0e6ff) 100%);
+            
             --card-bg: #ffffff;
             --text-main: #2c3e50;
             --text-muted: #8ca0b3;
@@ -199,6 +208,17 @@
                 <input type="text" id="group-name" class="input-full" placeholder="输入群聊名称..." onblur="saveGroupName()">
             </div>
 
+            <div style="text-align:left; margin-bottom: 16px;">
+                <label class="input-label">群回复语言 (Group Language)</label>
+                <input type="text" id="group-language" class="input-full" placeholder="输入语言 (如: ja, en, zh, Spanish...)" onblur="saveGroupLanguage()" list="lang-list">
+                <datalist id="lang-list">
+                    <option value="ja">日本語 (Japanese)</option>
+                    <option value="zh">中文 (Chinese)</option>
+                    <option value="en">English</option>
+                </datalist>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">影响 AI 群聊回复语言及翻译方向。</div>
+            </div>
+
             <!-- 主动消息开关 -->
             <div class="switch-row">
                 <div>
@@ -223,12 +243,71 @@
                 </label>
             </div>
 
+            <!-- 群聊线上线下模式 -->
+            <div class="switch-row">
+                <div>
+                    <div style="font-size:14px; font-weight:700; color:var(--primary-dark); margin-bottom:2px;">📡 群聊模式 (Online/Offline)</div>
+                    <div style="font-size:11px; color:var(--primary);">线上聊天 / 线下相处</div>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="group-mode-chk" onchange="saveGroupChatMode()">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <!-- 是否包含用户 -->
+            <div class="switch-row">
+                <div>
+                    <div style="font-size:14px; font-weight:700; color:var(--primary-dark); margin-bottom:2px;">👤 包含用户 (Include User)</div>
+                    <div style="font-size:11px; color:var(--primary);">开启：用户也在场 / 关闭：用户不在</div>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="include-user-chk" onchange="saveIncludeUser()">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
             <div style="text-align:left;">
                 <label class="input-label">群成员列表 (Members)</label>
                 <div id="member-list" class="member-list-wrapper">
                     <!-- JS 生成标签 -->
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- ================= 【新增】背景设置区域 ================= -->
+    <div class="module" id="module-chat-bg">
+        <div class="mod-header">🎨 聊天背景 (Chat Background)</div>
+        <div class="mod-body content-box">
+            
+            <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+                <!-- 背景预览 -->
+                <div style="flex: 1;">
+                    <div id="chat-bg-preview" style="width: 100%; height: 100px; border: 2px dashed #ddd; border-radius: 12px; background-size: cover; background-position: center; display: flex; align-items: center; justify-content: center; color: #999; font-size: 12px; overflow: hidden; background-color: #f8f9fa;">
+                        <span id="bg-preview-text">点击上传背景</span>
+                    </div>
+                </div>
+                
+                <!-- 操作按钮 -->
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    <button class="btn btn-save" style="font-size: 12px;" onclick="document.getElementById('chat-bg-input').click()">
+                        📤 上传
+                    </button>
+                    <button id="clear-chat-bg-btn" class="btn" style="background: #f1f3f5; color: #555; font-size: 12px; display: none;" onclick="clearChatBg()">
+                        🗑️ 删除
+                    </button>
+                    <button class="btn btn-edit" style="font-size: 12px;" onclick="resetToDefault()">
+                        ↩️ 默认
+                    </button>
+                </div>
+            </div>
+            
+            <div style="font-size: 12px; color: #999; line-height: 1.4;">
+                💡 若不上传，此聊天将使用主题设置中的默认背景。
+            </div>
+            
+            <input type="file" id="chat-bg-input" accept="image/*" style="display: none;" onchange="uploadChatBackground(this)">
         </div>
     </div>
 
@@ -267,12 +346,116 @@
 </div>
 
 <script>
-    const groupId = window.location.pathname.split('/').pop();
+    const pathParts = window.location.pathname.split('/').filter(Boolean);
+    const groupId = pathParts[pathParts.length - 1];
     let globalData = {};
     let isEditing = false;
 
     // 初始化链接
     document.getElementById('backBtn').onclick = () => window.location.href = `/chat/group/${groupId}`;
+
+    // ========================= 【新增】背景管理函数 =========================
+    
+    // 当前聊天的背景配置
+    let chatBgConfig = null;
+
+    // 初始化背景UI
+    async function initChatBackground() {
+        try {
+            const res = await fetch(`/api/group/${groupId}/chat_background`);
+            if (res.ok) {
+                chatBgConfig = await res.json();
+                renderChatBackgroundUI();
+            }
+        } catch(e) {
+            console.warn('获取聊天背景配置失败:', e);
+            chatBgConfig = { filename: null };
+        }
+    }
+
+    // 渲染背景UI
+    function renderChatBackgroundUI() {
+        const bgPreview = document.getElementById('chat-bg-preview');
+        const bgText = document.getElementById('bg-preview-text');
+        const clearBtn = document.getElementById('clear-chat-bg-btn');
+
+        if (chatBgConfig && chatBgConfig.filename) {
+            bgPreview.style.backgroundImage = `url(/group_backgrounds/${groupId}/${chatBgConfig.filename})`;
+            bgText.style.display = 'none';
+            clearBtn.style.display = 'block';
+        } else {
+            bgPreview.style.backgroundImage = 'none';
+            bgText.style.display = 'block';
+            bgText.textContent = '点击上传背景';
+            clearBtn.style.display = 'none';
+        }
+    }
+
+    // 上传聊天背景
+    async function uploadChatBackground(input) {
+        const file = input.files[0];
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const previewEl = document.getElementById('chat-bg-preview');
+        previewEl.style.opacity = '0.5';
+
+        try {
+            const res = await fetch(`/api/group/${groupId}/upload_chat_background`, {
+                method: 'POST',
+                body: formData
+            });
+            const result = await res.json();
+
+            if (result.status === 'success') {
+                chatBgConfig = { filename: result.filename };
+                renderChatBackgroundUI();
+                // 保存配置到服务器
+                saveChatBgConfig();
+            } else {
+                alert('上传失败: ' + (result.error || '未知错误'));
+            }
+        } catch(e) {
+            console.error("Upload error:", e);
+            alert('网络错误或服务器异常: ' + e.message);
+        } finally {
+            previewEl.style.opacity = '1';
+            input.value = '';
+        }
+    }
+
+    // 清除聊天背景
+    function clearChatBg() {
+        if (confirm('确定要删除此群聊的背景吗？')) {
+            chatBgConfig = { filename: null };
+            renderChatBackgroundUI();
+            saveChatBgConfig();
+        }
+    }
+
+    // 重置为默认背景
+    function resetToDefault() {
+        chatBgConfig = { filename: null };
+        renderChatBackgroundUI();
+        saveChatBgConfig();
+    }
+
+    // 保存背景配置
+    async function saveChatBgConfig() {
+        try {
+            await fetch(`/api/group/${groupId}/save_chat_background`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(chatBgConfig)
+            });
+        } catch(e) {
+            console.warn('保存背景配置失败:', e);
+        }
+    }
+
+    // ======================================================================
 
     // 加载数据
     async function loadData() {
@@ -280,19 +463,30 @@
         globalData = await res.json();
         renderMeta();
         renderMemoryView();
+        // 初始化背景
+        initChatBackground();
     }
 
     // 渲染基本信息
     function renderMeta() {
         const meta = globalData.meta;
         document.getElementById('group-name').value = meta.name;
-        document.getElementById('group-avatar').src = meta.avatar || '/static/default_group.png';
+        document.getElementById('group-language').value = meta.language || '';
+        
+        const avatarUrl = meta.avatar || '/static/default_group.png';
+        document.getElementById('group-avatar').src = window.getCosUrl ? window.getCosUrl(avatarUrl) : avatarUrl;
 
         // 【修改】默认为 false (如果 active_mode 是 undefined 或者是 false 都算 false)
         document.getElementById('group-active-chk').checked = meta.active_mode || false;
 
         // 置顶开关（与单聊一致）
         document.getElementById('group-pinned-chk').checked = meta.pinned || false;
+
+        // 群聊线上线下模式 (默认 online = unchecked)
+        document.getElementById('group-mode-chk').checked = (meta.group_chat_mode === 'offline');
+
+        // 是否包含用户 (默认 true = checked)
+        document.getElementById('include-user-chk').checked = (meta.include_user !== false);
 
         const membersDiv = document.getElementById('member-list');
         membersDiv.innerHTML = meta.members.map(m => `<span class="member-tag">${m}</span>`).join('');
@@ -466,6 +660,19 @@
         } catch (e) { alert('网络错误'); }
     }
 
+    // 保存语言设置
+    async function saveGroupLanguage() {
+        const lang = document.getElementById('group-language').value.trim();
+        try {
+            const res = await fetch(`/api/group/${groupId}/update_meta`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ language: lang })
+            });
+            if (!res.ok) alert('语言设置保存失败');
+        } catch (e) { alert('网络错误'); }
+    }
+
     // 置顶开关即时保存
     async function saveGroupPinnedState() {
         const pinned = document.getElementById('group-pinned-chk').checked;
@@ -482,6 +689,45 @@
         } catch (e) {
             alert('网络错误');
             document.getElementById('group-pinned-chk').checked = !pinned;
+        }
+    }
+
+    // 群聊线上线下模式即时保存
+    async function saveGroupChatMode() {
+        const isOffline = document.getElementById('group-mode-chk').checked;
+        const mode = isOffline ? 'offline' : 'online';
+        try {
+            const res = await fetch(`/api/group/${groupId}/update_meta`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ group_chat_mode: mode })
+            });
+            if (!res.ok) {
+                alert('群聊模式保存失败');
+                document.getElementById('group-mode-chk').checked = !isOffline;
+            }
+        } catch (e) {
+            alert('网络错误');
+            document.getElementById('group-mode-chk').checked = !isOffline;
+        }
+    }
+
+    // 包含用户开关即时保存
+    async function saveIncludeUser() {
+        const include = document.getElementById('include-user-chk').checked;
+        try {
+            const res = await fetch(`/api/group/${groupId}/update_meta`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ include_user: include })
+            });
+            if (!res.ok) {
+                alert('保存失败');
+                document.getElementById('include-user-chk').checked = !include;
+            }
+        } catch (e) {
+            alert('网络错误');
+            document.getElementById('include-user-chk').checked = !include;
         }
     }
 
@@ -572,5 +818,7 @@
     }
 </script>
 
+  <!-- AI巡航悬浮球 -->
+  <script src="/static/ai-cruise.js"></script>
 </body>
 </html>

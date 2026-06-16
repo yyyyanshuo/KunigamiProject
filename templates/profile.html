@@ -10,6 +10,10 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <!-- 【新增】主题加载脚本 -->
   <script src="/static/theme-loader.js"></script>
+  <script>
+    window.GLOBAL_COS_BASE_URL = "{{ COS_BASE_URL | default('') }}";
+    window.GLOBAL_USER_PREFIX = "users/{{ session.get('user_id', 1) }}";
+  </script>
   <style>
     :root {
       --primary-color: #ffb6b9;
@@ -399,7 +403,6 @@
     }
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-
   </style>
 </head>
 <body>
@@ -416,8 +419,20 @@
 <div class="header">
   <!-- 头像点击上传区域 -->
   <div class="avatar-wrapper" onclick="document.getElementById('user-avatar-input').click()">
-    <!-- 头像图片：默认从 /user_avatar 获取 -->
-    <img id="user-avatar-img" src="/user_avatar" class="avatar-large" onerror="this.src='https://api.dicebear.com/7.x/notionists/svg?seed=Felix'">
+    <!-- 头像图片：使用 JS 动态获取 COS 地址避免缓存问题 -->
+    <img id="user-avatar-img" class="avatar-large" onerror="this.onerror=null; this.src='/static/default_avatar.png';">
+    <script>
+      (function() {
+        const uid = "{{ session.get('user_id', 1) }}";
+        const path = `users/${uid}/avatar.png`;
+        const img = document.getElementById('user-avatar-img');
+        if (window.getCosUrl) {
+          img.src = window.getCosUrl(path);
+        } else {
+          img.src = '/user_avatar';
+        }
+      })();
+    </script>
     
     <!-- 右下角的小相机图标 -->
     <div class="camera-badge">
@@ -541,31 +556,6 @@
   </div>
 </div>
 
-<!-- 模块 2: 系统规则 -->
-<div class="section-container collapsed" id="container-format">
-  <div class="section-header" onclick="toggleSectionByHeader(this)">
-    <div class="section-header-main">
-      <div class="section-title">⚖️ 全局系统规则 (System Rules)</div>
-    </div>
-    <div>
-      <button class="btn-edit-toggle" onclick="event.stopPropagation(); enterEdit('format')">编辑 Edit</button>
-      <span class="section-arrow">▾</span>
-    </div>
-  </div>
-  <div class="section-body">
-    <div class="config-card">
-      <div class="view-box" id="view-format"><span class="empty-tip">加载中...</span></div>
-      <div class="edit-box">
-        <textarea id="input-format" class="editor-area" placeholder="在此输入系统规则约束..."></textarea>
-        <div class="action-bar">
-          <button class="btn btn-cancel" onclick="cancelEdit('format')">取消</button>
-          <button class="btn btn-save" onclick="saveConfig('format')">保存规则</button>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- API 线路与模型设置 -->
 <div class="section-container collapsed" id="module-api">
   <div class="section-header" onclick="toggleSectionByHeader(this)">
@@ -612,6 +602,10 @@
           <div class="api-status-item">
             <div class="api-label">人设 (Persona)</div>
             <div id="view-gen-model" class="api-badge">-</div>
+          </div>
+          <div class="api-status-item">
+            <div class="api-label">生图 (Image)</div>
+            <div id="view-image-model" class="api-badge">-</div>
           </div>
         </div>
       </div>
@@ -669,6 +663,7 @@
             <div><div class="input-label">识图理解</div><select id="model-vision" class="model-select"></select></div>
             <div><div class="input-label">记忆提取总结</div><select id="model-summary" class="model-select"></select></div>
             <div><div class="input-label">人设自动演进</div><select id="model-gen" class="model-select"></select></div>
+            <div><div class="input-label">AI 生图模型</div><select id="model-image" class="model-select"></select></div>
           </div>
         </div>
 
@@ -882,13 +877,14 @@
 
 <!-- 打赏弹窗已移至 tabbar.html -->
 
+  <!-- AI巡航悬浮球 -->
+  <script src="/static/ai-cruise.js"></script>
 </body>
 
 <script>
   // 缓存数据
   let cacheData = {
-    user: '',
-    format: ''
+    user: ''
   };
 
   // 折叠/展开模块
@@ -1034,11 +1030,19 @@
       if (result.status === 'success') {
         currentTheme.default_chat_bg = result.filename;
         renderThemeUI();
+        try {
+          await fetch('/api/theme/settings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(currentTheme)
+          });
+          localStorage.setItem('theme_updated', Date.now().toString());
+        } catch(err) { console.error("Auto save failed", err); }
       } else {
         alert('上传失败: ' + result.error);
       }
     } catch(e) {
-      alert('网络错误');
+      alert('网络或异常错误: ' + e.message); console.error(e);
     } finally {
       previewEl.style.opacity = '1';
       input.value = '';
@@ -1077,7 +1081,7 @@
         alert('保存失败');
       }
     } catch(e) {
-      alert('网络错误');
+      alert('网络或异常错误: ' + e.message); console.error(e);
     }
   }
 
@@ -1086,17 +1090,15 @@
   // 1. 加载所有配置 (合并调用)
   async function loadConfigs() {
     try {
-      // --- A. 加载全局人设 & 格式 (原有的逻辑) ---
+      // --- A. 加载全局人设 (原有的逻辑) ---
       const resConfig = await fetch('/api/global_config');
       const dataConfig = await resConfig.json();
 
       // 更新缓存
       cacheData.user = dataConfig.user_persona || '';
-      cacheData.format = dataConfig.system_format || '';
 
       // 渲染页面
       renderUI('user');
-      renderUI('format');
 
       // --- B. 【新增】加载当前用户名 ---
       const resUser = await fetch('/api/user/profile_settings');
@@ -1319,7 +1321,7 @@
         alert('上传失败: ' + result.error);
       }
     } catch (e) {
-      alert('网络错误');
+      alert('网络或异常错误: ' + e.message); console.error(e);
     } finally {
       imgEl.style.opacity = '1';
       // 清空 input，防止选同一张图不触发 onchange
@@ -1361,7 +1363,7 @@
     const btn = document.querySelector(`#container-${type} .btn-save`);
 
     // 映射后端 Key
-    const apiKey = (type === 'user') ? 'user_persona' : 'system_format';
+    const apiKey = 'user_persona';
 
     const originalText = btn.textContent;
     btn.textContent = '保存中...';
@@ -1386,7 +1388,7 @@
         alert('保存失败: ' + result.error);
       }
     } catch(e) {
-      alert('网络错误');
+      alert('网络或异常错误: ' + e.message); console.error(e);
     } finally {
       btn.textContent = originalText;
       btn.disabled = false;
@@ -1487,6 +1489,7 @@
     document.getElementById('view-vision-model').textContent = models.vision != null ? models.vision : (route === 'gemini' ? 'gemini-2.5-pro' : 'gpt-4o');
     document.getElementById('view-summary-model').textContent = models.summary;
     document.getElementById('view-gen-model').textContent = models.gen_persona;
+    document.getElementById('view-image-model').textContent = models.image != null ? models.image : (route === 'gemini' ? 'gemini-2.5-flash-image' : 'Kwai-Kolors/Kolors');
   }
 
   // 3. 切换编辑状态
@@ -1575,6 +1578,7 @@
     document.getElementById('model-vision').innerHTML = optionsHtml;
     document.getElementById('model-summary').innerHTML = optionsHtml;
     document.getElementById('model-gen').innerHTML = optionsHtml;
+    document.getElementById('model-image').innerHTML = optionsHtml;
 
     // B. 选中当前(或默认)值
     // 注意：这里我们优先显示配置文件里存的值。如果那个值不在列表里了(被删了)，就选列表第一个。
@@ -1586,6 +1590,7 @@
     setSelectValue('model-vision', savedModels.vision != null ? savedModels.vision : (route === 'gemini' ? 'gemini-2.5-pro' : 'gpt-4o'));
     setSelectValue('model-summary', savedModels.summary);
     setSelectValue('model-gen', savedModels.gen_persona);
+    setSelectValue('model-image', savedModels.image != null ? savedModels.image : (route === 'gemini' ? 'gemini-2.5-flash-image' : 'Kwai-Kolors/Kolors'));
 
     // C. 渲染管理标签列表
     const listEl = document.getElementById('model-tags-list');
@@ -1671,6 +1676,7 @@
     apiConfig.routes[activeRoute].models.vision = document.getElementById('model-vision').value;
     apiConfig.routes[activeRoute].models.summary = document.getElementById('model-summary').value;
     apiConfig.routes[activeRoute].models.gen_persona = document.getElementById('model-gen').value;
+    apiConfig.routes[activeRoute].models.image = document.getElementById('model-image').value;
 
     // 【新增】保存 relay 中转商选择
     if (activeRoute === 'relay') {
@@ -1713,7 +1719,7 @@
         alert('保存失败');
       }
     } catch(e) {
-      alert('网络错误');
+      alert('网络或异常错误: ' + e.message); console.error(e);
     } finally {
       btn.textContent = originalText;
       btn.disabled = false;

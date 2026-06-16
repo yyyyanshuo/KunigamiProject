@@ -10,3 +10,6 @@ janome
 jieba
 pykakasi
 pillow
+werkzeug
+cos-python-sdk-v5
+gevent
