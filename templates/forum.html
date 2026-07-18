@@ -1,0 +1,1045 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#ffb6b9">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="/static/logo.png">
+    <title>论坛体生成器</title>
+    <script src="/static/theme-loader.js"></script>
+    <style>
+        :root {
+            --primary: #ffb6b9;
+            --primary-dark: #f09598;
+            --primary-rgba: rgba(255, 182, 185, 0.18);
+            --primary-rgba-light: rgba(255, 182, 185, 0.08);
+            --bg: #fafafc;
+            --card: #ffffff;
+            --text: #2c3e50;
+            --text-secondary: #8ca0b3;
+            --text-muted: #b0bec5;
+            --border: #edf1f5;
+            --radius: 14px;
+            --radius-lg: 20px;
+            --shadow: 0 4px 20px rgba(0,0,0,0.04);
+            --shadow-lg: 0 12px 40px rgba(0,0,0,0.08);
+        }
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+        body {
+            font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
+            background: var(--bg);
+            margin: 0; padding: 0;
+            color: var(--text);
+        }
+
+        /* ===== Header ===== */
+        .header {
+            background: rgba(255,255,255,0.88);
+            backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            padding: 12px 18px;
+            display: flex; align-items: center; gap: 12px;
+            position: sticky; top: 0; z-index: 50;
+            border-bottom: 1px solid var(--border);
+        }
+        .header-back {
+            width: 34px; height: 34px;
+            border-radius: 50%; border: none;
+            background: var(--bg);
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; color: var(--text-secondary);
+            transition: all 0.15s;
+        }
+        .header-back:active { background: var(--primary-rgba); color: var(--primary-dark); }
+        .header-back svg { width: 18px; height: 18px; stroke-width: 2.5px; }
+        .header-title { font-size: 17px; font-weight: 700; color: var(--text); }
+        .header-subtitle { font-size: 12px; color: var(--text-muted); margin-left: 4px; font-weight: 400; }
+
+        /* ===== Main Layout ===== */
+        .forum-layout {
+            display: flex; gap: 0;
+            max-width: 1100px; margin: 0 auto;
+            height: calc(100vh - 60px);
+            padding: 16px;
+            box-sizing: border-box;
+            overflow: hidden;
+        }
+
+        /* ===== Settings Panel ===== */
+        .settings-panel {
+            flex: 1; min-width: 0;
+            display: flex; flex-direction: column; gap: 16px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+        .settings-panel .section {
+            background: var(--card);
+            border-radius: var(--radius);
+            padding: 18px;
+            box-shadow: var(--shadow);
+        }
+        .settings-panel .section-label {
+            font-size: 11px; font-weight: 700; color: var(--text-muted);
+            text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px;
+        }
+        .settings-panel input[type="text"],
+        .settings-panel textarea,
+        .settings-panel select {
+            width: 100%; padding: 12px 14px;
+            border: 1.5px solid var(--border);
+            border-radius: 10px; font-size: 14px; color: var(--text);
+            background: var(--bg); outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            font-family: inherit;
+        }
+        .settings-panel input[type="text"]:focus,
+        .settings-panel textarea:focus,
+        .settings-panel select:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-rgba-light);
+        }
+        .settings-panel textarea { resize: vertical; min-height: 80px; }
+        .settings-panel select { appearance: none; -webkit-appearance: none; cursor: pointer;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238ca0b3' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'%3E%3C/path%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: right 12px center;
+            padding-right: 36px;
+        }
+
+        .form-row { display: flex; gap: 10px; }
+        .form-row > * { flex: 1; }
+
+        .custom-type-wrap { display: none; margin-top: 10px; }
+
+        /* Chat segment cards */
+        .segment-card {
+            display: flex; align-items: center; gap: 10px;
+            background: var(--bg);
+            border-radius: 10px; padding: 10px 12px;
+            border: 1px solid var(--border);
+            transition: all 0.15s;
+        }
+        .segment-card:hover { border-color: var(--primary); }
+        .segment-card .seg-avatar {
+            width: 38px; height: 38px; border-radius: 10px;
+            object-fit: cover; flex-shrink: 0;
+            background: var(--primary-rgba-light);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 16px;
+        }
+        .segment-card .seg-info { flex: 1; min-width: 0; }
+        .segment-card .seg-name { font-size: 13px; font-weight: 600; color: var(--text); }
+        .segment-card .seg-meta { font-size: 11px; color: var(--text-muted); }
+        .segment-card .seg-remove {
+            width: 28px; height: 28px; border-radius: 50%;
+            border: none; background: transparent;
+            color: var(--text-muted); cursor: pointer;
+            font-size: 16px; display: flex; align-items: center;
+            justify-content: center; transition: all 0.15s;
+        }
+        .segment-card .seg-remove:hover { background: #fee2e2; color: #ef4444; }
+
+        .segments-list { display: flex; flex-direction: column; gap: 8px; }
+        .segments-empty {
+            text-align: center; color: var(--text-muted);
+            font-size: 13px; padding: 16px 0;
+        }
+
+        .btn-load-chat {
+            width: 100%; padding: 11px;
+            border: 2px dashed var(--border);
+            border-radius: 10px; background: transparent;
+            color: var(--text-secondary); font-size: 13px;
+            cursor: pointer; font-weight: 600;
+            transition: all 0.15s;
+        }
+        .btn-load-chat:hover { border-color: var(--primary); color: var(--primary-dark); background: var(--primary-rgba-light); }
+
+        .btn-generate {
+            width: 100%; padding: 14px;
+            border: none; border-radius: 12px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            color: #fff; font-size: 15px; font-weight: 700;
+            cursor: pointer; transition: all 0.2s;
+            box-shadow: 0 4px 16px rgba(240, 149, 152, 0.35);
+        }
+        .btn-generate:active { transform: scale(0.97); }
+        .btn-generate:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+        /* ===== Phone Preview ===== */
+        .phone-preview {
+            flex: 0 0 400px;
+            display: flex; flex-direction: column; align-items: center;
+            align-self: stretch;
+            overflow: hidden;
+        }
+        .phone-frame {
+            flex: 1; min-height: 0;
+            width: 375px; max-width: 100%;
+            border-radius: 40px;
+            border: 8px solid #1a1a1c;
+            background: #ffffff;
+            display: flex; flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 24px 60px rgba(0,0,0,0.12), 0 8px 20px rgba(0,0,0,0.06);
+            position: relative;
+        }
+        .phone-notch {
+            width: 120px; height: 28px;
+            background: #1a1a1c;
+            border-radius: 0 0 20px 20px;
+            position: absolute; top: 0; left: 50%;
+            transform: translateX(-50%);
+            z-index: 2;
+        }
+        .phone-status-bar {
+            height: 36px; background: #1a1a1c; flex-shrink: 0;
+            display: flex; align-items: center;
+            justify-content: space-between;
+            padding: 0 24px; color: #fff;
+            font-size: 10px; font-weight: 600;
+        }
+        .phone-screen {
+            flex: 1; min-height: 0;
+            overflow-y: auto; overflow-x: hidden;
+            padding: 14px 14px 20px 14px;
+            -webkit-overflow-scrolling: touch;
+            scroll-behavior: smooth;
+        }
+        .phone-screen::-webkit-scrollbar { width: 3px; }
+        .phone-screen::-webkit-scrollbar-thumb { background: #ddd; border-radius: 3px; }
+
+        .phone-placeholder {
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            height: 100%; color: var(--text-muted);
+            font-size: 13px; text-align: center;
+        }
+        .phone-placeholder svg { opacity: 0.3; margin-bottom: 12px; }
+
+        /* Forum posts inside phone */
+        .phone-screen .forum-post {
+            margin-bottom: 10px; border-radius: 10px;
+            padding: 10px 12px; position: relative;
+            animation: postSlideIn 0.3s ease-out;
+        }
+        @keyframes postSlideIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .phone-screen .forum-post.self {
+            background: linear-gradient(135deg, var(--primary-rgba-light), rgba(255,255,255,0.6));
+            border: 1px solid rgba(255, 182, 185, 0.3);
+        }
+        .phone-screen .forum-post.npc {
+            background: #f5f6f8;
+            border: 1px solid #e5e7eb;
+        }
+        .phone-screen .forum-post-header {
+            display: flex; align-items: center; gap: 6px;
+            margin-bottom: 5px; flex-wrap: wrap;
+        }
+        .phone-screen .forum-post-name {
+            font-size: 12px; font-weight: 600; color: var(--text);
+        }
+        .phone-screen .forum-post-tag {
+            font-size: 10px; color: #999;
+            background: rgba(0,0,0,0.04);
+            padding: 1px 6px; border-radius: 4px;
+        }
+        .phone-screen .forum-post-role {
+            font-size: 9px; font-weight: 600; padding: 1px 6px; border-radius: 8px;
+        }
+        .phone-screen .forum-post-role.self {
+            background: var(--primary-rgba); color: var(--primary-dark);
+        }
+        .phone-screen .forum-post-role.npc {
+            background: #e2e8f0; color: #64748b;
+        }
+        .phone-screen .forum-post-content {
+            font-size: 13px; line-height: 1.6; color: #555;
+            word-break: break-word;
+        }
+        .phone-screen .forum-post-reply-to {
+            display: inline-block; font-size: 10px;
+            color: var(--primary-dark);
+            background: var(--primary-rgba-light);
+            padding: 1px 6px; border-radius: 6px;
+            margin-left: 4px; cursor: pointer;
+            transition: background 0.15s;
+        }
+        .phone-screen .forum-post-reply-to:hover {
+            background: var(--primary-rgba);
+        }
+        .phone-screen .forum-post-highlight {
+            box-shadow: 0 0 0 3px var(--primary) !important;
+            transition: box-shadow 1.5s ease-out;
+        }
+        .phone-screen .forum-thread-title {
+            font-size: 16px; font-weight: 700; color: var(--text);
+            text-align: center; padding: 4px 0 10px 0;
+            border-bottom: 1px solid #eee; margin-bottom: 10px;
+        }
+
+        .phone-actions {
+            display: flex; gap: 8px; margin-top: 14px; width: 375px; max-width: 92vw;
+            flex-shrink: 0;
+        }
+        .phone-actions button {
+            flex: 1; padding: 10px; border-radius: 10px;
+            border: none; cursor: pointer; font-size: 13px; font-weight: 600;
+            transition: all 0.15s;
+        }
+        .btn-copy { background: var(--text); color: #fff; }
+        .btn-copy:active { background: #000; }
+        .btn-back-edit { background: var(--bg); color: var(--text-secondary); border: 1px solid var(--border) !important; }
+        .btn-back-edit:active { background: var(--primary-rgba-light); }
+
+        /* ===== Chat Picker Modal ===== */
+        .picker-modal-overlay {
+            display: none; position: fixed; inset: 0;
+            background: rgba(0,0,0,0.45); backdrop-filter: blur(4px);
+            z-index: 2000; align-items: center; justify-content: center;
+            padding: 16px;
+        }
+        .picker-modal-overlay.show { display: flex; }
+        .picker-modal {
+            background: var(--card); width: 90%; max-width: 480px;
+            max-height: 80vh; border-radius: var(--radius-lg);
+            display: flex; flex-direction: column;
+            overflow: hidden; box-shadow: var(--shadow-lg);
+            animation: modalIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        @keyframes modalIn {
+            from { opacity: 0; transform: translateY(20px) scale(0.95); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .picker-modal-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 18px; border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+        .picker-modal-title { font-size: 16px; font-weight: 700; }
+        .picker-modal-close {
+            width: 30px; height: 30px; border-radius: 50%;
+            border: none; background: var(--bg); cursor: pointer;
+            font-size: 18px; color: var(--text-muted);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .picker-modal-body {
+            flex: 1; overflow-y: auto; padding: 12px 16px;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        /* Contact list inside picker */
+        .picker-contact {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 12px; border-radius: 10px;
+            cursor: pointer; transition: background 0.1s;
+            border: 1px solid transparent;
+        }
+        .picker-contact:hover, .picker-contact:active { background: var(--bg); }
+        .picker-contact.selected-contact { border-color: var(--primary); background: var(--primary-rgba-light); }
+        .picker-contact .c-avatar {
+            width: 40px; height: 40px; border-radius: 10px;
+            object-fit: cover; flex-shrink: 0;
+            background: var(--primary-rgba-light);
+        }
+        .picker-contact .c-info { flex: 1; min-width: 0; }
+        .picker-contact .c-name { font-size: 14px; font-weight: 600; }
+        .picker-contact .c-type { font-size: 11px; color: var(--text-muted); }
+        .picker-contact .c-arrow { color: var(--text-muted); font-size: 18px; }
+
+        /* ===== Loading Overlay ===== */
+        .loading-overlay {
+            display: none; position: fixed; inset: 0;
+            background: rgba(0,0,0,0.55); backdrop-filter: blur(6px);
+            z-index: 3000; flex-direction: column;
+            align-items: center; justify-content: center;
+            color: #fff;
+        }
+        .loading-overlay.show { display: flex; }
+        .loading-spinner {
+            width: 44px; height: 44px;
+            border: 3px solid rgba(255,255,255,0.25);
+            border-top-color: #fff; border-radius: 50%;
+            animation: spin 0.75s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text {
+            margin-top: 16px; font-size: 14px; font-weight: 500;
+            opacity: 0.85; text-align: center;
+        }
+        .loading-subtext {
+            margin-top: 6px; font-size: 12px; opacity: 0.5;
+        }
+
+        /* ===== Toast ===== */
+        .toast {
+            position: fixed; bottom: 80px; left: 50%;
+            transform: translateX(-50%);
+            background: #333; color: #fff;
+            padding: 10px 24px; border-radius: 24px;
+            font-size: 13px; font-weight: 600;
+            z-index: 4000; opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        .toast.show { opacity: 1; }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 800px) {
+            .forum-layout {
+                flex-direction: column; padding: 12px;
+                overflow: hidden;
+                height: calc(100vh - 60px);
+            }
+            .settings-panel {
+                overflow-y: auto;
+            }
+            .phone-preview {
+                flex: 1 1 auto;
+                margin-top: 0; width: 100%;
+                align-self: auto;
+                overflow: hidden;
+            }
+            .phone-frame {
+                flex: 1; min-height: 0;
+                max-width: 100%; width: 100%;
+                border-radius: 32px; border-width: 6px;
+            }
+            .phone-screen { flex: 1; min-height: 0; }
+            .phone-actions { width: 100%; max-width: 100%; }
+            .form-row { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+    <button class="header-back" onclick="location.href='/'">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 18l-6-6 6-6"/>
+        </svg>
+    </button>
+    <span class="header-title">论坛体生成器</span>
+    <span class="header-subtitle">聊天记录 → 网友吃瓜论坛</span>
+</div>
+
+<!-- Main Layout -->
+<div class="forum-layout">
+    <!-- Settings Panel -->
+    <div class="settings-panel" id="settingsPanel">
+        <div class="section">
+            <div class="section-label">论坛主题</div>
+            <input type="text" id="topicInput" placeholder="例如：E4小分队周末一起出去玩、大家在讨论什么新番…" maxlength="200">
+        </div>
+
+        <div class="section">
+            <div class="section-label">论坛类型</div>
+            <div class="form-row">
+                <select id="forumTypeSelect" onchange="toggleCustomType()">
+                    <option value="novel_readers">小说读者论坛</option>
+                    <option value="world_bystanders">世界路人论坛</option>
+                    <option value="custom">自定义类型</option>
+                </select>
+                <select id="floorLimitSelect">
+                    <option value="10">10 楼</option>
+                    <option value="20" selected>20 楼</option>
+                    <option value="30">30 楼</option>
+                    <option value="50">50 楼</option>
+                </select>
+            </div>
+            <div class="custom-type-wrap" id="customTypeWrap">
+                <input type="text" id="customTypeInput" placeholder="描述论坛类型，如：电竞水友论坛、家长群讨论区…" maxlength="100">
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-label">聊天记录证据（可载入多段）</div>
+            <div class="segments-list" id="segmentsList">
+                <div class="segments-empty">还未载入聊天记录</div>
+            </div>
+            <button class="btn-load-chat" onclick="openChatPicker()" style="margin-top:10px;">+ 载入聊天记录</button>
+        </div>
+
+        <div class="section">
+            <div class="section-label">选择历史论坛（续写，最多选一个）</div>
+            <div style="display:flex;gap:8px;">
+                <select id="historyForumSelect" onchange="onHistoryForumSelected()" style="flex:1;">
+                    <option value="">不续写（新建帖子）</option>
+                </select>
+                <button type="button" onclick="viewHistoryForum()" style="padding:10px 16px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text-secondary);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">查看</button>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-label">补充信息</div>
+            <textarea id="supplementaryInput" placeholder="作品背景、人物关系、前情提要等…帮助网友更好地理解上下文" maxlength="2000"></textarea>
+        </div>
+
+        <button class="btn-generate" id="generateBtn" onclick="generateForum()">
+            🚀 生成论坛
+        </button>
+    </div>
+
+    <!-- Phone Preview -->
+    <div class="phone-preview" id="phonePreview" style="display:none;">
+        <div class="phone-frame">
+            <div class="phone-notch"></div>
+            <div class="phone-status-bar">
+                <span>9:41</span>
+                <span>📶 🔋</span>
+            </div>
+            <div class="phone-screen" id="phoneScreen">
+                <div class="phone-placeholder" id="phonePlaceholder">
+                    <svg viewBox="0 0 24 24" width="48" height="48" stroke="currentColor" stroke-width="1.5" fill="none">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    <div>填写左侧信息并载入聊天记录后，<br>点击"生成论坛"查看效果</div>
+                </div>
+            </div>
+        </div>
+        <div class="phone-actions" id="phoneActions" style="display:none;">
+            <button class="btn-back-edit" onclick="backToEdit()">返回编辑</button>
+            <button class="btn-copy" onclick="copyForumBlock()">复制论坛块代码</button>
+        </div>
+    </div>
+</div>
+
+<!-- Contact Picker Mini-Modal (redirects to chat page for message selection) -->
+<div class="picker-modal-overlay" id="pickerOverlay" onclick="if(event.target===this)closeChatPicker()">
+    <div class="picker-modal">
+        <div class="picker-modal-header">
+            <span class="picker-modal-title">选择联系人，进入聊天页选消息</span>
+            <button class="picker-modal-close" onclick="closeChatPicker()">&times;</button>
+        </div>
+        <div class="picker-modal-body" style="padding:12px 16px;">
+            <div id="contactListInner" style="display:flex;flex-direction:column;gap:4px;">
+                <div style="text-align:center;color:var(--text-muted);padding:20px;">加载中...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Loading Overlay -->
+<div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-spinner"></div>
+    <div class="loading-text" id="loadingText">正在收集网友八卦...</div>
+    <div class="loading-subtext" id="loadingSubtext">这可能需要十几秒</div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+    // ===== State =====
+    let chatSegments = [];
+    let currentForumData = null;
+    let isResultMode = false;
+
+    // ===== Chat Segments =====
+    function renderSegments() {
+        const list = document.getElementById('segmentsList');
+        if (chatSegments.length === 0) {
+            list.innerHTML = '<div class="segments-empty">还未载入聊天记录</div>';
+            return;
+        }
+        list.innerHTML = chatSegments.map((seg, i) => `
+            <div class="segment-card">
+                <div class="seg-avatar">💬</div>
+                <div class="seg-info">
+                    <div class="seg-name">${escHtml(seg.contact_name)}</div>
+                    <div class="seg-meta">${seg.messages.length} 条消息</div>
+                </div>
+                <button class="seg-remove" onclick="removeSegment(${i})" title="移除">&times;</button>
+            </div>
+        `).join('');
+    }
+
+    function removeSegment(idx) {
+        chatSegments.splice(idx, 1);
+        renderSegments();
+    }
+
+    // ===== Chat Picker: redirects to chat page in forum picker mode =====
+    async function openChatPicker() {
+        saveFormState();
+        document.getElementById('pickerOverlay').classList.add('show');
+        await loadContacts();
+    }
+
+    function closeChatPicker() {
+        document.getElementById('pickerOverlay').classList.remove('show');
+    }
+
+    function saveFormState() {
+        const state = {
+            topic: document.getElementById('topicInput').value,
+            forumType: document.getElementById('forumTypeSelect').value,
+            floorLimit: document.getElementById('floorLimitSelect').value,
+            customType: document.getElementById('customTypeInput').value,
+            supplementary: document.getElementById('supplementaryInput').value,
+            historyId: document.getElementById('historyForumSelect').value,
+            segments: chatSegments
+        };
+        sessionStorage.setItem('forumFormState', JSON.stringify(state));
+    }
+
+    function restoreFormState() {
+        try {
+            const raw = sessionStorage.getItem('forumFormState');
+            if (!raw) return;
+            const state = JSON.parse(raw);
+            sessionStorage.removeItem('forumFormState');
+            if (state.topic) document.getElementById('topicInput').value = state.topic;
+            if (state.forumType) {
+                document.getElementById('forumTypeSelect').value = state.forumType;
+                toggleCustomType();
+            }
+            if (state.floorLimit) document.getElementById('floorLimitSelect').value = state.floorLimit;
+            if (state.customType) document.getElementById('customTypeInput').value = state.customType;
+            if (state.supplementary) document.getElementById('supplementaryInput').value = state.supplementary;
+            if (state.historyId) document.getElementById('historyForumSelect').value = state.historyId;
+            if (state.segments && state.segments.length > 0) {
+                chatSegments = state.segments;
+                renderSegments();
+            }
+        } catch (e) {}
+    }
+
+    async function loadContacts() {
+        const inner = document.getElementById('contactListInner');
+        inner.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;">加载中...</div>';
+        try {
+            const resp = await fetch('/api/contacts');
+            if (!resp.ok) throw new Error('Failed');
+            const contacts = await resp.json();
+            if (contacts.length === 0) {
+                inner.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;">暂无联系人</div>';
+                return;
+            }
+            inner.innerHTML = contacts.map(c => {
+                const name = encodeURIComponent(c.name || c.id);
+                const jumpUrl = c.type === 'group'
+                    ? `/chat/group/${c.id}?forumPicker=1&forumName=${name}`
+                    : `/chat/${c.id}?forumPicker=1&forumName=${name}`;
+                return `
+                <div class="picker-contact" onclick="window.location.href='${jumpUrl}'">
+                    <img class="c-avatar" src="${escHtml(c.avatar || '/static/default_avatar.png')}" alt="">
+                    <div class="c-info">
+                        <div class="c-name">${escHtml(c.name || c.id)}</div>
+                        <div class="c-type">${c.type === 'group' ? '群聊' : '私聊'}</div>
+                    </div>
+                    <span class="c-arrow">›</span>
+                </div>
+                `;
+            }).join('');
+        } catch (e) {
+            inner.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;">加载失败，请重试</div>';
+        }
+    }
+
+    // ===== On page load: check for returned picker data from chat page =====
+    (function checkReturnedPickerData() {
+        try {
+            // 先恢复表单保存的旧段，再把新载入的段追加在后面
+            restoreFormState();
+            const raw = sessionStorage.getItem('forumPickerSegment');
+            if (raw) {
+                const seg = JSON.parse(raw);
+                sessionStorage.removeItem('forumPickerSegment');
+                if (seg && seg.messages && seg.messages.length > 0) {
+                    chatSegments.push(seg);
+                    renderSegments();
+                }
+            }
+        } catch (e) {}
+    })();
+
+    // ===== History Forum Selector =====
+    async function loadHistoryForums() {
+        const sel = document.getElementById('historyForumSelect');
+        try {
+            const resp = await fetch('/api/forums/list');
+            if (!resp.ok) return;
+            const forums = await resp.json();
+            forums.forEach(f => {
+                const opt = document.createElement('option');
+                opt.value = f.id;
+                opt.textContent = `${f.title} (${f.forum_type === 'novel_readers' ? '小说读者' : f.forum_type === 'world_bystanders' ? '世界路人' : f.custom_type_description || '自定义'} · ${f.created_at})`;
+                sel.appendChild(opt);
+            });
+        } catch (e) {}
+    }
+
+    function onHistoryForumSelected() {
+        // If a historical forum is selected, the AI will continue from there
+        // No need for extra UI changes
+    }
+
+    async function viewHistoryForum() {
+        const sel = document.getElementById('historyForumSelect');
+        const forumId = sel.value;
+        if (!forumId) return alert('请先选择一个历史论坛');
+
+        try {
+            const resp = await fetch(`/api/forums/${forumId}`);
+            if (!resp.ok) throw new Error('Not found');
+            const data = await resp.json();
+            showResult(data);
+        } catch (e) {
+            alert('加载历史论坛失败');
+        }
+    }
+
+    // ===== Custom Type Toggle =====
+    function toggleCustomType() {
+        const wrap = document.getElementById('customTypeWrap');
+        wrap.style.display = document.getElementById('forumTypeSelect').value === 'custom' ? 'block' : 'none';
+    }
+
+    // ===== Generate Forum (流式 SSE) =====
+    async function generateForum() {
+        const topic = document.getElementById('topicInput').value.trim();
+        if (!topic) { alert('请输入论坛主题！'); return; }
+        if (chatSegments.length === 0) { alert('请至少载入一段聊天记录！'); return; }
+
+        const forumType = document.getElementById('forumTypeSelect').value;
+        const floorLimit = parseInt(document.getElementById('floorLimitSelect').value);
+        const supplementary = document.getElementById('supplementaryInput').value.trim();
+        const customTypeDesc = document.getElementById('customTypeInput').value.trim();
+        const historyId = document.getElementById('historyForumSelect').value;
+
+        if (forumType === 'custom' && !customTypeDesc) {
+            alert('请填写自定义论坛类型描述！'); return;
+        }
+
+        var btn = document.getElementById('generateBtn');
+        btn.disabled = true;
+        btn.textContent = '流式生成中...';
+
+        // 准备手机屏幕
+        var phonePreview = document.getElementById('phonePreview');
+        phonePreview.style.display = 'flex';
+        var screen = document.getElementById('phoneScreen');
+        screen.innerHTML = '';
+        var actions = document.getElementById('phoneActions');
+        actions.style.display = 'none';
+        if (window.innerWidth <= 800) {
+            document.getElementById('settingsPanel').style.display = 'none';
+        }
+
+        try {
+            var resp = await fetch('/api/forums/generate-stream', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    topic: topic,
+                    chat_segments: chatSegments,
+                    forum_type: forumType,
+                    custom_type_description: customTypeDesc,
+                    floor_limit: floorLimit,
+                    supplementary_info: supplementary,
+                    historical_forum_id: historyId ? parseInt(historyId) : null
+                })
+            });
+            if (!resp.ok) {
+                var errData = await resp.json().catch(function(){ return {}; });
+                alert(errData.error || '提交失败');
+                btn.disabled = false; btn.textContent = '🚀 生成论坛';
+                phonePreview.style.display = 'none';
+                return;
+            }
+
+            var reader = resp.body.getReader();
+            var decoder = new TextDecoder();
+            var lineBuf = '';
+            var textBuf = '';
+            var titleRendered = false;
+            var seenPosts = 0;
+
+            function renderStreamPost(post) {
+                if (!titleRendered) {
+                    var titleDiv = document.createElement('div');
+                    titleDiv.className = 'forum-thread-title';
+                    titleDiv.textContent = post.title || '';
+                    screen.appendChild(titleDiv);
+                    titleRendered = true;
+                }
+                var el = document.createElement('div');
+                el.innerHTML = renderForumPost(post, seenPosts);
+                screen.appendChild(el.firstElementChild);
+                seenPosts++;
+                screen.scrollTop = screen.scrollHeight;
+            }
+
+            function tryParsePosts(text) {
+                var posts = [];
+                var postRegex = /\[POST:([^:]+):(self|npc):(\d+)(?::(\d+))?\]([\s\S]*?)\[\/POST\]/g;
+                var m;
+                var lastIdx = 0;
+                while ((m = postRegex.exec(text)) !== null) {
+                    posts.push({
+                        name: m[1].trim(),
+                        role: m[2],
+                        floor: parseInt(m[3]),
+                        replyTo: m[4] ? parseInt(m[4]) : null,
+                        content: m[5].trim()
+                    });
+                    lastIdx = m.index + m[0].length;
+                }
+                var remaining = text.substring(lastIdx);
+                return { posts: posts, remaining: remaining };
+            }
+
+            while (true) {
+                var result = await reader.read();
+                if (result.done) break;
+                lineBuf += decoder.decode(result.value, {stream: true});
+
+                var lines = lineBuf.split('\n');
+                lineBuf = lines.pop() || '';
+
+                for (var li = 0; li < lines.length; li++) {
+                    var line = lines[li];
+                    if (!line.startsWith('data: ')) continue;
+                    try {
+                        var data = JSON.parse(line.substring(6));
+                        if (data.error) {
+                            alert(data.error);
+                            break;
+                        }
+                        if (data.done) {
+                            currentForumData = data.forum;
+                            refreshHistorySelect(data.forum);
+                            actions.style.display = 'flex';
+                            btn.disabled = false;
+                            btn.textContent = '🚀 生成论坛';
+                            return;
+                        }
+                        if (data.text) {
+                            textBuf += data.text;
+                            var parsed = tryParsePosts(textBuf);
+                            for (var pi = 0; pi < parsed.posts.length; pi++) {
+                                renderStreamPost(parsed.posts[pi]);
+                            }
+                            if (parsed.posts.length > 0) {
+                                textBuf = parsed.remaining;
+                            }
+                        }
+                    } catch (e) {}
+                }
+            }
+        } catch (e) {
+            alert('流式连接中断，请重试');
+        }
+
+        btn.disabled = false;
+        btn.textContent = '🚀 生成论坛';
+    }
+
+    function showResult(data) {
+        isResultMode = true;
+        currentForumData = data;
+        const screen = document.getElementById('phoneScreen');
+        const placeholder = document.getElementById('phonePlaceholder');
+        const actions = document.getElementById('phoneActions');
+        const panel = document.getElementById('settingsPanel');
+        const phonePreview = document.getElementById('phonePreview');
+
+        phonePreview.style.display = 'flex';
+        placeholder.style.display = 'none';
+        actions.style.display = 'flex';
+
+        let html = `<div class="forum-thread-title">${escHtml(data.title)}</div>`;
+
+        data.posts.forEach((post, i) => {
+            html += renderForumPost(post, i);
+        });
+
+        screen.innerHTML = html;
+        screen.scrollTop = 0;
+
+        // On mobile, hide settings panel
+        if (window.innerWidth <= 800) {
+            panel.style.display = 'none';
+        }
+
+        // Refresh history selector
+        refreshHistorySelect(data);
+    }
+
+    function renderForumPost(post, idx) {
+        const floorNum = post.floor != null ? post.floor : idx;
+        const tag = floorNum === 0 ? '楼主' : `#${floorNum}楼`;
+        const role = post.role || 'npc';
+        const roleLabel = role === 'self' ? '自己' : '网友';
+        const roleClass = role === 'self' ? 'self' : 'npc';
+        const hasReply = post.replyTo !== null && post.replyTo !== undefined;
+
+        let replyHtml = '';
+        if (hasReply) {
+            replyHtml = `<span class="forum-post-reply-to" onclick="scrollToFloor(${post.replyTo})">回复 #${post.replyTo}</span>`;
+        }
+
+        return `
+            <div class="forum-post ${roleClass}${hasReply ? ' has-reply' : ''}" data-floor="${floorNum}" style="animation-delay:${idx * 0.03}s">
+                <div class="forum-post-header">
+                    <span class="forum-post-name">${escHtml(post.name || '')}</span>
+                    <span class="forum-post-tag">${tag}</span>
+                    <span class="forum-post-role ${roleClass}">${roleLabel}</span>
+                    ${replyHtml}
+                </div>
+                <div class="forum-post-content">${escHtml(post.content || '').replace(/\n/g, '<br>')}</div>
+            </div>
+        `;
+    }
+
+    function scrollToFloor(floorNum) {
+        const screen = document.getElementById('phoneScreen');
+        const target = screen.querySelector(`.forum-post[data-floor="${floorNum}"]`);
+        if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target.classList.add('forum-post-highlight');
+            setTimeout(() => target.classList.remove('forum-post-highlight'), 1500);
+        }
+    }
+
+    function backToEdit() {
+        isResultMode = false;
+        document.getElementById('phonePreview').style.display = 'none';
+        document.getElementById('phoneScreen').innerHTML = `
+            <div class="phone-placeholder" id="phonePlaceholder">
+                <svg viewBox="0 0 24 24" width="48" height="48" stroke="currentColor" stroke-width="1.5" fill="none">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+                <div>填写左侧信息并载入聊天记录后，<br>点击"生成论坛"查看效果</div>
+            </div>
+        `;
+        document.getElementById('phoneActions').style.display = 'none';
+        document.getElementById('settingsPanel').style.display = '';
+        currentForumData = null;
+    }
+
+    function refreshHistorySelect(data) {
+        const sel = document.getElementById('historyForumSelect');
+        // Check if this forum is already in the list
+        let found = false;
+        for (let i = 0; i < sel.options.length; i++) {
+            if (sel.options[i].value == data.id) { found = true; break; }
+        }
+        if (!found) {
+            const opt = document.createElement('option');
+            opt.value = data.id;
+            opt.textContent = `${data.title} (${data.forum_type === 'novel_readers' ? '小说读者' : data.forum_type === 'world_bystanders' ? '世界路人' : data.custom_type_description || '自定义'} · 刚刚)`;
+            sel.insertBefore(opt, sel.options[1] || null);
+        }
+    }
+
+    // ===== Copy Forum Block =====
+    function copyForumBlock() {
+        if (!currentForumData) { showToast('没有论坛数据'); return; }
+        if (!currentForumData.posts || currentForumData.posts.length === 0) { showToast('论坛内容为空'); return; }
+
+        let block = '[FORUM:' + currentForumData.title + ']';
+        for (var i = 0; i < currentForumData.posts.length; i++) {
+            var post = currentForumData.posts[i];
+            var floor = post.floor != null ? post.floor : i;
+            var header = '[POST:' + (post.name || '') + ':' + (post.role || 'npc') + ':' + floor;
+            if (post.replyTo !== null && post.replyTo !== undefined) {
+                header += ':' + post.replyTo;
+            }
+            header += ']';
+            block += '\n' + header + '\n' + (post.content || '') + '\n[/POST]';
+        }
+        block += '\n[/FORUM]';
+
+        var ta = document.createElement('textarea');
+        ta.value = block;
+        ta.style.position = 'fixed';
+        ta.style.left = '0';
+        ta.style.top = '0';
+        ta.style.opacity = '0';
+        ta.style.pointerEvents = 'none';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        var ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) {}
+        document.body.removeChild(ta);
+
+        if (ok) {
+            showToast('已复制 ' + currentForumData.posts.length + ' 楼论坛块！');
+        } else if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(block).then(function() {
+                showToast('已复制论坛块代码！');
+            }).catch(function() {
+                showToast('复制失败，请长按手动选择复制');
+            });
+        } else {
+            showToast('复制失败，请长按手动选择复制');
+        }
+    }
+
+    // ===== Loading =====
+    const loadingPhrases = [
+        '正在收集网友八卦...',
+        '正在潜入论坛数据库...',
+        '正在脑补网友发言...',
+        '正在伪造IP地址...',
+        '正在编写爆炸性回复...',
+        '网友正在赶来吃瓜的路上...',
+        '正在排版论坛楼层...',
+    ];
+
+    function showLoading() {
+        const overlay = document.getElementById('loadingOverlay');
+        overlay.classList.add('show');
+        let idx = 0;
+        document.getElementById('loadingText').textContent = loadingPhrases[0];
+        overlay._phraseInterval = setInterval(() => {
+            idx = (idx + 1) % loadingPhrases.length;
+            document.getElementById('loadingText').textContent = loadingPhrases[idx];
+        }, 2500);
+        document.getElementById('loadingSubtext').textContent = '大型语言模型正在全力生成中...';
+    }
+
+    function hideLoading() {
+        const overlay = document.getElementById('loadingOverlay');
+        overlay.classList.remove('show');
+        if (overlay._phraseInterval) {
+            clearInterval(overlay._phraseInterval);
+            overlay._phraseInterval = null;
+        }
+    }
+
+    // ===== Toast =====
+    function showToast(msg) {
+        const toast = document.getElementById('toast');
+        toast.textContent = msg;
+        toast.classList.add('show');
+        setTimeout(() => toast.classList.remove('show'), 2200);
+    }
+
+    // ===== Utility =====
+    function escHtml(s) {
+        if (!s) return '';
+        const div = document.createElement('div');
+        div.textContent = s;
+        return div.innerHTML;
+    }
+
+    // ===== Init =====
+    loadHistoryForums();
+</script>
+
+</body>
+</html>

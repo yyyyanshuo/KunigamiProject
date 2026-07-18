@@ -39,7 +39,7 @@ def safe_save_json(filepath, data):
 
 # ================= 日结逻辑 (Daily) =================
 
-def _process_single_char_daily(char_id, target_date_str):
+def _process_single_char_daily(char_id, target_date_str, user_id=None):
     """处理单个角色的日结（调用时需已 set_background_user）"""
     from app import call_ai_to_summarize, update_short_memory_for_date, get_paths
     print(f"   > 正在处理角色: [{char_id}]")
@@ -50,7 +50,7 @@ def _process_single_char_daily(char_id, target_date_str):
 
     # 1. 自动补录 (只补录私聊的，群聊的已经实时进去了)
     try:
-        count, _ = update_short_memory_for_date(char_id, target_date_str)
+        count, _ = update_short_memory_for_date(char_id, target_date_str, user_id=user_id)
         if count > 0: print(f"     ✅ [补录] 私聊补录 {count} 条")
     except Exception as e: print(f"     ❌ [补录] 出错: {e}")
 
@@ -75,7 +75,7 @@ def _process_single_char_daily(char_id, target_date_str):
     text_to_summarize = "\n".join([f"[{e['time']}] {e['event']}" for e in events])
 
     # 调用 AI 总结 (medium模式)
-    summary = call_ai_to_summarize(text_to_summarize, "medium", char_id)
+    summary = call_ai_to_summarize(text_to_summarize, "medium", char_id, user_id=user_id)
 
     if not summary: return
 
@@ -150,7 +150,7 @@ def _process_single_user_daily_rollovers(user_id, target_date_str):
         char_ids = get_all_char_ids_for_current_user()
         for char_id in char_ids:
             try:
-                _process_single_char_daily(char_id, target_date_str)
+                _process_single_char_daily(char_id, target_date_str, user_id=user_id)
                 time.sleep(2)
             except Exception as e:
                 print(f"     ❌ 处理角色 {char_id} 时崩溃: {e}")
@@ -185,7 +185,7 @@ def run_all_daily_rollovers(target_date_str=None):
 
 # ================= 周结逻辑 (Weekly) =================
 
-def _process_single_char_weekly(char_id):
+def _process_single_char_weekly(char_id, user_id=None):
     """处理单个角色的周结（调用时需已 set_background_user）"""
     from app import call_ai_to_summarize, get_paths
 
@@ -215,7 +215,7 @@ def _process_single_char_weekly(char_id):
         return
 
     full_text = "\n".join(summary_buffer)
-    long_summary = call_ai_to_summarize(full_text, "long", char_id)
+    long_summary = call_ai_to_summarize(full_text, "long", char_id, user_id=user_id)
 
     if not long_summary: return
 
@@ -248,7 +248,7 @@ def _process_single_user_weekly_rollovers(user_id):
         char_ids = get_all_char_ids_for_current_user()
         for char_id in char_ids:
             try:
-                _process_single_char_weekly(char_id)
+                _process_single_char_weekly(char_id, user_id=user_id)
                 time.sleep(2)
             except Exception as e:
                 print(f"     ❌ 处理角色 {char_id} 时崩溃: {e}")
@@ -359,6 +359,110 @@ def run_yearly_age_increment():
 # - 将原来的“精确等于 HH:MM”改为“在目标时间点附近的容错窗口内触发”
 # - 每个角色每天最多自动入睡一次、自动起床一次（用 *_last_applied_date 记录）
 DEEP_SLEEP_TIME_TOLERANCE_MINUTES = 2
+BEDTIME_DIARY_MAX_USER_WORKERS = 2
+BEDTIME_DIARY_MAX_PER_USER_PER_CHECK = 1
+BEDTIME_DIARY_RETRY_DELAY_MINUTES = 10
+BEDTIME_DIARY_CHAR_DELAY_SECONDS = 2
+
+
+def _now_timestamp() -> str:
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _mark_bedtime_diary_pending(info: dict, target_date_str: str, reason: str) -> bool:
+    """Mark a character for bedtime diary generation without looking at chat DB."""
+    if info.get("bedtime_diary_date") != target_date_str:
+        info["bedtime_diary_attempts"] = 0
+        info["bedtime_diary_last_error"] = None
+
+    if (
+        info.get("bedtime_diary_date") == target_date_str
+        and info.get("bedtime_diary_status") in ("success", "running", "pending")
+    ):
+        return False
+
+    info["bedtime_diary_date"] = target_date_str
+    info["bedtime_diary_status"] = "pending"
+    info["bedtime_diary_pending_reason"] = reason
+    info["bedtime_diary_updated_at"] = _now_timestamp()
+    return True
+
+
+def _parse_timestamp(ts: str | None) -> datetime.datetime | None:
+    if not ts:
+        return None
+    try:
+        return datetime.datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return None
+
+
+def _should_run_bedtime_diary(info: dict, target_date_str: str, now_dt: datetime.datetime) -> bool:
+    """Retry pending/failed bedtime diary jobs based only on characters.json state."""
+    if info.get("bedtime_diary_enabled", True) is False:
+        return False
+    if not info.get("deep_sleep", False):
+        return False
+    if info.get("ds_start_last_applied_date") != target_date_str:
+        return False
+
+    diary_date = info.get("bedtime_diary_date")
+    status = info.get("bedtime_diary_status")
+    if diary_date != target_date_str:
+        return True
+    if status in ("success", "skipped"):
+        return False
+    if status == "pending":
+        return True
+
+    if status in ("running", "failed"):
+        updated_at = _parse_timestamp(info.get("bedtime_diary_updated_at"))
+        if updated_at is None:
+            return True
+        retry_after = datetime.timedelta(minutes=BEDTIME_DIARY_RETRY_DELAY_MINUTES)
+        return now_dt - updated_at >= retry_after
+
+    return True
+
+
+def _update_bedtime_diary_status(cfg_file: str, char_id: str, target_date_str: str, status: str, error: str | None = None):
+    try:
+        with open(cfg_file, "r", encoding="utf-8") as f:
+            all_config = json.load(f)
+        if char_id not in all_config:
+            return
+        info = all_config[char_id]
+        info["bedtime_diary_date"] = target_date_str
+        info["bedtime_diary_status"] = status
+        info["bedtime_diary_updated_at"] = _now_timestamp()
+        if error:
+            info["bedtime_diary_last_error"] = str(error)[:500]
+        elif status == "success":
+            info["bedtime_diary_last_error"] = None
+        safe_save_json(cfg_file, all_config)
+    except Exception as e:
+        print(f"🌙 [Diary] 写回状态失败 {char_id}: {e}")
+
+
+def _has_short_memory_events_for_date(char_id: str, target_date_str: str, user_id=None) -> bool:
+    try:
+        from app import get_paths
+
+        _, prompts_dir = get_paths(char_id, user_id=user_id)
+        short_mem_path = os.path.join(prompts_dir, "6_memory_short.json")
+        if not os.path.exists(short_mem_path):
+            return False
+        with open(short_mem_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        day_data = data.get(target_date_str)
+        if isinstance(day_data, list):
+            return len(day_data) > 0
+        if isinstance(day_data, dict):
+            events = day_data.get("events", [])
+            return isinstance(events, list) and len(events) > 0
+    except Exception as e:
+        print(f"🌙 [Diary] 检查短期记忆失败 {char_id}: {e}")
+    return False
 
 
 def _parse_hhmm_to_seconds(hhmm: str) -> int | None:
@@ -388,10 +492,11 @@ def _process_single_user_sleep_status(user_id, now_time: str):
     - 不按“区间内就强制睡/醒”，只在时间点附近的一小段时间内尝试一次
     - 每个角色每天对 start/end 各自动触发一次，避免多次覆盖用户手动设置
     """
-    from app import set_background_user, clear_background_user, _get_characters_config_file
+    from app import set_background_user, clear_background_user, _get_characters_config_file, is_bedtime_diary_global_enabled
 
     try:
         set_background_user(user_id)
+        bedtime_diary_global_enabled = is_bedtime_diary_global_enabled()
         cfg_file = _get_characters_config_file()
         if not os.path.exists(cfg_file):
             return
@@ -421,6 +526,8 @@ def _process_single_user_sleep_status(user_id, now_time: str):
                     info["ds_start_last_applied_date"] = today_str
                     print(f"💤 [自动睡眠] 用户 {user_id} {char_id} 到点睡觉了 (配置:{start_time}, 当前:{now_time})")
                     updated = True
+                    if bedtime_diary_global_enabled and info.get("bedtime_diary_enabled", True) is not False and _mark_bedtime_diary_pending(info, today_str, "auto_sleep"):
+                        print(f"🌙 [Diary] 用户 {user_id} {char_id} 已加入睡前日记待生成队列")
 
             # --- 自动唤醒 ---
             if end_time and end_last_date != today_str and current_status:
@@ -437,6 +544,113 @@ def _process_single_user_sleep_status(user_id, now_time: str):
         print(f"❌ 用户 {user_id} 睡眠检查出错: {e}")
     finally:
         clear_background_user()
+
+
+def _process_single_user_bedtime_diaries(user_id, target_date_str: str):
+    """Process pending bedtime diary jobs for one user, using characters.json as the source of truth."""
+    from app import (
+        set_background_user, clear_background_user, _get_characters_config_file,
+        trigger_bedtime_diary, update_short_memory_for_date, is_bedtime_diary_global_enabled
+    )
+
+    processed_count = 0
+    try:
+        set_background_user(user_id)
+        if not is_bedtime_diary_global_enabled():
+            return 0
+        cfg_file = _get_characters_config_file()
+        if not os.path.exists(cfg_file):
+            return 0
+
+        with open(cfg_file, "r", encoding="utf-8") as f:
+            all_config = json.load(f)
+
+        now_dt = datetime.datetime.now()
+        pending_char_ids = []
+        updated = False
+        for char_id, info in all_config.items():
+            if _should_run_bedtime_diary(info, target_date_str, now_dt):
+                if info.get("bedtime_diary_date") != target_date_str:
+                    info["bedtime_diary_date"] = target_date_str
+                    info["bedtime_diary_status"] = "pending"
+                    info["bedtime_diary_attempts"] = 0
+                    info["bedtime_diary_last_error"] = None
+                    info["bedtime_diary_pending_reason"] = "catch_up"
+                    info["bedtime_diary_updated_at"] = _now_timestamp()
+                    updated = True
+                pending_char_ids.append(char_id)
+
+        if updated:
+            safe_save_json(cfg_file, all_config)
+
+        for char_id in pending_char_ids[:BEDTIME_DIARY_MAX_PER_USER_PER_CHECK]:
+            with open(cfg_file, "r", encoding="utf-8") as f:
+                latest_config = json.load(f)
+            info = latest_config.get(char_id)
+            if not info or not _should_run_bedtime_diary(info, target_date_str, datetime.datetime.now()):
+                continue
+
+            info["bedtime_diary_date"] = target_date_str
+            info["bedtime_diary_status"] = "running"
+            info["bedtime_diary_attempts"] = int(info.get("bedtime_diary_attempts") or 0) + 1
+            info["bedtime_diary_updated_at"] = _now_timestamp()
+            safe_save_json(cfg_file, latest_config)
+
+            try:
+                try:
+                    update_short_memory_for_date(char_id, target_date_str, user_id=user_id)
+                except Exception as e:
+                    print(f"🌙 [Diary] 用户 {user_id} {char_id} 睡前短期记忆补录异常: {e}")
+
+                if not _has_short_memory_events_for_date(char_id, target_date_str, user_id=user_id):
+                    _update_bedtime_diary_status(cfg_file, char_id, target_date_str, "skipped", "no_short_memory_today")
+                    print(f"🌙 [Diary] 用户 {user_id} {char_id} 今天没有短期记忆，跳过睡前日记")
+                    processed_count += 1
+                    continue
+
+                ok = trigger_bedtime_diary(char_id, user_id=user_id)
+                if not ok:
+                    with open(cfg_file, "r", encoding="utf-8") as f:
+                        after_config = json.load(f)
+                    after_info = after_config.get(char_id, {})
+                    if after_info.get("bedtime_diary_status") == "running":
+                        _update_bedtime_diary_status(cfg_file, char_id, target_date_str, "failed", "trigger_returned_false")
+                processed_count += 1
+            except Exception as e:
+                _update_bedtime_diary_status(cfg_file, char_id, target_date_str, "failed", e)
+                print(f"🌙 [Diary] 用户 {user_id} {char_id} 生成睡前日记出错: {e}")
+
+            time.sleep(BEDTIME_DIARY_CHAR_DELAY_SECONDS)
+
+    except Exception as e:
+        print(f"❌ 用户 {user_id} 睡前日记队列处理失败: {e}")
+    finally:
+        clear_background_user()
+
+    return processed_count
+
+
+def run_pending_bedtime_diary_jobs(target_date_str=None):
+    """Process bedtime diary backlog with bounded concurrency, like the stable daily rollover jobs."""
+    from app import list_all_user_ids
+
+    if not target_date_str:
+        target_date_str = datetime.datetime.now().strftime("%Y-%m-%d")
+
+    user_ids = list_all_user_ids()
+    if not user_ids:
+        return
+
+    def _worker(uid):
+        return _process_single_user_bedtime_diaries(uid, target_date_str)
+
+    max_workers = min(BEDTIME_DIARY_MAX_USER_WORKERS, len(user_ids))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        counts = list(executor.map(_worker, user_ids))
+
+    total = sum(counts)
+    if total:
+        print(f"🌙 [Diary] 本轮处理睡前日记 {total} 条")
 
 
 def check_and_update_sleep_status():
@@ -456,6 +670,8 @@ def check_and_update_sleep_status():
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         list(executor.map(_worker, user_ids))
 
+    run_pending_bedtime_diary_jobs()
+
 def _process_single_user_active_messaging(user_id):
     """处理单个用户的主动消息检测（供线程池调用）"""
     from app import (
@@ -464,10 +680,15 @@ def _process_single_user_active_messaging(user_id):
         get_characters_config_for_current_user, get_groups_config_for_current_user,
         get_paths, get_group_dir,
     )
+    from core.circuit_breaker import is_user_frozen
 
     try:
         set_background_user(user_id)
         chars_config = get_characters_config_for_current_user()
+
+        if is_user_frozen(user_id):
+            print(f"   ⚠️ 用户 {user_id} 已被冻结，跳过主动消息")
+            return
 
         for char_id, info in chars_config.items():
             if info.get("light_sleep", False) or info.get("deep_sleep", False):
@@ -535,7 +756,6 @@ def _process_single_user_active_messaging(user_id):
             print(f"   > [群:{group_id}] 距上次 {int(minutes_diff)}分, 概率 {p_final:.2f}, 骰子 {dice:.2f}")
 
             if dice < p_final:
-                # 【修正】群聊主动消息也必须传递 user_id，否则无法读取 API Key 和用户配置
                 trigger_group_active_chat(group_id, user_id=user_id)
 
     except Exception as e:
@@ -562,9 +782,10 @@ def run_active_messaging_check():
 def _process_single_user_active_moments(user_id):
     """处理单个用户的主动发朋友圈检测（供线程池调用）"""
     from app import (
-        trigger_active_moments, set_background_user, clear_background_user,
+        set_background_user, clear_background_user,
         get_characters_config_for_current_user, get_moments_paths, _get_active_moments_enabled,
     )
+    from blueprints.moments import trigger_active_moments
 
     try:
         set_background_user(user_id)
@@ -610,7 +831,11 @@ def _process_single_user_active_moments(user_id):
             print(f"   > 用户 {user_id} [{char_id}] 距上次发圈 {hours_since:.1f}h, 性格指数 {moments_index}, 概率 {p_final:.2f}, 骰子 {dice:.2f}")
 
             if dice < p_final:
-                trigger_active_moments(char_id)
+                trigger_active_moments(char_id, user_id=user_id)
+                # 若因 API 致命错误自动关闭了主动朋友圈，则立即停止本轮后续角色
+                if not _get_active_moments_enabled():
+                    print(f"   - 用户 {user_id} 主动朋友圈已被自动停止，结束本轮检测")
+                    break
 
     except Exception as e:
         print(f"❌ 用户 {user_id} 朋友圈检测出错: {e}")

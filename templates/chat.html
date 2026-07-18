@@ -9,6 +9,53 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="apple-touch-icon" href="/static/logo.png">
 
+  <script>
+    window.__chatDiagnosticEarly = window.__chatDiagnosticEarly || [];
+    (function() {
+      function pushEarlyDiagnostic(details) {
+        window.__chatDiagnosticEarly.push(Object.assign({
+          time: new Date().toISOString(),
+          phase: 'early_unknown',
+          page: window.location.pathname,
+          browser: navigator.userAgent
+        }, details || {}));
+      }
+
+      window.addEventListener('error', function(event) {
+        var target = event.target || event.srcElement;
+        if (target && target !== window && target.tagName) {
+          var resourceSource = target.currentSrc || target.src || target.href || '';
+          if (target.tagName === 'IMG' && (!target.getAttribute('src') || resourceSource === window.location.href)) {
+            return;
+          }
+          pushEarlyDiagnostic({
+            phase: 'resource_error',
+            tag: target.tagName,
+            source: resourceSource,
+            id: target.id || '',
+            className: target.className || ''
+          });
+          return;
+        }
+        pushEarlyDiagnostic({
+          phase: 'early_window_error',
+          error: String((event.error && (event.error.stack || event.error.message)) || event.message || 'Script error'),
+          source: event.filename || '',
+          line: event.lineno || 0,
+          column: event.colno || 0
+        });
+      }, true);
+
+      window.addEventListener('unhandledrejection', function(event) {
+        var reason = event.reason;
+        pushEarlyDiagnostic({
+          phase: 'early_unhandled_promise',
+          error: String((reason && (reason.stack || reason.message)) || reason || 'Unknown promise rejection')
+        });
+      });
+    })();
+  </script>
+
   <!-- 【新增】主题加载脚本 -->
   <script src="/static/theme-loader.js"></script>
 
@@ -49,7 +96,7 @@
       /* 避让刘海屏 */
       padding-top: env(safe-area-inset-top);
       padding-bottom: env(safe-area-inset-bottom);
-      
+
       background-size: cover;
       background-position: center;
       background-attachment: fixed;
@@ -266,6 +313,29 @@
       font-size: 13px;
     }
 
+    /* HTML 交互块容器 */
+    .html-block-container {
+      width: 100%;
+      min-height: 100px;
+      margin: 4px 0;
+      border-radius: 8px;
+      background: #fcfcfc;
+      border: 1px solid var(--primary-rgba-lighter, rgba(255,182,185,0.15));
+    }
+    .html-block-iframe {
+      width: 100%;
+      border: none;
+      display: block;
+    }
+    .html-block-iframe.fullscreen {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100vw !important;
+      height: 100vh !important;
+      z-index: 10000;
+      background: transparent;
+    }
+
     /* 拍一拍：整页居中，在气泡组上方；下方头像+气泡始终横向并排（气泡在头像内侧） */
     .message-group.has-tickle {
       width: 100%;
@@ -431,6 +501,12 @@
     #messageInput:focus { border-color: var(--primary-color); }
     #sendBtn { margin-left: 8px; background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color: white; border: none; border-radius: 20px; padding: 10px 18px; cursor: pointer; font-weight: bold; box-shadow: 0 3px 6px var(--primary-rgba-strong); transition: all 0.2s; }
     #sendBtn:hover { transform: translateY(-2px); box-shadow: 0 4px 10px var(--primary-rgba-strong); }
+    /* Agent UI 样式 */
+    i.agent-ask { color: #e67e22; font-style: normal; display: block; margin-top: 4px; }
+    i.agent-wait { color: #3498db; font-style: normal; display: block; margin-top: 4px; }
+    i.agent-stop { color: #e74c3c; font-style: normal; }
+    #stopAgentBtn { transition: all 0.2s; }
+    #stopAgentBtn:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(255,68,68,0.4); }
 
     /* --- 【新增】强制隐藏“加载更多”按钮 --- */
     #load-more-container {
@@ -465,6 +541,33 @@
       display: flex; align-items: center; justify-content: center;
       box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     }
+
+    /* --- 【论坛体选择器】借用聊天页选消息时隐藏多余 UI --- */
+    #forumPickerBar {
+      display: none;
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(255,255,255,0.96);
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      padding: 10px 16px;
+      border-bottom: 1px solid #edf1f5;
+      align-items: center; gap: 10px;
+    }
+    body.forum-picker #forumPickerBar { display: flex; }
+    body.forum-picker .chat-header { display: none; }
+    body.forum-picker .input-container { display: none !important; }
+    body.forum-picker #morePanel { display: none !important; }
+    body.forum-picker #quickPhrasesPanel { display: none !important; }
+    body.forum-picker #load-more-container { display: none !important; }
+    body.forum-picker #mention-bar { display: none !important; }
+    body.forum-picker #editMessageModal { display: none !important; }
+    body.forum-picker .tab-bar { display: none !important; }
+    body.forum-picker #exportResultModal { display: none !important; }
+    body.forum-picker #daily-donate-modal { display: none !important; }
+    body.forum-picker #aiCruiseBall { display: none !important; }
+    /* 论坛版选择栏按钮切换 */
+    .selection-forum-btns { display: none !important; }
+    body.forum-picker .selection-forum-btns { display: flex !important; }
+    body.forum-picker .selection-normal-btns { display: none !important; }
 
     /* --- 【新增】+号按钮样式 --- */
     #plusBtn {
@@ -841,11 +944,673 @@
       80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
       100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
     }
+
+    .cb-modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 5000; display: flex; align-items: center; justify-content: center; }
+    .cb-modal { background: #fff; border-radius: 16px; padding: 32px 28px 24px; max-width: 400px; width: 90%; text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.15); animation: cbModalIn 0.3s ease; }
+    @keyframes cbModalIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+    .cb-modal-icon { font-size: 48px; margin-bottom: 12px; }
+    .cb-modal-title { font-size: 18px; font-weight: bold; color: #333; margin-bottom: 8px; }
+    .cb-modal-message { font-size: 14px; color: #666; line-height: 1.6; margin-bottom: 20px; white-space: pre-wrap; }
+    .cb-modal-countdown { font-size: 12px; color: #999; margin-bottom: 16px; }
+    .cb-modal-btn { padding: 10px 32px; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; }
+    .cb-modal-btn.primary { background: var(--primary-color, #007bff); color: #fff; }
+    .cb-modal-btn.secondary { background: #f0f0f0; color: #666; margin-left: 10px; }
+    /* --- 【论坛体】气泡内触发按钮 --- */
+    .forum-trigger-btn {
+      display: block;
+      width: 100%;
+      margin: 8px 0 4px 0;
+      padding: 10px 14px;
+      background: linear-gradient(135deg, var(--primary-color, #e91e63), var(--primary-dark, #c2185b));
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      text-align: center;
+      transition: transform 0.15s, box-shadow 0.15s;
+      box-shadow: 0 2px 8px var(--primary-rgba-light, rgba(233,30,99,0.25));
+    }
+    .forum-trigger-btn:active {
+      transform: scale(0.97);
+      box-shadow: 0 1px 4px var(--primary-rgba-light, rgba(233,30,99,0.2));
+    }
+    .forum-trigger-btn svg {
+      width: 16px;
+      height: 16px;
+      vertical-align: -3px;
+      margin-right: 6px;
+    }
+
+    /* --- 【论坛体】弹窗遮罩 --- */
+    .forum-modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.55);
+      z-index: 3000;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      box-sizing: border-box;
+    }
+    .forum-modal-overlay.show {
+      display: flex;
+    }
+
+    /* --- 【论坛体】弹窗容器 --- */
+    .forum-modal {
+      background: var(--bg-color, #fff);
+      width: 90%;
+      max-width: 500px;
+      max-height: 80vh;
+      border-radius: 16px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+      overflow: hidden;
+      animation: forumModalIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    @keyframes forumModalIn {
+      from { opacity: 0; transform: translateY(24px) scale(0.95); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* --- 【论坛体】弹窗头部 --- */
+    .forum-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border-color, #eee);
+      flex-shrink: 0;
+      background: var(--bg-color, #fff);
+    }
+    .forum-modal-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary, #333);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+      margin-right: 12px;
+    }
+    .forum-modal-close {
+      background: none;
+      border: none;
+      font-size: 22px;
+      color: #999;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+      line-height: 1;
+      transition: background 0.15s;
+    }
+    .forum-modal-close:hover {
+      background: rgba(0, 0, 0, 0.06);
+      color: #555;
+    }
+
+    /* --- 【论坛体】弹窗内容 (可滚动) --- */
+    .forum-modal-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px 16px;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* --- 【论坛体】每楼帖子 --- */
+    .forum-post {
+      margin-bottom: 12px;
+      border-radius: 10px;
+      padding: 12px 14px;
+      position: relative;
+    }
+    .forum-post.self {
+      background: linear-gradient(135deg, var(--primary-rgba-lighter, rgba(233,30,99,0.08)), rgba(255,255,255,0.6));
+      border: 1px solid var(--primary-lighter, rgba(233,30,99,0.25));
+    }
+    .forum-post.npc {
+      background: #f5f6f8;
+      border: 1px solid #e5e7eb;
+    }
+
+    .forum-post-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+      flex-wrap: wrap;
+    }
+    .forum-post-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary, #333);
+    }
+    .forum-post-tag {
+      font-size: 11px;
+      color: #999;
+      background: rgba(0,0,0,0.04);
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+    .forum-post-role {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 8px;
+      border-radius: 10px;
+    }
+    .forum-post-role.self {
+      background: var(--primary-rgba-light, rgba(233,30,99,0.15));
+      color: var(--primary-color, #e91e63);
+    }
+    .forum-post-role.npc {
+      background: #e2e8f0;
+      color: #64748b;
+    }
+
+    .forum-post-content {
+      font-size: 14px;
+      line-height: 1.65;
+      color: var(--text-secondary, #555);
+      word-break: break-word;
+    }
+
+    .forum-post-reply-to {
+      display: inline-block;
+      font-size: 11px;
+      color: var(--primary-color, #e91e63);
+      background: var(--primary-rgba-lighter, rgba(233,30,99,0.08));
+      padding: 1px 8px;
+      border-radius: 8px;
+      margin-left: 4px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .forum-post-reply-to:hover {
+      background: var(--primary-rgba-light, rgba(233,30,99,0.18));
+    }
+
+    .forum-post.has-reply {
+      padding-top: 6px;
+    }
+    .forum-post.has-reply .forum-post-content {
+      padding-top: 6px;
+      border-top: 1px dashed rgba(0,0,0,0.08);
+    }
+
+    .forum-empty-hint {
+      text-align: center;
+      color: #bbb;
+      padding: 40px 0;
+      font-size: 14px;
+    }
+
+    /* --- 【聊天记录】气泡内卡片 --- */
+    .chatlog-card {
+      display: block;
+      padding: 10px 12px;
+      background: var(--bubble-other-bg, #fff);
+      border: 1px solid var(--border-color, #e0e0e0);
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.15s, box-shadow 0.15s;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+      text-align: left;
+      box-sizing: border-box;
+    }
+    .bubble.bubble-chatlog {
+      padding: 0;
+      border: none !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      border-radius: 0;
+      overflow: visible;
+    }
+    .chatlog-card:active {
+      background: var(--bubble-other-bg-active, #f0f0f0);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+    }
+    .chatlog-card-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-primary, #333);
+      margin-bottom: 6px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .chatlog-card-preview {
+      font-size: 13px;
+      color: var(--text-secondary, #666);
+      line-height: 1.5;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      margin-bottom: 6px;
+    }
+    .chatlog-card-footer {
+      font-size: 11px;
+      color: var(--text-tertiary, #999);
+      border-top: 1px solid var(--border-color, #eee);
+      padding-top: 6px;
+    }
+
+    /* --- 【聊天记录】展开弹窗 --- */
+    .chatlog-modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.55);
+      z-index: 3000;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      box-sizing: border-box;
+    }
+    .chatlog-modal-overlay.show {
+      display: flex;
+    }
+    .chatlog-modal {
+      background: var(--bg-color, #fff);
+      width: 90%;
+      max-width: 500px;
+      max-height: 80vh;
+      border-radius: 16px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+      overflow: hidden;
+      animation: forumModalIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    .chatlog-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border-color, #eee);
+      flex-shrink: 0;
+      background: var(--bg-color, #fff);
+    }
+    .chatlog-modal-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary, #333);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+      margin-right: 12px;
+    }
+    .chatlog-modal-close {
+      background: none;
+      border: none;
+      font-size: 22px;
+      color: #999;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+      line-height: 1;
+      transition: background 0.15s;
+    }
+    .chatlog-modal-close:hover {
+      background: rgba(0, 0, 0, 0.06);
+      color: #555;
+    }
+    .chatlog-modal-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px 14px;
+      -webkit-overflow-scrolling: touch;
+    }
+    .chatlog-date-separator {
+      text-align: center;
+      color: var(--text-tertiary, #999);
+      font-size: 12px;
+      margin: 14px 0 10px 0;
+    }
+    .chatlog-log-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 14px;
+      line-height: 1.55;
+    }
+    .chatlog-log-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      object-fit: cover;
+      background: #e0e0e0;
+    }
+    .chatlog-log-body {
+      flex: 1;
+      min-width: 0;
+    }
+    .chatlog-log-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary, #333);
+      margin-bottom: 3px;
+    }
+    .chatlog-log-content {
+      font-size: 13px;
+      color: var(--text-secondary, #555);
+    }
+    .chatlog-log-time {
+      font-size: 11px;
+      color: var(--text-tertiary, #999);
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    /* --- 【睡前心声 THOUGHTS】心理描写卡片 --- */
+    .message-wrapper .bubble.bubble-thoughts,
+    .message-wrapper.assistant .bubble.bubble-thoughts {
+      padding: 0 !important;
+      border: none !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      border-radius: 0 !important;
+      overflow: visible;
+      align-self: center;
+      width: 100%;
+      max-width: 100%;
+    }
+    .thoughts-card {
+      display: block;
+      width: 100%;
+      max-width: 100%;
+      margin: 6px auto;
+      padding: 14px 18px;
+      background: #FFF6D5;
+      border: 1px solid #F5E6A8;
+      border-radius: 14px;
+      cursor: pointer;
+      box-sizing: border-box;
+      text-align: left;
+      box-shadow: 0 2px 8px rgba(200, 170, 60, 0.15);
+      transition: box-shadow 0.15s, transform 0.1s;
+    }
+    .thoughts-card:active {
+      box-shadow: 0 1px 4px rgba(200, 170, 60, 0.25);
+      transform: scale(0.99);
+    }
+    .thoughts-card-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #8a6d1a;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .thoughts-card-title::before {
+      content: "\1F319";
+      font-size: 14px;
+    }
+    .thoughts-card-preview {
+      font-size: 13px;
+      color: #6b5c2e;
+      line-height: 1.7;
+      white-space: pre-line;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+    .thoughts-card-footer {
+      font-size: 11px;
+      color: #b09a4a;
+      border-top: 1px solid #EFE0A0;
+      padding-top: 6px;
+    }
+
+    /* --- 【睡前心声 THOUGHTS】展开弹窗 --- */
+    .thoughts-modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.55);
+      z-index: 3000;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      box-sizing: border-box;
+    }
+    .thoughts-modal-overlay.show {
+      display: flex;
+    }
+    .thoughts-modal {
+      background: #FFFBEB;
+      width: 90%;
+      max-width: 460px;
+      max-height: 80vh;
+      border-radius: 16px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+      overflow: hidden;
+      animation: forumModalIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    .thoughts-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid #F0E4B0;
+      flex-shrink: 0;
+    }
+    .thoughts-modal-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #8a6d1a;
+    }
+    .thoughts-modal-title::before {
+      content: "\1F319  ";
+    }
+    .thoughts-modal-close {
+      background: none;
+      border: none;
+      font-size: 22px;
+      color: #b09a4a;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+      line-height: 1;
+      transition: background 0.15s;
+    }
+    .thoughts-modal-close:hover {
+      background: rgba(180, 150, 50, 0.12);
+    }
+    .thoughts-modal-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 20px;
+      -webkit-overflow-scrolling: touch;
+    }
+    .thoughts-para {
+      font-size: 14.5px;
+      color: #5c4e24;
+      line-height: 1.85;
+      margin: 0 0 14px 0;
+      text-indent: 2em;
+    }
+    .thoughts-para:last-child {
+      margin-bottom: 0;
+    }
+
+    /* --- 【转发】目标选择弹窗 --- */
+    .forward-modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.55);
+      z-index: 3000;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      box-sizing: border-box;
+    }
+    .forward-modal-overlay.show {
+      display: flex;
+    }
+    .forward-modal {
+      background: var(--bg-color, #fff);
+      width: 90%;
+      max-width: 500px;
+      max-height: 75vh;
+      border-radius: 16px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+      overflow: hidden;
+      animation: forumModalIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    .forward-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border-color, #eee);
+      flex-shrink: 0;
+      background: var(--bg-color, #fff);
+    }
+    .forward-modal-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary, #333);
+    }
+    .forward-modal-close {
+      background: none;
+      border: none;
+      font-size: 22px;
+      color: #999;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+      line-height: 1;
+      transition: background 0.15s;
+    }
+    .forward-modal-close:hover {
+      background: rgba(0, 0, 0, 0.06);
+      color: #555;
+    }
+    .forward-modal-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 14px;
+      -webkit-overflow-scrolling: touch;
+    }
+    .forward-contact-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 8px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.12s;
+      border-bottom: 1px solid var(--border-color, #f5f5f5);
+    }
+    .forward-contact-item:active {
+      background: rgba(0, 0, 0, 0.04);
+    }
+    .forward-contact-item input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+      flex-shrink: 0;
+      accent-color: var(--primary-color, #4cd964);
+    }
+    .forward-contact-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      object-fit: cover;
+      background: #e0e0e0;
+    }
+    .forward-contact-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .forward-contact-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary, #333);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .forward-contact-type {
+      font-size: 11px;
+      color: var(--text-tertiary, #999);
+    }
+    .forward-modal-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 18px;
+      border-top: 1px solid var(--border-color, #eee);
+      flex-shrink: 0;
+      background: var(--bg-color, #fff);
+    }
+    .forward-count {
+      font-size: 13px;
+      color: var(--text-secondary, #666);
+      font-weight: 600;
+    }
+    .forward-confirm-btn {
+      padding: 8px 24px;
+      border: none;
+      background: linear-gradient(135deg, var(--primary-color, #4cd964), var(--primary-dark, #2ac1bc));
+      color: white;
+      border-radius: 20px;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 14px;
+      transition: transform 0.12s;
+    }
+    .forward-confirm-btn:active {
+      transform: scale(0.96);
+    }
+    .forward-confirm-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
   </style>
   <!-- 【新增】引入 html2canvas 库用于生成聊天记录图片 -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
+
+<!-- 【论坛体选择器】顶部操作条 -->
+<div id="forumPickerBar">
+  <button onclick="forumPickerReturn()" style="display:flex;align-items:center;gap:4px;border:none;background:transparent;color:var(--primary-dark,#e91e63);font-size:14px;font-weight:600;cursor:pointer;padding:0;">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+    返回论坛
+  </button>
+  <span style="font-size:12px;color:#8ca0b3;">选择要载入的消息 · Shift+点选 / 长按连选</span>
+</div>
 
 <!-- 【新增】顶部导航栏 -->
 <header class="chat-header">
@@ -916,6 +1681,7 @@
   <textarea id="messageInput" placeholder="输入消息…" rows="1"></textarea>
   <button id="sendBtn">发送</button><!-- 【新增】+号按钮 -->
   <button id="plusBtn" onclick="toggleQuickPanel()">+</button>
+  <button id="stopAgentBtn" onclick="stopAgent()" style="display:none; background:linear-gradient(135deg, #ff4444, #cc0000); color:white; border:none; border-radius:20px; padding:10px 14px; cursor:pointer; font-weight:bold; margin-left:4px;" title="停止正在运行的 Agent">🛑 停止 Agent</button>
 </div>
 
 <!-- 【新增】更多面板：图片 / 表情 / 常用语 -->
@@ -979,7 +1745,7 @@
 
 <!-- 表情详情弹窗（大图 + 所属表情包） -->
 <div id="stickerDetailModal" class="sticker-detail-modal" data-current-sticker-path="">
-  <div class="modal-body"><img id="stickerDetailImg" src="" alt="" /></div>
+  <div class="modal-body"><img id="stickerDetailImg" alt="" /></div>
   <div class="modal-footer">
     <a href="#" id="stickerDetailPackLink">查看表情包</a>
     <span style="margin:0 8px;">|</span>
@@ -1014,9 +1780,15 @@
 <!-- 【新增】底部多选操作栏 -->
 <div id="selectionBar" style="display:none; position:fixed; bottom:0; left:0; width:100%; background:#fff; padding:16px; box-shadow:0 -2px 10px rgba(0,0,0,0.1); z-index:200; align-items:center; justify-content:space-between; box-sizing:border-box;">
   <span id="selectCount" style="color:#666; font-weight:bold;">已选择 0 条</span>
-  <div style="display:flex; gap:10px;">
+  <div style="display:flex; gap:10px;" class="selection-normal-btns">
     <button onclick="toggleSelectionMode()" style="padding:8px 16px; border:1px solid #ddd; background:#fff; border-radius:20px; cursor:pointer;">取消</button>
+    <button onclick="forwardSelectedMessages()" style="padding:8px 20px; border:none; background:linear-gradient(135deg, #4A90D9, #357ABD); color:white; border-radius:20px; cursor:pointer; font-weight:bold;">转发</button>
     <button onclick="exportSelectedMessages()" style="padding:8px 20px; border:none; background:linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color:white; border-radius:20px; cursor:pointer; font-weight:bold;">生成记录</button>
+    <button onclick="deleteSelectedMessages()" style="padding:8px 20px; border:none; background:linear-gradient(135deg, #ff5c5c, #d93636); color:white; border-radius:20px; cursor:pointer; font-weight:bold;">删除</button>
+  </div>
+  <div style="display:flex; gap:10px;" class="selection-forum-btns">
+    <button onclick="forumPickerCancel()" style="padding:8px 16px; border:1px solid #ddd; background:#fff; border-radius:20px; cursor:pointer;">取消</button>
+    <button onclick="forumPickerConfirm()" style="padding:8px 24px; border:none; background:linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color:white; border-radius:20px; cursor:pointer; font-weight:bold;">载入到论坛</button>
   </div>
 </div>
 
@@ -1024,13 +1796,13 @@
 <div id="exportResultModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:2000; align-items:center; justify-content:center;">
   <div style="background:#fff; padding:20px; border-radius:12px; width:85%; max-width:600px; height: 60vh; display:flex; flex-direction:column; box-shadow:0 4px 20px rgba(0,0,0,0.2);">
     <h3 style="margin:0 0 10px 0; color:#444; flex-shrink:0;">导出预览</h3>
-    
+
     <!-- 【新增】选项卡切换 -->
     <div style="display:flex; gap:15px; margin-bottom:15px; flex-shrink:0; border-bottom:1px solid #eee; padding-bottom:10px;">
       <button id="tabTextBtn" onclick="switchExportTab('text')" style="padding:8px 16px; border:none; background:transparent; color:#444; cursor:pointer; font-weight:bold; border-bottom:3px solid #4cd964;">📄 文字版</button>
       <button id="tabImageBtn" onclick="switchExportTab('image')" style="padding:8px 16px; border:none; background:transparent; color:#999; cursor:pointer; font-weight:bold; border-bottom:3px solid transparent; transition: all 0.2s;">🖼️ 图片版</button>
     </div>
-    
+
     <!-- 文字版容器 -->
     <div id="exportTextContainer" style="flex:1; display:flex; flex-direction:column;">
       <p style="margin:0 0 10px 0; color:#888; font-size:12px; flex-shrink:0;">您可以直接复制下方内容，或者点击按钮一键复制。</p>
@@ -1040,7 +1812,7 @@
         <button id="copyResultBtn" style="padding:8px 20px; border:none; background:linear-gradient(135deg, #4cd964, #2ac1bc); color:white; border-radius:6px; cursor:pointer; font-weight:bold;">复制全部</button>
       </div>
     </div>
-    
+
     <!-- 图片版容器 -->
     <div id="exportImageContainer" style="flex:1; display:none; flex-direction:column; min-height:0;">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-shrink:0;">
@@ -1080,6 +1852,72 @@
   </div>
 </div>
 
+<!-- 【论坛体】弹窗 -->
+<div class="forum-modal-overlay" id="forumModalOverlay" onclick="if(event.target===this)closeForumModal()">
+  <div class="forum-modal">
+    <div class="forum-modal-header">
+      <span class="forum-modal-title" id="forumModalTitle">帖子标题</span>
+      <button class="forum-modal-close" onclick="closeForumModal()">&times;</button>
+    </div>
+    <div class="forum-modal-body" id="forumModalBody">
+      <div class="forum-empty-hint">暂无内容</div>
+    </div>
+  </div>
+</div>
+
+<!-- 【聊天记录】展开弹窗 -->
+<div class="chatlog-modal-overlay" id="chatlogModalOverlay" onclick="if(event.target===this)closeChatlogModal()">
+  <div class="chatlog-modal">
+    <div class="chatlog-modal-header">
+      <span class="chatlog-modal-title" id="chatlogModalTitle">聊天记录</span>
+      <button class="chatlog-modal-close" onclick="closeChatlogModal()">&times;</button>
+    </div>
+    <div class="chatlog-modal-body" id="chatlogModalBody">
+      <div class="forum-empty-hint">暂无内容</div>
+    </div>
+  </div>
+</div>
+
+<!-- 【睡前心声】内心独白展开弹窗 -->
+<div class="thoughts-modal-overlay" id="thoughtsModalOverlay" onclick="if(event.target===this)closeThoughtsModal()">
+  <div class="thoughts-modal">
+    <div class="thoughts-modal-header">
+      <span class="thoughts-modal-title">内心独白</span>
+      <button class="thoughts-modal-close" onclick="closeThoughtsModal()">&times;</button>
+    </div>
+    <div class="thoughts-modal-body" id="thoughtsModalBody"></div>
+  </div>
+</div>
+
+<!-- 【转发】目标选择弹窗 -->
+<div class="forward-modal-overlay" id="forwardModalOverlay" onclick="if(event.target===this)closeForwardModal()">
+  <div class="forward-modal">
+    <div class="forward-modal-header">
+      <span class="forward-modal-title">选择转发目标</span>
+      <button class="forward-modal-close" onclick="closeForwardModal()">&times;</button>
+    </div>
+    <div class="forward-modal-list" id="forwardModalList">
+      <div class="forum-empty-hint">加载中...</div>
+    </div>
+    <div class="forward-modal-footer">
+      <span class="forward-count" id="forwardCount">已选择 0 个聊天</span>
+      <button class="forward-confirm-btn" id="forwardConfirmBtn" onclick="confirmForward()" disabled>确认转发</button>
+    </div>
+  </div>
+</div>
+
+<div id="cbModal" class="cb-modal-overlay" style="display:none;">
+    <div class="cb-modal">
+        <div class="cb-modal-icon" id="cbModalIcon">⚡</div>
+        <div class="cb-modal-title" id="cbModalTitle"></div>
+        <div class="cb-modal-message" id="cbModalMessage"></div>
+        <div class="cb-modal-countdown" id="cbModalCountdown"></div>
+        <div>
+            <button class="cb-modal-btn primary" onclick="closeCbModal()">我知道了</button>
+        </div>
+    </div>
+</div>
+
 <!-- 【最终的、绝对正确的 <script> 标签】-->
 <script>
   // --- 1. 核心状态 ---
@@ -1087,7 +1925,7 @@
   // 【新增】设置全局 COS 变量供 theme-loader.js 使用
   window.GLOBAL_USER_PREFIX = 'users/' + currentUserId;
   // 如果后端有传 cos_base_url 可以填在这，否则 theme-loader 会去查 localStorage
-  // window.GLOBAL_COS_BASE_URL = '...'; 
+  // window.GLOBAL_COS_BASE_URL = '...';
 
   const pathParts = window.location.pathname.split('/').filter(Boolean);
   // 判断是否为群聊 (URL包含 group)
@@ -1095,13 +1933,99 @@
   // 获取 ID (如果是群聊则是 group_id，单聊则是 char_id)
   const currentId = pathParts[pathParts.length - 1];
 
+  // 手机端错误诊断：仅在发生错误时显示，不记录聊天正文。
+  const chatDiagnosticEntries = Array.isArray(window.__chatDiagnosticEarly)
+    ? window.__chatDiagnosticEarly.slice()
+    : [];
+
+  function formatDiagnosticError(error) {
+    if (!error) return 'Unknown error';
+    return String(error.stack || error.message || error);
+  }
+
+  function showChatDiagnostic(details) {
+    const entry = Object.assign({
+      time: new Date().toISOString(),
+      phase: 'unknown',
+      page: window.location.pathname,
+      userId: currentUserId,
+      targetId: currentId,
+      mode: isGroupMode ? 'group' : 'single',
+      browser: navigator.userAgent
+    }, details || {});
+    chatDiagnosticEntries.push(entry);
+
+    let panel = document.getElementById('chat-diagnostic-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'chat-diagnostic-panel';
+      panel.style.cssText = 'position:fixed;left:10px;right:10px;bottom:10px;z-index:2147483646;max-height:65vh;overflow:auto;padding:12px;background:#fff7ed;color:#7c2d12;border:2px solid #f97316;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.28);font:12px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:left;';
+      panel.innerHTML = '<div style="font-size:15px;font-weight:700;margin-bottom:6px;">聊天页加载失败 · 诊断信息</div><div style="margin-bottom:8px;">请点击“复制报告”并发送给管理员。报告不包含聊天正文。</div><pre id="chat-diagnostic-content" style="margin:0 0 10px;white-space:pre-wrap;word-break:break-word;user-select:text;"></pre><div style="display:flex;gap:8px;"><button type="button" id="chat-diagnostic-copy" style="padding:7px 12px;border:0;border-radius:7px;background:#ea580c;color:#fff;font-weight:600;">复制报告</button><button type="button" id="chat-diagnostic-close" style="padding:7px 12px;border:1px solid #fdba74;border-radius:7px;background:#fff;color:#9a3412;">暂时关闭</button></div>';
+      document.body.appendChild(panel);
+
+      panel.querySelector('#chat-diagnostic-copy').addEventListener('click', async function() {
+        const report = panel.querySelector('#chat-diagnostic-content').textContent;
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(report);
+          } else {
+            const textarea = document.createElement('textarea');
+            textarea.value = report;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            textarea.remove();
+          }
+          this.textContent = '已复制';
+        } catch (copyError) {
+          this.textContent = '复制失败，请长按报告复制';
+        }
+      });
+      panel.querySelector('#chat-diagnostic-close').addEventListener('click', function() {
+        panel.style.display = 'none';
+      });
+    }
+
+    panel.style.display = 'block';
+    panel.querySelector('#chat-diagnostic-content').textContent =
+      JSON.stringify(chatDiagnosticEntries, null, 2);
+  }
+
+  window.addEventListener('error', function(event) {
+    if (event.target && event.target !== window && event.target.tagName) {
+      return;
+    }
+    showChatDiagnostic({
+      phase: 'window_error',
+      error: formatDiagnosticError(event.error || event.message),
+      source: event.filename || '',
+      line: event.lineno || 0,
+      column: event.colno || 0
+    });
+  });
+
+  window.addEventListener('unhandledrejection', function(event) {
+    showChatDiagnostic({
+      phase: 'unhandled_promise',
+      error: formatDiagnosticError(event.reason)
+    });
+  });
+
+  if (chatDiagnosticEntries.length) {
+    setTimeout(function() {
+      showChatDiagnostic({ phase: 'early_diagnostic_replay' });
+    }, 0);
+  }
+
   console.log(`Mode: ${isGroupMode ? 'Group' : 'Single'}, ID: ${currentId}`);
 
   // 缓存配置
   let currentConfig = {}; // 存群信息 或 角色信息
   let groupMembers = {};  // 存群成员详细信息 (ID -> Avatar/Name)
   // 用户拍一拍后缀，默认空；具体取值由后端配置 / 用户配置决定
-  let userTickleSuffix = ''; 
+  let userTickleSuffix = '';
   let aiLanguage = 'ja';  // 拍一拍展示语言：ja=日语 zh=中文
   // 当前用户姓名（从 /api/user/profile_settings 获取）
   let currentUserName = 'User';
@@ -1132,6 +2056,43 @@
     el.textContent = `亲密度 ${sign}${delta}`;
     document.body.appendChild(el);
     setTimeout(() => el.remove(), 3000);
+  }
+
+  let cbCountdownTimer = null;
+  function showCbModal(info) {
+    const overlay = document.getElementById('cbModal');
+    document.getElementById('cbModalTitle').textContent =
+      info.type === 'frozen' ? '账号已冻结' :
+      info.type === 'cooldown' ? '熔断冷却中' : '⚠️ 警告';
+    document.getElementById('cbModalIcon').textContent =
+      info.type === 'frozen' ? '🚫' :
+      info.type === 'cooldown' ? '⏳' : '⚠️';
+    document.getElementById('cbModalMessage').textContent = info.message || '';
+    if (info.type === 'cooldown' && info.remaining_seconds) {
+      updateCbCountdown(info.remaining_seconds);
+      cbCountdownTimer = setInterval(() => {
+        info.remaining_seconds--;
+        if (info.remaining_seconds <= 0) {
+          clearInterval(cbCountdownTimer);
+          document.getElementById('cbModalCountdown').textContent = '';
+          return;
+        }
+        updateCbCountdown(info.remaining_seconds);
+      }, 1000);
+    } else {
+      document.getElementById('cbModalCountdown').textContent = '';
+    }
+    overlay.style.display = 'flex';
+  }
+  function updateCbCountdown(secs) {
+    const mins = Math.floor(secs / 60);
+    const s = secs % 60;
+    document.getElementById('cbModalCountdown').textContent =
+      `剩余冷却时间: ${mins}分${s}秒`;
+  }
+  function closeCbModal() {
+    document.getElementById('cbModal').style.display = 'none';
+    if (cbCountdownTimer) { clearInterval(cbCountdownTimer); cbCountdownTimer = null; }
   }
 
   if ('serviceWorker' in navigator) {
@@ -1165,6 +2126,42 @@
     let isLoading = false;
     const messagesPerPage = 20;
 
+    // Agent 相关状态
+    let agentIsRunning = false;
+    let agentIsWaiting = false;
+    let agentQuestion = '';
+    let agentPollTimer = null;
+
+    function hasWebCommands(text) {
+      return /\[(CLICK|TYPE|GOTO):.+?\]/i.test(text) || /\[BACK\]/i.test(text) || /\[FINISH\]/i.test(text);
+    }
+
+    // 转发：联系人缓存 { id -> { type, name, remark, avatar } }
+    let contactsCache = {};
+    let contactsCacheFetched = false;
+
+    async function ensureContactsCache() {
+      if (contactsCacheFetched) return;
+      try {
+        const res = await fetch('/api/contacts');
+        const list = await res.json();
+        list.forEach(c => { contactsCache[c.id] = { type: c.type, name: c.name, remark: c.remark || c.name, avatar: c.avatar }; });
+        contactsCacheFetched = true;
+      } catch(e) { console.error('获取联系人列表失败', e); }
+    }
+
+    function resolveDisplayName(id) {
+      if (id === 'user') return currentUserName || 'User';
+      const c = contactsCache[id];
+      return c ? (c.remark || c.name || id) : id;
+    }
+
+    function resolveAvatar(id) {
+      if (id === 'user') return '/user_avatar?t=' + (window.PAGE_LOAD_TIME || Date.now());
+      const c = contactsCache[id];
+      return c ? (c.avatar || '/static/default_avatar.png') : '/static/default_avatar.png';
+    }
+
     // --- 【新增】发送前随机分配表情函数 ---
   async function randomizeStickersInText(text) {
     if (!text || text.indexOf('[表情]') === -1) return text;
@@ -1178,7 +2175,7 @@
     while ((m = regex.exec(text)) !== null) {
       out += text.slice(lastIndex, m.index);
       const nameOrPath = m[1].trim();
-      
+
       // 判断是否已经是精确路径（面板点击发送的会有 official: 或 user:）
       const isPath = nameOrPath.startsWith('official:') || nameOrPath.startsWith('user:');
 
@@ -1213,14 +2210,14 @@
     // 检查是否为日语环境：'ja' 或者 包含 '日' 或 'ja'
     const isJapanese = aiLanguage === 'ja' || (aiLanguage && (aiLanguage.toLowerCase().includes('ja') || aiLanguage.includes('日')));
     if (!isJapanese) return text;
-    
+
     // 【新增】提取 emoji，先注音再加回
     // JavaScript emoji 正则：支持常见 emoji 范围
     const emojiRegex = /[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\uFE0F]/gu;
     const emojiMap = new Map();
     let textWithoutEmoji = text;
     let emojiCount = 0;
-    
+
     // 用占位符替换 emoji
     textWithoutEmoji = textWithoutEmoji.replace(emojiRegex, (match) => {
       const placeholder = `__EMOJI_${emojiCount}__`;
@@ -1228,7 +2225,7 @@
       emojiCount++;
       return placeholder;
     });
-    
+
     try {
       const r = await fetch('/api/furigana', {
         method: 'POST',
@@ -1237,12 +2234,12 @@
       });
       const data = await r.json();
       let result = data && data.result ? data.result : textWithoutEmoji;
-      
+
       // 【新增】把 emoji 加回来
       for (const [placeholder, emoji] of emojiMap) {
         result = result.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), emoji);
       }
-      
+
       return result;
     } catch (e) {
       return text;
@@ -1392,7 +2389,16 @@
       // --- 【新增】加载并应用聊天背景 ---
       await loadAndApplyChatBackground();
 
-    } catch (e) { console.error("UI加载失败", e); }
+      // 预加载联系人缓存（用于转发/聊天记录卡片解析）
+      await ensureContactsCache();
+
+    } catch (e) {
+      console.error("UI加载失败", e);
+      showChatDiagnostic({
+        phase: 'ui_init',
+        error: formatDiagnosticError(e)
+      });
+    }
   }
 
   // 【新增】聊天背景应用逻辑
@@ -1477,7 +2483,7 @@
       let displayContent = inner.trim();
       const snapshotStart = displayContent.indexOf('【当前页面文本】');
       const promptStart = displayContent.indexOf('请根据你的性格和当前页面');
-      
+
       if (snapshotStart !== -1) {
         // 如果找到了快照标识，截取快照内容
         let content = displayContent.substring(snapshotStart);
@@ -1509,9 +2515,379 @@
     return { tickles, rest };
   }
 
+  // --- 【论坛体】提取论坛块 ---
+  function extractForumBlocks(text) {
+    if (!text || typeof text !== 'string') return { blocks: [], cleanText: text };
+
+    // 【修复】保护 [HTML]...[/HTML] 块不被论坛标签解析
+    var htmlBlockPlaceholders = [];
+    var textWithoutHtml = text.replace(/\[HTML\]([\s\S]*?)\[\/HTML\]/g, function(full) {
+      var idx = htmlBlockPlaceholders.length;
+      htmlBlockPlaceholders.push(full);
+      return '[__HTML_BLOCK_' + idx + '__]';
+    });
+
+    // 【修复】先剥离论坛标签内部的 ruby 注音，防止 </ruby> 中的 ] 破坏标签解析
+    var cleanedForParsing = textWithoutHtml.replace(/\[FORUM:([^\]]*?)\]([\s\S]*?)\[\/FORUM\]/g, function(full) {
+      return full.replace(/<ruby>([^<]*)<rt>[^<]*<\/rt><\/ruby>/g, '$1');
+    });
+
+    const blocks = [];
+    const replacements = [];
+    const forumRegex = /\[FORUM:([^\]]*?)\]([\s\S]*?)\[\/FORUM\]/g;
+    let match;
+    let blockIdx = 0;
+    while ((match = forumRegex.exec(cleanedForParsing)) !== null) {
+      const title = match[1].trim();
+      const body = match[2];
+      const posts = [];
+      const postRegex = /\[POST:([^:]+):(self|npc):(\d+)(?::(\d+))?\]([\s\S]*?)\[\/POST\]/g;
+      let postMatch;
+      while ((postMatch = postRegex.exec(body)) !== null) {
+        posts.push({
+          name: postMatch[1].trim(),
+          role: postMatch[2],
+          floor: parseInt(postMatch[3]),
+          replyTo: postMatch[4] ? parseInt(postMatch[4]) : null,
+          content: postMatch[5].trim()
+        });
+      }
+      blocks.push({ title, posts });
+      replacements.push({ original: match[0], placeholder: '[__FORUM_BLOCK_' + blockIdx + '__]' });
+      blockIdx++;
+    }
+    let cleanText = cleanedForParsing;
+    replacements.forEach(function(r) {
+      cleanText = cleanText.replace(r.original, r.placeholder);
+    });
+
+    // 【修复】还原 [HTML]...[/HTML] 块
+    htmlBlockPlaceholders.forEach(function(htmlBlock, i) {
+      cleanText = cleanText.replace('[__HTML_BLOCK_' + i + '__]', htmlBlock);
+    });
+
+    return { blocks, cleanText };
+  }
+
+  // --- 【聊天记录】提取转发块 [CHATLOG:sourceId]...[/CHATLOG] ---
+  function extractChatlogBlocks(text) {
+    if (!text || typeof text !== 'string') return { blocks: [], cleanText: text };
+
+    // 保护 [HTML]...[/HTML] 块
+    var htmlBlockPlaceholders = [];
+    var textWithoutHtml = text.replace(/\[HTML\]([\s\S]*?)\[\/HTML\]/g, function(full) {
+      var idx = htmlBlockPlaceholders.length;
+      htmlBlockPlaceholders.push(full);
+      return '[__HTML_BLOCK_' + idx + '__]';
+    });
+
+    const blocks = [];
+    const replacements = [];
+    const chatlogRegex = /\[CHATLOG:([^\]]*?)\]([\s\S]*?)\[\/CHATLOG\]/g;
+    let match;
+    let blockIdx = 0;
+    while ((match = chatlogRegex.exec(textWithoutHtml)) !== null) {
+      const sourceId = match[1].trim();
+      const body = match[2];
+      const logs = [];
+      let currentDate = '';
+
+      const tokenRegex = /\[DATE:([^\]]*?)\]|\[LOG:([^|\]]*?)\|([^\]]*?)\]([\s\S]*?)\[\/LOG\]/g;
+      let t;
+      while ((t = tokenRegex.exec(body)) !== null) {
+        if (t[1] !== undefined) {
+          currentDate = t[1].trim();
+        } else {
+          logs.push({
+            sender: (t[2] || '').trim(),
+            time: (t[3] || '').trim(),
+            date: currentDate,
+            content: (t[4] || '').trim()
+          });
+        }
+      }
+
+      blocks.push({ sourceId, logs });
+      replacements.push({ original: match[0], placeholder: '[__CHATLOG_BLOCK_' + blockIdx + '__]' });
+      blockIdx++;
+    }
+
+    let cleanText = textWithoutHtml;
+    replacements.forEach(function(r) {
+      cleanText = cleanText.replace(r.original, r.placeholder);
+    });
+
+    // 还原 [HTML]...[/HTML] 块
+    htmlBlockPlaceholders.forEach(function(htmlBlock, i) {
+      cleanText = cleanText.replace('[__HTML_BLOCK_' + i + '__]', htmlBlock);
+    });
+
+    return { blocks, cleanText };
+  }
+
+  // --- 【睡前心声 THOUGHTS】提取内心独白块，替换为占位令牌 ---
+  function extractThoughtsBlocks(text) {
+    if (!text || typeof text !== 'string') return { blocks: [], cleanText: text };
+
+    const blocks = [];
+    const replacements = [];
+    // 吞掉大模型可能多输出的重复闭合标签，如 [/THOUGHTS][/THOUGHTS]
+    const thoughtsRegex = /\[THOUGHTS\]([\s\S]*?)\[\/THOUGHTS\](?:\s*\[\/THOUGHTS\])*/g;
+    let match;
+    let blockIdx = 0;
+    while ((match = thoughtsRegex.exec(text)) !== null) {
+      const content = (match[1] || '').trim();
+      blocks.push({ content: content });
+      replacements.push({ original: match[0], placeholder: '[__THOUGHTS_BLOCK_' + blockIdx + '__]' });
+      blockIdx++;
+    }
+
+    let cleanText = text;
+    replacements.forEach(function(r) {
+      cleanText = cleanText.replace(r.original, r.placeholder);
+    });
+    // 清理残留的孤立标签（历史脏数据兜底）
+    cleanText = cleanText.replace(/\[\/?THOUGHTS\]/g, '');
+
+    return { blocks, cleanText };
+  }
+
+  // --- 【睡前心声 THOUGHTS】把 / 与换行统一拆成段落（跳过 HTML 标签内的 /）---
+  function splitThoughtsParagraphs(content) {
+    var s = String(content || '');
+    var parts = [];
+    var current = '';
+    var inTag = false;
+    for (var i = 0; i < s.length; i++) {
+      var ch = s[i];
+      if (ch === '<') inTag = true;
+      else if (ch === '>') inTag = false;
+
+      if ((ch === '/' || ch === '\n') && !inTag) {
+        var trimmed = current.trim();
+        if (trimmed) parts.push(trimmed);
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+    var trimmed = current.trim();
+    if (trimmed) parts.push(trimmed);
+    return parts;
+  }
+
+  // --- 【睡前心声 THOUGHTS】打开展开弹窗 ---
+  function openThoughtsModal(groupEl, blockIdx) {
+    let blocks = [];
+    try { blocks = JSON.parse(groupEl.dataset.thoughtsBlocks || '[]'); } catch(e) { blocks = []; }
+    const block = blocks[blockIdx];
+    if (!block) return;
+
+    const body = document.getElementById('thoughtsModalBody');
+    body.innerHTML = '';
+    const paras = splitThoughtsParagraphs(block.content);
+    if (paras.length === 0) {
+      body.innerHTML = '<div class="forum-empty-hint">……</div>';
+    } else {
+      paras.forEach(function(p) {
+        const pEl = document.createElement('p');
+        pEl.className = 'thoughts-para';
+        pEl.innerHTML = p;
+        body.appendChild(pEl);
+      });
+    }
+    document.getElementById('thoughtsModalOverlay').classList.add('show');
+  }
+
+  function closeThoughtsModal() {
+    document.getElementById('thoughtsModalOverlay').classList.remove('show');
+  }
+
+  // --- 【聊天记录】根据来源ID生成标题 ---
+  function buildChatlogTitle(sourceId) {
+    const c = contactsCache[sourceId];
+    if (c && c.type === 'group') {
+      return (c.remark || c.name || sourceId) + '的聊天记录';
+    }
+    const otherName = resolveDisplayName(sourceId);
+    return (currentUserName || 'User') + '和' + otherName + '的聊天记录';
+  }
+
+  // --- 【聊天记录】打开展开弹窗 ---
+  function openChatlogModal(groupEl, blockIdx) {
+    let blocks = [];
+    try { blocks = JSON.parse(groupEl.dataset.chatlogBlocks || '[]'); } catch(e) { blocks = []; }
+    const block = blocks[blockIdx];
+    if (!block) return;
+
+    document.getElementById('chatlogModalTitle').textContent = buildChatlogTitle(block.sourceId);
+    const body = document.getElementById('chatlogModalBody');
+    body.innerHTML = '';
+
+    if (!block.logs || block.logs.length === 0) {
+      body.innerHTML = '<div class="forum-empty-hint">暂无内容</div>';
+    } else {
+      let lastDate = '';
+      block.logs.forEach(function(log) {
+        if (log.date && log.date !== lastDate) {
+          const dateEl = document.createElement('div');
+          dateEl.className = 'chatlog-date-separator';
+          dateEl.textContent = log.date;
+          body.appendChild(dateEl);
+          lastDate = log.date;
+        }
+
+        // 单聊中的 AI 消息 sender 为 "assistant"，解析为实际角色 ID
+        const senderId = (log.sender === 'assistant') ? block.sourceId : log.sender;
+
+        const row = document.createElement('div');
+        row.className = 'chatlog-log-row';
+
+        const avatar = document.createElement('img');
+        avatar.className = 'chatlog-log-avatar';
+        let avatarUrl = resolveAvatar(senderId);
+        avatar.src = window.getCosUrl ? window.getCosUrl(avatarUrl) : avatarUrl;
+        avatar.onerror = function() { this.src = '/static/default_avatar.png'; };
+        row.appendChild(avatar);
+
+        const bodyEl = document.createElement('div');
+        bodyEl.className = 'chatlog-log-body';
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'chatlog-log-name';
+        nameEl.textContent = resolveDisplayName(senderId);
+        bodyEl.appendChild(nameEl);
+
+        const contentEl = document.createElement('div');
+        contentEl.className = 'chatlog-log-content';
+        const lines = String(log.content).split('/').map(s => s.trim()).filter(s => s !== '');
+        contentEl.textContent = lines.join('\n');
+        contentEl.style.whiteSpace = 'pre-wrap';
+        bodyEl.appendChild(contentEl);
+
+        row.appendChild(bodyEl);
+
+        const timeEl = document.createElement('div');
+        timeEl.className = 'chatlog-log-time';
+        timeEl.textContent = (log.time || '').slice(0, 5);
+        row.appendChild(timeEl);
+
+        body.appendChild(row);
+      });
+    }
+
+    document.getElementById('chatlogModalOverlay').classList.add('show');
+  }
+
+  function closeChatlogModal() {
+    document.getElementById('chatlogModalOverlay').classList.remove('show');
+  }
+
+  // --- 【论坛体】打开弹窗 ---
+  function openForumModal(groupEl, blockIdx) {
+    var blocks = [];
+    try {
+      blocks = JSON.parse(groupEl.dataset.forumBlocks || '[]');
+    } catch(e) { blocks = []; }
+    var block = blocks[blockIdx];
+    if (!block) return;
+
+    document.getElementById('forumModalTitle').textContent = block.title || '';
+    var body = document.getElementById('forumModalBody');
+    body.innerHTML = '';
+
+    if (!block.posts || block.posts.length === 0) {
+      body.innerHTML = '<div class="forum-empty-hint">暂无内容</div>';
+    } else {
+      block.posts.forEach(function(post, idx) {
+        var div = document.createElement('div');
+        div.className = 'forum-post ' + (post.role === 'self' ? 'self' : 'npc');
+        div.setAttribute('data-floor', idx);
+        if (post.replyTo !== null && post.replyTo !== undefined) {
+          div.classList.add('has-reply');
+        }
+
+        var header = document.createElement('div');
+        header.className = 'forum-post-header';
+
+        var nameEl = document.createElement('span');
+        nameEl.className = 'forum-post-name';
+        nameEl.textContent = post.name || '';
+        header.appendChild(nameEl);
+
+        var tagEl = document.createElement('span');
+        tagEl.className = 'forum-post-tag';
+        var floorNum = post.floor != null ? post.floor : idx;
+        tagEl.textContent = floorNum === 0 ? '楼主' : '#' + floorNum + '楼';
+        header.appendChild(tagEl);
+
+        var roleEl = document.createElement('span');
+        roleEl.className = 'forum-post-role ' + (post.role || 'npc');
+        roleEl.textContent = post.role === 'self' ? '自己' : 'NPC';
+        header.appendChild(roleEl);
+
+        if (post.replyTo !== null && post.replyTo !== undefined) {
+          var replyEl = document.createElement('span');
+          replyEl.className = 'forum-post-reply-to';
+          replyEl.textContent = '回复 #' + post.replyTo + '楼';
+          replyEl.title = '点击跳转到 #' + post.replyTo + '楼';
+          replyEl.onclick = (function(targetFloor) {
+            return function(e) {
+              e.stopPropagation();
+              var target = body.querySelector('.forum-post[data-floor="' + targetFloor + '"]');
+              if (target) {
+                target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                target.style.transition = 'box-shadow 0.3s';
+                target.style.boxShadow = '0 0 0 3px var(--primary-color, #e91e63)';
+                setTimeout(function() { target.style.boxShadow = ''; }, 1500);
+              }
+            };
+          })(post.replyTo);
+          header.appendChild(replyEl);
+        }
+
+        var contentDiv = document.createElement('div');
+        contentDiv.className = 'forum-post-content';
+        contentDiv.innerHTML = (post.content || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/\n/g, '<br>');
+
+        div.appendChild(header);
+        div.appendChild(contentDiv);
+        body.appendChild(div);
+      });
+    }
+
+    document.getElementById('forumModalOverlay').classList.add('show');
+  }
+
+  // --- 【论坛体】关闭弹窗 ---
+  function closeForumModal() {
+    document.getElementById('forumModalOverlay').classList.remove('show');
+  }
+
+  // 将 SQLite 的 YYYY-MM-DD HH:mm:ss 转为各浏览器都能解析的本地 ISO 时间。
+  function parseChatTimestamp(value) {
+    if (value instanceof Date) return value;
+    let normalized = value;
+    if (typeof normalized === 'string') {
+      normalized = normalized.trim().replace(
+        /^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2}(?:\.\d+)?)$/,
+        '$1T$2'
+      );
+    }
+    const parsed = new Date(normalized);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+    console.warn('Invalid chat timestamp:', value);
+    return new Date();
+  }
+
   // --- 【新增】通用日期检查函数 ---
   function checkAndAppendDateSeparator(newTimestamp) {
-    const newDate = new Date(newTimestamp);
+    const newDate = parseChatTimestamp(newTimestamp);
 
     // 1. 获取当前页面最底部的一条消息容器
     const lastGroup = chatContainer.querySelector('.message-group:last-child');
@@ -1548,10 +2924,19 @@
     const isAssistant = role !== 'user';
     // 优先使用 rawContent，因为 content 可能已经由于 history/v2 接口转换失去了原始标签
     const textToProcess = rawContent != null ? String(rawContent) : (content != null ? String(content) : '');
-    
+
     // 【新增】提取 AI 巡航信息与拍一拍
     const { cleanText: textAfterCruise, cruises } = extractCruiseFromContent(textToProcess);
-    const { tickles, rest } = extractTicklesFromContent(textAfterCruise);
+    const { tickles, rest: restAfterTickle } = extractTicklesFromContent(textAfterCruise);
+
+    // 【论坛体】提取论坛块，替换为占位令牌
+    const { blocks: forumBlocks, cleanText: restAfterForum } = extractForumBlocks(restAfterTickle);
+
+    // 【聊天记录】提取转发块，替换为占位令牌
+    const { blocks: chatlogBlocks, cleanText: restAfterChatlog } = extractChatlogBlocks(restAfterForum);
+
+    // 【睡前心声】提取内心独白块，替换为占位令牌（必须在按 "/" 拆气泡之前）
+    const { blocks: thoughtsBlocks, cleanText: rest } = extractThoughtsBlocks(restAfterChatlog);
 
     const fullText = rest;
     const originalRawText = textToProcess;
@@ -1567,13 +2952,23 @@
     const rawParts = [];
     let current = '';
     let inTag = false;
+
+    // 找到最外层 [HTML]...[/HTML] 的范围（第一个开头 → 最后一个结尾）
+    var _htmlRangeStart = rest.indexOf('[HTML]');
+    var _htmlRangeEnd = -1;
+    if (_htmlRangeStart !== -1) {
+      _htmlRangeEnd = rest.lastIndexOf('[/HTML]');
+      if (_htmlRangeEnd !== -1) _htmlRangeEnd += 7;
+    }
+
     for (let i = 0; i < rest.length; i++) {
       if (rest[i] === '<') inTag = true;
       else if (rest[i] === '>') inTag = false;
-      
-      const isInsideUrl = urlMatches.some(match => i >= match.start && i < match.end);
 
-      if (rest[i] === '/' && !inTag && !isInsideUrl) {
+      const isInsideUrl = urlMatches.some(match => i >= match.start && i < match.end);
+      const insideHtmlBlock = _htmlRangeStart !== -1 && _htmlRangeEnd !== -1 && i >= _htmlRangeStart && i < _htmlRangeEnd;
+
+      if (rest[i] === '/' && !inTag && !isInsideUrl && !insideHtmlBlock) {
         rawParts.push(current);
         current = '';
       } else {
@@ -1581,10 +2976,10 @@
       }
     }
     rawParts.push(current);
-    
+
     // 清理首尾空格并过滤空段
     const cleanedParts = rawParts.map(p => p.trim()).filter(s => s !== '');
-    
+
     const segments = [];
     for (let i = 0; i < cleanedParts.length; i++) {
       let seg = cleanedParts[i];
@@ -1634,7 +3029,7 @@
     }
     if (currentBubbles.length) rows.push({ type: 'content', bubbles: currentBubbles });
 
-    const date = new Date(timestamp);
+    const date = parseChatTimestamp(timestamp);
 
     // --- 角色判断逻辑 ---
     const isUser = role === 'user';
@@ -1653,6 +3048,21 @@
 
     // 【新增】把说话人的 ID 存进去 (如果是用户则是 'user'，如果是群聊则是 'isagi' 等)
     group.dataset.sender = role;
+
+    // 【论坛体】存储论坛块数据
+    if (forumBlocks && forumBlocks.length > 0) {
+      group.dataset.forumBlocks = JSON.stringify(forumBlocks);
+    }
+
+    // 【聊天记录】存储转发块数据
+    if (chatlogBlocks && chatlogBlocks.length > 0) {
+      group.dataset.chatlogBlocks = JSON.stringify(chatlogBlocks);
+    }
+
+    // 【睡前心声】存储内心独白块数据
+    if (thoughtsBlocks && thoughtsBlocks.length > 0) {
+      group.dataset.thoughtsBlocks = JSON.stringify(thoughtsBlocks);
+    }
 
     // --- 头像与名字处理 ---
     let avatarUrl = '/static/default_avatar.png'; // 默认
@@ -1791,21 +3201,172 @@
       const imagePath = imageMatchNew ? imageMatchNew[1].trim() : (imageMatchOld ? imageMatchOld[1].trim() : '');
       const voiceMatch = text && text.match(/^\[voice\]\(([^)]+)\)\(([\s\S]*)\)$/);
       const isVoice = !!voiceMatch;
-      
+
+      // 【论坛体】检测纯占位令牌
+      const forumPlaceholderMatch = text && text.match(/^\[__FORUM_BLOCK_(\d+)__\]$/);
+
+      if (forumPlaceholderMatch) {
+        const blockIdx = parseInt(forumPlaceholderMatch[1]);
+        var allBlocks = [];
+        try { allBlocks = JSON.parse(group.dataset.forumBlocks || '[]'); } catch(e) {}
+        var blockInfo = allBlocks[blockIdx];
+        if (blockInfo) {
+          bubble.classList.add('bubble-forum');
+          var btn = document.createElement('button');
+          btn.className = 'forum-trigger-btn';
+          btn.textContent = '查看帖子：' + (blockInfo.title || '');
+          btn.onclick = function(idx) { return function(e) { e.stopPropagation(); openForumModal(group, idx); }; }(blockIdx);
+          bubble.appendChild(btn);
+        } else {
+          bubble.classList.add('bubble-empty');
+          bubble.innerHTML = '<span class="empty-placeholder">（论坛内容已失效）</span>';
+        }
+        wrapper.appendChild(bubble);
+        if (attachControls && isLastInGroup) {
+          wrapper.dataset.fulltext = fullText;
+          var controls = document.createElement('div');
+          controls.classList.add('controls-container');
+          if (role === 'assistant' && !isGroupMode) {
+            var regenBtn = document.createElement('button');
+            regenBtn.classList.add('regen-btn');
+            regenBtn.title = '重新生成 (删除此条并重试)';
+            regenBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>';
+            regenBtn.onclick = function() { doRegenerate(wrapper); };
+            controls.appendChild(regenBtn);
+          }
+          if (isAssistant) {
+            (function() {
+              var rawText = group.dataset.originalContent || group.dataset.resolvedFulltext || fullText || wrapper.dataset.fulltext || '';
+              var ttsText = rawText
+                .replace(/<ruby>([^<]*)<rt>[^<]*<\/rt><\/ruby>/g, '$1')
+                .replace(/<[^>]+>/g, '')
+                .replace(/\[表情\][\s\S]*?(?=\s*\/\s*|$)/g, '')
+                .replace(/\[图片\]\([^\)]+\)(\([^\)]*\))?/g, '')
+                .replace(/\[图片\]/g, '')
+                .replace(/\[表情\]/g, '')
+                .replace(/\[CLICK:.*?\]/g, '')
+                .replace(/\[TYPE:.*?\]/g, '')
+                .replace(/\[GOTO:.*?\]/g, '')
+                .replace(/\[BACK\]/g, '')
+                .replace(/\[FINISH\]/g, '')
+                .replace(/\[.*?\]/g, '')
+                .replace(/\[ruby\][^[]*\[\/ruby\]/g, '')
+                .replace(/\//g, '。')
+                .replace(/\s+/g, ' ')
+                .trim();
+              if (!ttsText) return;
+              var voiceBtn = document.createElement('button');
+              voiceBtn.className = 'action-btn tts-btn';
+              voiceBtn.title = '语音播放';
+              voiceBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>';
+              voiceBtn.onclick = async function() {
+                if (voiceBtn.classList.contains('playing')) {
+                  var audioEl = voiceBtn._audioEl;
+                  if (audioEl) { audioEl.pause(); audioEl.remove(); }
+                  voiceBtn.classList.remove('playing');
+                  voiceBtn.style.color = '';
+                  return;
+                }
+                if (voiceBtn._cachedAudioUrl) {
+                  var audio = new Audio(voiceBtn._cachedAudioUrl);
+                  voiceBtn._audioEl = audio;
+                  audio.onended = function() { voiceBtn.classList.remove('playing'); voiceBtn.style.color = ''; voiceBtn._audioEl = null; };
+                  audio.onerror = function() { voiceBtn.classList.remove('playing'); voiceBtn.style.color = ''; voiceBtn._audioEl = null; };
+                  voiceBtn.classList.add('playing');
+                  voiceBtn.style.color = '#4cd964';
+                  await audio.play();
+                  return;
+                }
+                voiceBtn.classList.add('playing');
+                voiceBtn.style.color = '#4cd964';
+                voiceBtn.style.cursor = 'wait';
+                try {
+                  var res = await fetch('/api/' + (isGroupMode ? role : currentId) + '/tts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: ttsText })
+                  });
+                  if (!res.ok) { var err = await res.json().catch(function() { return {}; }); throw new Error(err.error || 'TTS request failed'); }
+                  var blob = await res.blob();
+                  var audioUrl = URL.createObjectURL(blob);
+                  voiceBtn._cachedAudioUrl = audioUrl;
+                  var audio2 = new Audio(audioUrl);
+                  voiceBtn._audioEl = audio2;
+                  audio2.onended = function() { voiceBtn.classList.remove('playing'); voiceBtn.style.color = ''; voiceBtn._audioEl = null; };
+                  audio2.onerror = function() { voiceBtn.classList.remove('playing'); voiceBtn.style.color = ''; voiceBtn._audioEl = null; };
+                  await audio2.play();
+                  voiceBtn.style.cursor = '';
+                } catch (err2) {
+                  voiceBtn.classList.remove('playing');
+                  voiceBtn.style.color = '';
+                  voiceBtn.style.cursor = '';
+                  alert('语音生成失败: ' + (err2.message || '未知错误'));
+                }
+              };
+              controls.appendChild(voiceBtn);
+            })();
+          }
+          var translateBtn = null;
+          var fullMessageText = (group.dataset.originalContent || group.dataset.resolvedFulltext || fullText || wrapper.dataset.fulltext || '').trim();
+          var contentWithoutMedia = fullMessageText.replace(/\[表情\][\s\S]*?(?=\s*\/\s*|$)/g, '').replace(/\[图片\]\([^\)]+\)(\([^\)]*\))?/g, '').replace(/\[图片\]/g, '').replace(/\[表情\]/g, '').trim();
+          var hasTextContent = contentWithoutMedia.replace(/[\s\/]+/g, '') !== '';
+          if (aiLanguage && aiLanguage !== 'zh' && hasTextContent) {
+            translateBtn = document.createElement('button');
+            translateBtn.className = 'action-btn';
+            translateBtn.title = '翻译';
+            translateBtn.innerHTML = '<span style="font-size:10px;font-weight:bold;">文</span>';
+            translateBtn.onclick = function() {
+              var dynId = parseInt(group.dataset.id, 10);
+              translateMessage(wrapper, Number.isNaN(dynId) ? id : dynId, group);
+            };
+          }
+          var timestampEl = document.createElement('div');
+          timestampEl.classList.add('timestamp');
+          timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          var editBtn = document.createElement('button');
+          editBtn.className = 'action-btn';
+          editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+          editBtn.onclick = function() { openEditModal(id, fullText, group); };
+          var delBtn = document.createElement('button');
+          delBtn.className = 'action-btn';
+          delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+          delBtn.onclick = function() { deleteMessage(id, group); };
+          var copyBtn = document.createElement('button');
+          copyBtn.className = 'action-btn';
+          copyBtn.innerHTML = '<img src="' + copyIconPath + '" style="width:14px;height:14px;opacity:0.6;">';
+          copyBtn.onclick = function() {
+            var textToCopy = group.dataset.originalContent || group.dataset.resolvedFulltext || fullText;
+            textToCopy = stripRubyTags(textToCopy);
+            if (navigator.clipboard && window.isSecureContext) {
+              navigator.clipboard.writeText(textToCopy).then(function() { showCopySuccess(copyBtn, copyIconPath); }).catch(function() { fallbackCopyTextToClipboard(textToCopy, copyBtn, copyIconPath); });
+            } else {
+              fallbackCopyTextToClipboard(textToCopy, copyBtn, copyIconPath);
+            }
+          };
+          controls.appendChild(timestampEl);
+          if (translateBtn) controls.appendChild(translateBtn);
+          if (id) { controls.appendChild(editBtn); controls.appendChild(delBtn); }
+          controls.appendChild(copyBtn);
+          wrapper.appendChild(controls);
+        }
+        st.appendChild(wrapper);
+        return;
+      }
+
       if (isVoice) {
         const voiceText = voiceMatch[1].trim().replace(/<ruby>([^<]*)<rt>[^<]*<\/rt><\/ruby>/g, '$1');
         const voiceTone = voiceMatch[2].trim().replace(/<ruby>([^<]*)<rt>[^<]*<\/rt><\/ruby>/g, '$1');
         bubble.classList.add('bubble-voice');
-        
+
         const voiceContent = document.createElement('div');
         voiceContent.style.cssText = 'display:flex;align-items:center;gap:8px;';
-        
+
         const playBtn = document.createElement('button');
         playBtn.className = 'voice-play-btn';
         playBtn.style.cssText = 'width:36px;height:36px;border-radius:50%;border:2px solid var(--primary-color);background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.2s;';
         playBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" style="fill:var(--primary-color);margin-left:2px;"><path d="M8 5v14l11-7z"/></svg>';
         playBtn.title = '播放语音';
-        
+
         const voiceInfo = document.createElement('div');
         voiceInfo.style.cssText = 'flex:1;min-width:0;';
         const voiceTextEl = document.createElement('div');
@@ -1819,7 +3380,7 @@
         voiceContent.appendChild(playBtn);
         voiceContent.appendChild(voiceInfo);
         bubble.appendChild(voiceContent);
-        
+
         (function() {
           let isPlaying = false;
           let audioEl = null;
@@ -1859,7 +3420,8 @@
             playBtn.style.cursor = 'wait';
             try {
               const ttsText = '[' + voiceTone + ']' + voiceText;
-              const res = await fetch(`/api/${currentId}/tts_voice`, {
+              const ttsTarget = isGroupMode ? role : currentId;
+              const res = await fetch(`/api/${ttsTarget}/tts_voice`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ text: ttsText })
@@ -1902,7 +3464,7 @@
             }
           };
         })();
-        
+
         wrapper.appendChild(bubble);
         if (attachControls && isLastInGroup) {
           wrapper.dataset.fulltext = fullText;
@@ -1915,6 +3477,120 @@
             regenBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>';
             regenBtn.onclick = () => doRegenerate(wrapper);
             controls.appendChild(regenBtn);
+          }
+
+          // 【语音播放按钮】
+          if (isAssistant) {
+            (function() {
+              const rawText = group.dataset.originalContent || group.dataset.resolvedFulltext || fullText || wrapper.dataset.fulltext || '';
+              const ttsText = rawText
+                .replace(/<ruby>([^<]*)<rt>[^<]*<\/rt><\/ruby>/g, '$1')
+                .replace(/<[^>]+>/g, '')
+                .replace(/\[表情\][\s\S]*?(?=\s*\/\s*|$)/g, '')
+                .replace(/\[图片\]\([^\)]+\)(\([^\)]*\))?/g, '')
+                .replace(/\[图片\]/g, '')
+                .replace(/\[表情\]/g, '')
+                .replace(/\[CLICK:.*?\]/g, '')
+                .replace(/\[TYPE:.*?\]/g, '')
+                .replace(/\[GOTO:.*?\]/g, '')
+                .replace(/\[BACK\]/g, '')
+                .replace(/\[FINISH\]/g, '')
+                .replace(/\[.*?\]/g, '')
+                .replace(/\[ruby\][^[]*\[\/ruby\]/g, '')
+                .replace(/\//g, '。')
+                .replace(/\s+/g, ' ')
+                .trim();
+              if (!ttsText) return;
+              const voiceBtn = document.createElement('button');
+              voiceBtn.className = 'action-btn tts-btn';
+              voiceBtn.title = '语音播放';
+              voiceBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>';
+              voiceBtn.onclick = async function() {
+                if (voiceBtn.classList.contains('playing')) {
+                  const audioEl = voiceBtn._audioEl;
+                  if (audioEl) { audioEl.pause(); audioEl.remove(); }
+                  voiceBtn.classList.remove('playing');
+                  voiceBtn.style.color = '';
+                  return;
+                }
+                if (voiceBtn._cachedAudioUrl) {
+                  const audio = new Audio(voiceBtn._cachedAudioUrl);
+                  voiceBtn._audioEl = audio;
+                  audio.onended = function() {
+                    voiceBtn.classList.remove('playing');
+                    voiceBtn.style.color = '';
+                    voiceBtn._audioEl = null;
+                  };
+                  audio.onerror = function() {
+                    voiceBtn.classList.remove('playing');
+                    voiceBtn.style.color = '';
+                    voiceBtn._audioEl = null;
+                  };
+                  voiceBtn.classList.add('playing');
+                  voiceBtn.style.color = '#4cd964';
+                  await audio.play();
+                  return;
+                }
+                voiceBtn.classList.add('playing');
+                voiceBtn.style.color = '#4cd964';
+                voiceBtn.style.cursor = 'wait';
+                try {
+                   const res = await fetch(`/api/${isGroupMode ? role : currentId}/tts`, {
+                     method: 'POST',
+                     headers: { 'Content-Type': 'application/json' },
+                     body: JSON.stringify({ text: ttsText })
+                   });
+                  if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.error || 'TTS request failed');
+                  }
+                  const blob = await res.blob();
+                  const audioUrl = URL.createObjectURL(blob);
+                  voiceBtn._cachedAudioUrl = audioUrl;
+                  const audio = new Audio(audioUrl);
+                  voiceBtn._audioEl = audio;
+                  audio.onended = function() {
+                    voiceBtn.classList.remove('playing');
+                    voiceBtn.style.color = '';
+                    voiceBtn._audioEl = null;
+                  };
+                  audio.onerror = function() {
+                    voiceBtn.classList.remove('playing');
+                    voiceBtn.style.color = '';
+                    voiceBtn._audioEl = null;
+                  };
+                  await audio.play();
+                  voiceBtn.style.cursor = '';
+                } catch (err) {
+                  console.error('TTS error:', err);
+                  voiceBtn.classList.remove('playing');
+                  voiceBtn.style.color = '';
+                  voiceBtn.style.cursor = '';
+                  alert('语音生成失败: ' + (err.message || '未知错误'));
+                }
+              };
+              controls.appendChild(voiceBtn);
+            })();
+          }
+          // 翻译按钮
+          let translateBtn = null;
+          const fullMessageText = (group.dataset.originalContent || group.dataset.resolvedFulltext || fullText || wrapper.dataset.fulltext || '').trim();
+          const contentWithoutMedia = fullMessageText
+            .replace(/\[表情\][\s\S]*?(?=\s*\/\s*|$)/g, '')
+            .replace(/\[图片\]\([^\)]+\)(\([^\)]*\))?/g, '')
+            .replace(/\[图片\]/g, '')
+            .replace(/\[表情\]/g, '')
+            .trim();
+          const hasTextContent = contentWithoutMedia.replace(/[\s\/]+/g, '') !== '';
+          if (aiLanguage && aiLanguage !== 'zh' && hasTextContent) {
+            translateBtn = document.createElement('button');
+            translateBtn.className = 'action-btn';
+            translateBtn.title = '翻译';
+            translateBtn.innerHTML = '<span style="font-size: 10px; font-weight: bold;">文</span>';
+            translateBtn.onclick = () => {
+              const dynamicId = parseInt(group.dataset.id, 10);
+              translateMessage(wrapper, Number.isNaN(dynamicId) ? id : dynamicId, group);
+            };
           }
           const timestampEl = document.createElement('div');
           timestampEl.classList.add('timestamp');
@@ -1940,6 +3616,7 @@
             }
           };
           controls.appendChild(timestampEl);
+          if (translateBtn) controls.appendChild(translateBtn);
           if (id) { controls.appendChild(editBtn); controls.appendChild(delBtn); }
           controls.appendChild(copyBtn);
           wrapper.appendChild(controls);
@@ -1947,22 +3624,22 @@
         st.appendChild(wrapper);
         return;
       }
-      
+
       if (stickerMatch || isImage) {
         let isSticker = !!stickerMatch;
         const pathOrName = isSticker ? stickerMatch[1].trim() : imagePath;
         const url = isSticker ? ('/api/stickers/file?path=' + encodeURIComponent(pathOrName)) : ('/api/user/image/' + encodeURIComponent(pathOrName));
-        
+
         bubble.classList.add('bubble-sticker');
         const img = document.createElement('img');
         img.className = 'sticker-msg-img';
         img.setAttribute('crossorigin', 'anonymous'); // 【修复】开启跨域，防止污染画布
-        
+
         if (!isSticker) {
             img.style.maxWidth = '200px';
             img.style.maxHeight = '200px';
         }
-        
+
         img.src = url;
         img.alt = isSticker ? (pathOrName.indexOf(':') >= 0 ? '表情' : pathOrName) : '用户图片';
         img.loading = 'lazy';
@@ -1980,7 +3657,7 @@
           var detailImg = document.getElementById('stickerDetailImg');
           var modal = document.getElementById('stickerDetailModal');
           var packLink = document.getElementById('stickerDetailPackLink');
-          
+
           if (!isSticker) {
               detailImg.src = url;
               packLink.style.display = 'none';
@@ -1989,7 +3666,7 @@
               modal.style.display = 'flex';
               return;
           }
-          
+
           var resolvedPath = pathOrName;
           var detailUrl = url;
           if (pathOrName.indexOf('official:') !== 0 && pathOrName.indexOf('user:') !== 0) {
@@ -2011,7 +3688,7 @@
           modal.classList.add('show');
           modal.style.display = 'flex';
         };
-        
+
         if (isSticker) {
             wrapper.dataset.stickerPath = pathOrName;
             if (pathOrName.indexOf('official:') !== 0 && pathOrName.indexOf('user:') !== 0) {
@@ -2023,7 +3700,7 @@
             // 图片：保存整段 [图片](地址)(描述) 供复制/编辑
             wrapper.dataset.fullSegment = text;
         }
-        
+
         wrapper.appendChild(bubble);
         if (attachControls && isLastInGroup) {
           wrapper.dataset.fulltext = fullText;
@@ -2192,25 +3869,305 @@
         st.appendChild(wrapper);
         return;
       }
+
+      // 【睡前心声】检测纯占位令牌
+      const thoughtsPlaceholderMatch = text && text.match(/^\[__THOUGHTS_BLOCK_(\d+)__\]$/);
+      if (thoughtsPlaceholderMatch) {
+        const blockIdx = parseInt(thoughtsPlaceholderMatch[1]);
+        let allBlocks = [];
+        try { allBlocks = JSON.parse(group.dataset.thoughtsBlocks || '[]'); } catch(e) {}
+        const blockInfo = allBlocks[blockIdx];
+        if (blockInfo && blockInfo.content) {
+          const card = document.createElement('div');
+          card.className = 'thoughts-card';
+          card.onclick = function(idx) { return function(e) { e.stopPropagation(); openThoughtsModal(group, idx); }; }(blockIdx);
+
+          const titleEl = document.createElement('div');
+          titleEl.className = 'thoughts-card-title';
+          titleEl.textContent = '内心独白';
+          card.appendChild(titleEl);
+
+          const previewEl = document.createElement('div');
+          previewEl.className = 'thoughts-card-preview';
+          previewEl.innerHTML = splitThoughtsParagraphs(blockInfo.content).join('<br>');
+          card.appendChild(previewEl);
+
+          const footerEl = document.createElement('div');
+          footerEl.className = 'thoughts-card-footer';
+          footerEl.textContent = '点击展开查看';
+          card.appendChild(footerEl);
+
+          bubble.appendChild(card);
+          bubble.classList.add('bubble-thoughts');
+        } else {
+          bubble.classList.add('bubble-empty');
+          bubble.innerHTML = '<span class="empty-placeholder">（内容已失效）</span>';
+        }
+        wrapper.appendChild(bubble);
+        if (attachControls && isLastInGroup) {
+          wrapper.dataset.fulltext = fullText;
+          const controls = document.createElement('div');
+          controls.classList.add('controls-container');
+          if (role === 'assistant' && !isGroupMode) {
+            const regenBtnThoughts = document.createElement('button');
+            regenBtnThoughts.classList.add('regen-btn');
+            regenBtnThoughts.title = '重新生成 (删除此条并重试)';
+            regenBtnThoughts.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>';
+            regenBtnThoughts.onclick = function() { doRegenerate(wrapper); };
+            controls.appendChild(regenBtnThoughts);
+          }
+          let translateBtnThoughts = null;
+          if (aiLanguage && aiLanguage !== 'zh' && blockInfo && blockInfo.content) {
+            const stripped = blockInfo.content.replace(/\[.*?\]/g, '').replace(/\/+/g, '').replace(/\n+/g, '').replace(/<[^>]+>/g, '').trim();
+            if (stripped) {
+              translateBtnThoughts = document.createElement('button');
+              translateBtnThoughts.className = 'action-btn';
+              translateBtnThoughts.title = '翻译';
+              translateBtnThoughts.innerHTML = '<span style="font-size:10px;font-weight:bold;">文</span>';
+              translateBtnThoughts.onclick = function() {
+                var dynId = parseInt(group.dataset.id, 10);
+                translateMessage(wrapper, Number.isNaN(dynId) ? id : dynId, group);
+              };
+            }
+          }
+          const timestampEl = document.createElement('div');
+          timestampEl.classList.add('timestamp');
+          timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const copyBtn = document.createElement('button');
+          copyBtn.className = 'action-btn';
+          copyBtn.innerHTML = '<img src="' + copyIconPath + '" style="width:14px;height:14px;opacity:0.6;">';
+          copyBtn.onclick = function() {
+            var textToCopy = group.dataset.originalContent || group.dataset.resolvedFulltext || fullText;
+            textToCopy = stripRubyTags(textToCopy);
+            if (navigator.clipboard && window.isSecureContext) {
+              navigator.clipboard.writeText(textToCopy).then(function() { showCopySuccess(copyBtn, copyIconPath); }).catch(function() { fallbackCopyTextToClipboard(textToCopy, copyBtn, copyIconPath); });
+            } else {
+              fallbackCopyTextToClipboard(textToCopy, copyBtn, copyIconPath);
+            }
+          };
+          controls.appendChild(timestampEl);
+          if (id) {
+            const editBtn = document.createElement('button');
+            editBtn.className = 'action-btn';
+            editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+            editBtn.onclick = function() { openEditModal(id, fullText, group); };
+            const delBtn = document.createElement('button');
+            delBtn.className = 'action-btn';
+            delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+            delBtn.onclick = function() { deleteMessage(id, group); };
+            controls.appendChild(editBtn);
+            controls.appendChild(delBtn);
+          }
+          if (translateBtnThoughts) controls.appendChild(translateBtnThoughts);
+          controls.appendChild(copyBtn);
+          wrapper.appendChild(controls);
+        }
+        st.appendChild(wrapper);
+        return;
+      }
+
+      // 【聊天记录】检测纯占位令牌
+      const chatlogPlaceholderMatch = text && text.match(/^\[__CHATLOG_BLOCK_(\d+)__\]$/);
+      if (chatlogPlaceholderMatch) {
+        const blockIdx = parseInt(chatlogPlaceholderMatch[1]);
+        let allBlocks = [];
+        try { allBlocks = JSON.parse(group.dataset.chatlogBlocks || '[]'); } catch(e) {}
+        const blockInfo = allBlocks[blockIdx];
+        if (blockInfo && blockInfo.logs && blockInfo.logs.length > 0) {
+          const card = document.createElement('div');
+          card.className = 'chatlog-card';
+          card.onclick = function(idx) { return function(e) { e.stopPropagation(); openChatlogModal(group, idx); }; }(blockIdx);
+
+          const titleEl = document.createElement('div');
+          titleEl.className = 'chatlog-card-title';
+          titleEl.textContent = buildChatlogTitle(blockInfo.sourceId);
+          card.appendChild(titleEl);
+
+          const previewEl = document.createElement('div');
+          previewEl.className = 'chatlog-card-preview';
+          const previewLines = [];
+          const maxPreview = Math.min(3, blockInfo.logs.length);
+          for (let i = 0; i < maxPreview; i++) {
+            const log = blockInfo.logs[i];
+            const resolved = (log.sender === 'assistant') ? blockInfo.sourceId : log.sender;
+            const name = resolveDisplayName(resolved);
+            const line = (log.content || '').replace(/\//g, ' ');
+            previewLines.push(name + '：' + line);
+          }
+          previewEl.textContent = previewLines.join('\n');
+          card.appendChild(previewEl);
+
+          const footerEl = document.createElement('div');
+          footerEl.className = 'chatlog-card-footer';
+          footerEl.textContent = '聊天记录';
+          card.appendChild(footerEl);
+
+          bubble.appendChild(card);
+          bubble.classList.add('bubble-chatlog');
+        } else {
+          bubble.classList.add('bubble-empty');
+          bubble.innerHTML = '<span class="empty-placeholder">（聊天记录已失效）</span>';
+        }
+        wrapper.appendChild(bubble);
+        if (attachControls && isLastInGroup) {
+          wrapper.dataset.fulltext = fullText;
+          const controls = document.createElement('div');
+          controls.classList.add('controls-container');
+          const timestampEl = document.createElement('div');
+          timestampEl.classList.add('timestamp');
+          timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const copyBtn = document.createElement('button');
+          copyBtn.className = 'action-btn';
+          copyBtn.innerHTML = '<img src="' + copyIconPath + '" style="width:14px;height:14px;opacity:0.6;">';
+          copyBtn.onclick = function() {
+            var textToCopy = group.dataset.originalContent || group.dataset.resolvedFulltext || fullText;
+            textToCopy = stripRubyTags(textToCopy);
+            if (navigator.clipboard && window.isSecureContext) {
+              navigator.clipboard.writeText(textToCopy).then(function() { showCopySuccess(copyBtn, copyIconPath); }).catch(function() { fallbackCopyTextToClipboard(textToCopy, copyBtn, copyIconPath); });
+            } else {
+              fallbackCopyTextToClipboard(textToCopy, copyBtn, copyIconPath);
+            }
+          };
+          controls.appendChild(timestampEl);
+          if (id) {
+            const editBtn = document.createElement('button');
+            editBtn.className = 'action-btn';
+            editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+            editBtn.onclick = function() { openEditModal(id, fullText, group); };
+            const delBtn = document.createElement('button');
+            delBtn.className = 'action-btn';
+            delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+            delBtn.onclick = function() { deleteMessage(id, group); };
+            controls.appendChild(editBtn);
+            controls.appendChild(delBtn);
+          }
+          controls.appendChild(copyBtn);
+          wrapper.appendChild(controls);
+        }
+        st.appendChild(wrapper);
+        return;
+      }
+
       if (!text || text.trim() === '') {
         bubble.classList.add('bubble-empty');
         bubble.innerHTML = '<span class="empty-placeholder">（空消息）</span>';
       } else {
         // Identify URLs and linkify them, plus add an agent button
         const urlRegex = /(https?:\/\/[^\s]+)/g;
-        let html = text.replace(/\n/g, "<br>");
-        
+        let html = text;
+
+        // 【必须最先执行】提取 [HTML]...[/HTML] 交互块：取第一个 [HTML] 开头 + 最后一个 [/HTML] 结尾
+        const htmlBlocks = [];
+        var _startIdx = html.indexOf('[HTML]');
+        var _endIdx = html.lastIndexOf('[/HTML]');
+        if (_startIdx !== -1 && _endIdx !== -1 && _endIdx > _startIdx) {
+          var _before = html.substring(0, _startIdx);
+          var _inner = html.substring(_startIdx + 6, _endIdx);
+          var _after  = html.substring(_endIdx + 7);
+          var blockId = 'html_block_' + ((window._htmlBlockId = (window._htmlBlockId || 0) + 1));
+          htmlBlocks.push({ id: blockId, innerHtml: _inner });
+          html = _before + '<div id="' + blockId + '" class="html-block-container"></div>' + _after;
+        }
+
+        html = html.replace(/\n/g, "<br>");
+
         // 【新增】处理角色指令相关展示 (用斜体提示)
         html = html.replace(/\[CLICK:(.*?)\]/g, "<i>点击了 '$1'</i>");
         html = html.replace(/\[TYPE:(.*?)\|(.*?)\]/g, "<i>在 '$1' 输入了 '$2'</i>");
         html = html.replace(/\[GOTO:(.*?)\]/g, "<i>正在前往 '$1'</i>");
         html = html.replace(/\[BACK\]/g, "<i>执行了后退操作</i>");
         html = html.replace(/\[FINISH\]/g, "<i>操作已完成</i>");
+        html = html.replace(/\[ASK:(.*?)\]/g, "<i class='agent-ask'>🤔 向你提问：$1</i>");
+        html = html.replace(/\[WAIT\]/g, "<i class='agent-wait'>⏸️ 操作已暂停</i>");
+        html = html.replace(/\[STOP\]/g, "<i class='agent-stop'>🛑 Agent 已停止</i>");
 
         html = html.replace(urlRegex, (url) => {
           return `<a href="${url}" target="_blank" class="chat-link">${url}</a> <button class="agent-btn" onclick="triggerAgent('${url}')" style="background:none; border:1px solid #ddd; border-radius:4px; padding:0 4px; cursor:pointer;" title="让TA去看看">🤖</button>`;
         });
+
+        // 【论坛体】剥离混在普通文本中的论坛占位令牌
+        var forumPlaceholdersInText = [];
+        if (html.indexOf('[__FORUM_BLOCK_') !== -1) {
+          html = html.replace(/\[__FORUM_BLOCK_(\d+)__\]/g, function(m, idx) {
+            forumPlaceholdersInText.push(parseInt(idx));
+            return '';
+          });
+        }
+        // 【聊天记录】剥离混在普通文本中的聊天记录占位令牌
+        var chatlogPlaceholdersInText = [];
+        if (html.indexOf('[__CHATLOG_BLOCK_') !== -1) {
+          html = html.replace(/\[__CHATLOG_BLOCK_(\d+)__\]/g, function(m, idx) {
+            chatlogPlaceholdersInText.push(parseInt(idx));
+            return '';
+          });
+        }
+        // 【睡前心声】剥离混在普通文本中的内心独白占位令牌
+        var thoughtsPlaceholdersInText = [];
+        if (html.indexOf('[__THOUGHTS_BLOCK_') !== -1) {
+          html = html.replace(/\[__THOUGHTS_BLOCK_(\d+)__\]/g, function(m, idx) {
+            thoughtsPlaceholdersInText.push(parseInt(idx));
+            return '';
+          });
+        }
         bubble.innerHTML = html;
+
+        if (htmlBlocks.length > 0) {
+          htmlBlocks.forEach(block => {
+            const container = bubble.querySelector('#' + block.id);
+            if (container) {
+              var result = createHtmlBlock(block.innerHtml);
+              container.appendChild(result.wrapper);
+            }
+          });
+        }
+
+        // 【论坛体】在普通文本气泡底部追加论坛查看按钮
+        if (forumPlaceholdersInText.length > 0) {
+          var allFBlocks = [];
+          try { allFBlocks = JSON.parse(group.dataset.forumBlocks || '[]'); } catch(e) {}
+          forumPlaceholdersInText.forEach(function(fIdx) {
+            var fInfo = allFBlocks[fIdx];
+            if (fInfo) {
+              var fBtn = document.createElement('button');
+              fBtn.className = 'forum-trigger-btn';
+              fBtn.textContent = '查看帖子：' + (fInfo.title || '');
+              fBtn.onclick = function(idx) { return function(e) { e.stopPropagation(); openForumModal(group, idx); }; }(fIdx);
+              bubble.appendChild(fBtn);
+            }
+          });
+        }
+        // 【聊天记录】在普通文本气泡底部追加聊天记录查看按钮
+        if (chatlogPlaceholdersInText.length > 0) {
+          var allCBlocks = [];
+          try { allCBlocks = JSON.parse(group.dataset.chatlogBlocks || '[]'); } catch(e) {}
+          chatlogPlaceholdersInText.forEach(function(cIdx) {
+            var cInfo = allCBlocks[cIdx];
+            if (cInfo) {
+              var cBtn = document.createElement('button');
+              cBtn.className = 'forum-trigger-btn';
+              cBtn.style.background = 'linear-gradient(135deg, #4A90D9, #357ABD)';
+              cBtn.textContent = '查看聊天记录：' + (buildChatlogTitle(cInfo.sourceId) || '');
+              cBtn.onclick = function(idx) { return function(e) { e.stopPropagation(); openChatlogModal(group, idx); }; }(cIdx);
+              bubble.appendChild(cBtn);
+            }
+          });
+        }
+        // 【睡前心声】在普通文本气泡底部追加内心独白查看按钮
+        if (thoughtsPlaceholdersInText.length > 0) {
+          var allTBlocks = [];
+          try { allTBlocks = JSON.parse(group.dataset.thoughtsBlocks || '[]'); } catch(e) {}
+          thoughtsPlaceholdersInText.forEach(function(tIdx) {
+            var tInfo = allTBlocks[tIdx];
+            if (tInfo) {
+              var tBtn = document.createElement('button');
+              tBtn.className = 'forum-trigger-btn';
+              tBtn.style.background = 'linear-gradient(135deg, #E9CE6B, #D9B84A)';
+              tBtn.textContent = '查看内心独白';
+              tBtn.onclick = function(idx) { return function(e) { e.stopPropagation(); openThoughtsModal(group, idx); }; }(tIdx);
+              bubble.appendChild(tBtn);
+            }
+          });
+        }
       }
       wrapper.appendChild(bubble);
       if (attachControls && isLastInGroup) {
@@ -2225,7 +4182,7 @@
           regenBtn.onclick = () => doRegenerate(wrapper);
           controls.appendChild(regenBtn);
         }
-        
+
         // 【语音播放按钮】
         if (isAssistant) {
           (function() {
@@ -2448,7 +4405,7 @@
           contentRowIdx++;
         }
       }
-      
+
       // 【新增】渲染巡航行 (对于带有撤回的消息组)
       if (cruises && cruises.length > 0) {
         cruises.forEach(c => {
@@ -2458,12 +4415,12 @@
           let displayHost = '';
           try { displayHost = new URL(c.url).hostname; } catch(e) { displayHost = '网页'; }
           cruiseRow.innerHTML = `<span>${charName} 正在阅读网页</span><span class="cruise-url">${displayHost}</span>`;
-          
+
           const cruiseContent = document.createElement('div');
           cruiseContent.className = 'cruise-content';
           cruiseContent.textContent = c.content;
           cruiseRow.appendChild(cruiseContent);
-          
+
           cruiseRow.onclick = (e) => {
             e.stopPropagation();
             cruiseRow.classList.toggle('expanded');
@@ -2555,7 +4512,32 @@
       // 如果是初始加载(或者强制刷新)，不带 before_id，后端默认返最新
 
       const res = await fetch(url);
-      const data = await res.json();
+      const responseText = await res.text();
+      if (!res.ok) {
+        const error = new Error('历史接口请求失败：HTTP ' + res.status);
+        showChatDiagnostic({
+          phase: 'history_http',
+          requestUrl: url,
+          status: res.status,
+          contentType: res.headers.get('content-type') || '',
+          error: formatDiagnosticError(error)
+        });
+        throw error;
+      }
+
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseError) {
+        showChatDiagnostic({
+          phase: 'history_json',
+          requestUrl: url,
+          status: res.status,
+          responseLength: responseText.length,
+          error: formatDiagnosticError(parseError)
+        });
+        throw parseError;
+      }
 
       if (data.messages && data.messages.length > 0) {
         const oldScrollHeight = chatContainer.scrollHeight;
@@ -2563,7 +4545,18 @@
 
         // 渲染消息 (prepend 插到前面)
         for (const msg of data.messages.reverse()) {
-          renderMessageGroup(msg, 'prepend');
+          try {
+            renderMessageGroup(msg, 'prepend');
+          } catch (renderError) {
+            showChatDiagnostic({
+              phase: 'message_render',
+              messageId: msg && msg.id,
+              role: msg && msg.role,
+              timestamp: msg && msg.timestamp,
+              error: formatDiagnosticError(renderError)
+            });
+            throw renderError;
+          }
         }
 
         // 刷新日期分隔符
@@ -2606,8 +4599,13 @@
         });
       }
       showCachedTranslations();
-    } catch (e) { console.error("Failed to load history:", e); }
-    finally { isLoading = false; loadMoreBtn.textContent = '加載更早的記錄'; }
+    } catch (e) {
+      console.error("Failed to load history:", e);
+      showChatDiagnostic({
+        phase: 'load_history',
+        error: formatDiagnosticError(e)
+      });
+    } finally { isLoading = false; loadMoreBtn.textContent = '加載更早的記錄'; }
   }
 
   // --- 向下滚动加载更多下方消息 (与上划逻辑对称) ---
@@ -2628,11 +4626,14 @@
         data.messages.forEach(msg => {
           const exists = chatContainer.querySelector(`.message-group[data-id="${msg.id}"]`);
           if (!exists) {
-            checkAndAppendDateSeparator(new Date(msg.timestamp));
+            checkAndAppendDateSeparator(msg.timestamp);
             renderMessageGroup(msg, 'append');
           }
         });
         showCachedTranslations();
+        if (pendingSentTranslation) {
+          _applyPendingTranslation();
+        }
       }
     } catch(e) { console.warn("Scroll-down load failed:", e); }
     finally { isLoading = false; }
@@ -2640,12 +4641,14 @@
 
   // --- 键盘弹起优化 ---
   // 当窗口大小改变（通常是键盘弹起）时，强制滚到底部
-  window.visualViewport.addEventListener('resize', () => {
-    // 稍微延时一下，等键盘完全弹出来
-    setTimeout(() => {
-      chatContainer.scrollTop = chatContainer.scrollHeight;
-    }, 100);
-  });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => {
+      // 稍微延时一下，等键盘完全弹出来
+      setTimeout(() => {
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      }, 100);
+    });
+  }
 
   // 输入框聚焦时也触发一次
   input.addEventListener('focus', () => {
@@ -2675,15 +4678,17 @@
       btn.textContent = '拍一拍…';
       const userMsgTime = new Date();
       checkAndAppendDateSeparator(userMsgTime);
-      
+
       try {
-        const res = await fetchWithTimeout(`${getApiPrefix()}/chat`, {
+        const endpoint = isGroupMode ? `/api/group/${encodeURIComponent(currentId)}/chat` : `/api/${encodeURIComponent(charId)}/chat_v2`;
+        const res = await fetchWithTimeout(endpoint, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({message: tickleMsg})
         });
         const data = await res.json();
         if (data.affinity_delta) showAffinityToast(data.affinity_delta);
+        if (data.circuit_breaker) { showCbModal(data.circuit_breaker); return; }
         if (data.error === 'consecutive_tickle') {
           alert(data.message || '不可连续拍一拍同一人，请稍后再试');
           return;
@@ -2692,7 +4697,7 @@
           alert(data.message || data.error);
           return;
         }
-        
+
         if (data.memory_sync_warning) showMemorySyncWarning(data.memory_sync_warning);
       } catch (e) {
         alert('发送失败');
@@ -2707,7 +4712,53 @@
     async function sendMessage() {
         let originalText = input.value.trim();
         if (!originalText) return;
-        
+
+        // 【Agent】检测 [STOP] 指令 —— 拦截并停止 agent
+        if (/\[STOP\]/i.test(originalText)) {
+            input.value = '';
+            btn.disabled = true; btn.textContent = "停止中…";
+            try {
+                await fetch('/api/agent/stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: currentUserId })
+                });
+                renderSystemMessage('🛑 已发送停止指令给 Agent');
+                agentIsRunning = false;
+                agentIsWaiting = false;
+                if (agentPollTimer) { clearInterval(agentPollTimer); agentPollTimer = null; }
+                updateAgentUI();
+            } catch (e) { console.error('[Agent] STOP failed:', e); }
+            btn.disabled = false; btn.textContent = '发送';
+            return;
+        }
+
+        // 【Agent】如果 agent 正在等待用户回复 → 把回复转给 agent（无论是否含网页指令），并跳过普通聊天
+        if (agentIsWaiting) {
+            input.value = ''; input.style.height = 'auto';
+            btn.disabled = true; btn.textContent = "发送中…";
+            try {
+                // 写入 IPC + 存用户消息到 DB，唤醒等待中的 Agent 继续操作
+                await fetch('/api/agent/reply', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: currentUserId, char_id: charId, message: originalText })
+                });
+                // 若用户消息本身含网页指令，额外下发给 Agent 立即执行
+                if (hasWebCommands(originalText)) {
+                    const tags = (originalText.match(/\[(?:CLICK|TYPE|GOTO):.+?\]|\[BACK\]|\[FINISH\]/gi) || []).map(t => t.toUpperCase());
+                    await fetch('/api/agent/web_action', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_id: currentUserId, tags, source: 'user' })
+                    });
+                }
+            } catch (e) { console.error('[Agent] reply failed:', e); }
+            btn.disabled = false; btn.textContent = '发送';
+            await pollNewMessages();
+            return;
+        }
+
         // 按钮变灰，提示正在抽取表情
         btn.disabled = true; btn.textContent = "处理中…";
 
@@ -2732,17 +4783,33 @@
 
       try {
           // 【修改】使用 getApiPrefix() + 120 秒超时
-          const res = await fetchWithTimeout(`${getApiPrefix()}/chat`, {
+          const endpoint = isGroupMode ? `/api/group/${encodeURIComponent(currentId)}/chat` : `/api/${encodeURIComponent(charId)}/chat_v2`;
+          const res = await fetchWithTimeout(endpoint, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({message: originalText})
           });
           const data = await res.json();
 
+          if (data.circuit_breaker) { showCbModal(data.circuit_breaker); return; }
+
           // 好感度变动提示
           if (data.affinity_delta) showAffinityToast(data.affinity_delta);
 
           if (data.memory_sync_warning) showMemorySyncWarning(data.memory_sync_warning);
+
+          // 【Agent】如果 agent 正在等待，检查 AI 回复是否含网页指令 → 通知 agent
+          if (agentIsWaiting) {
+            const repliesContent = data.replies ? data.replies.map(r => r.content).join(' ') : (data.reply || '');
+            if (hasWebCommands(repliesContent)) {
+              const tags = (repliesContent.match(/\[(?:CLICK|TYPE|GOTO):.+?\]|\[BACK\]|\[FINISH\]/gi) || []).map(t => t.toUpperCase());
+              fetch('/api/agent/web_action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: currentUserId, tags, source: 'assistant' })
+              }).catch(e => console.error('[Agent] web_action failed:', e));
+            }
+          }
         } catch (e) { console.error(e);
           renderMessageGroup({
             content: '[连接失败，请稍后重试]',
@@ -2762,6 +4829,9 @@
       chatContainer.innerHTML = '';
 
       await initUI();
+
+      // 【Agent】页面加载时检查 agent 状态（处理刷新后状态丢失）
+      startAgentPolling();
 
       const jumpId = sessionStorage.getItem('jump_to_msg_id');
 
@@ -2802,7 +4872,7 @@
         // === 普通模式 ===
         await loadHistory('initial');
       }
-      
+
       startPolling(); // 启动新消息轮询
 
       // 从表情包详情页跳回并带 sticker 参数时，自动发送该表情
@@ -2845,11 +4915,13 @@
     async function pollNewMessages() {
       // 如果正在加载（滚动加载等），跳过本次轮询
       if (isLoading) return;
-      
+
       // 获取当前页面中最新的一条消息 ID 作为 after_id
-      const lastMsg = chatContainer.querySelector('.message-group:last-child');
+      // 用最后一个 .message-group（忽略尾部的系统提示等非消息元素），避免轮询被打断
+      const groups = chatContainer.querySelectorAll('.message-group');
+      const lastMsg = groups[groups.length - 1];
       let afterId = lastMsg ? lastMsg.dataset.id : null;
-      
+
       // 如果还没有消息 ID，或者 ID 是临时生成的（Date.now()），则跳过
       if (!afterId || afterId > 1600000000000) return;
 
@@ -2865,14 +4937,15 @@
             data.messages.forEach(msg => {
               const exists = chatContainer.querySelector(`.message-group[data-id="${msg.id}"]`);
               if (!exists) {
-                checkAndAppendDateSeparator(new Date(msg.timestamp));
+                // 不在轮询渲染时追加日期分隔符：跨天分隔符已由发送时（checkAndAppendDateSeparator）处理，
+                // 避免气泡组带着第二个时间戳出现、删除后残留孤立分隔符
                 renderMessageGroup(msg, 'append');
               }
             });
-            if (pendingSentTranslation) {
-              _applyPendingTranslation();
-            }
             chatContainer.scrollTop = chatContainer.scrollHeight;
+          }
+          if (pendingSentTranslation) {
+            _applyPendingTranslation();
           }
         }
       } catch (err) {
@@ -2955,7 +5028,7 @@
           transBtn.disabled = false;
         }
       });
-      
+
       // 支持回车翻译 (Ctrl+Enter或Enter视需求，这里用Enter，Shift+Enter换行)
       transInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -3063,10 +5136,10 @@
     input.focus();
 
     var fullContent = (content != null ? String(content) : '').trim();
-    
+
     // 清理可能存在的注音标签
     fullContent = stripRubyTags(fullContent);
-    
+
     var contentToShow = fullContent;
       try {
         var groupEl = groupElement;
@@ -3159,6 +5232,126 @@
       }
     } catch(e) { alert("删除失败 (网络错误)"); }
   }
+
+  // --- 【新增】多选批量删除 ---
+  async function deleteSelectedMessages() {
+    const selectedEls = Array.from(document.querySelectorAll('.message-group.selected'));
+    if (selectedEls.length === 0) return alert("请先选择消息！");
+
+    if (!confirm(`确定删除选中的 ${selectedEls.length} 条消息吗？`)) return;
+
+    let failCount = 0;
+    for (const group of selectedEls) {
+      const id = group.dataset.id;
+      if (!id) { failCount++; continue; }
+      try {
+        const res = await fetch(`${getApiPrefix()}/messages/${id}`, { method: 'DELETE' });
+        if (res.ok) {
+          const prevSibling = group.previousElementSibling;
+          group.remove();
+          // 清理孤儿日期分隔符
+          if (prevSibling && prevSibling.classList.contains('date-separator')) {
+            const nextSibling = prevSibling.nextElementSibling;
+            if (!nextSibling || nextSibling.classList.contains('date-separator')) {
+              prevSibling.remove();
+            }
+          }
+        } else {
+          failCount++;
+        }
+      } catch(e) {
+        failCount++;
+      }
+    }
+
+    toggleSelectionMode(); // 退出多选模式
+    if (failCount > 0) alert(`部分消息删除失败（${failCount} 条）`);
+  }
+
+    // --- 【论坛体选择器】复用当前聊天页选消息载入论坛 ---
+    (function initForumPicker() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const returnTo = urlParams.get('forumPicker');
+      if (returnTo !== '1') return;
+
+      document.body.classList.add('forum-picker');
+
+      // 获取联系人名称：优先用 URL 传入的 forumName
+      let contactName = urlParams.get('forumName');
+      if (contactName) {
+        contactName = decodeURIComponent(contactName);
+      } else {
+        contactName = '联系人';
+        if (typeof charConfig !== 'undefined' && charConfig.name && charConfig.name !== 'Assistant') {
+          contactName = charConfig.name;
+        }
+        if (window.location.pathname.startsWith('/chat/group/')) {
+          const gid = window.location.pathname.split('/').pop();
+          if (gid && contactsCache[gid]) {
+            contactName = contactsCache[gid].name || contactsCache[gid].remark || gid;
+          }
+        }
+      }
+
+      window._forumPickerContactName = contactName;
+      window._forumPickerContactId = typeof charId !== 'undefined' ? charId : (window.location.pathname.split('/').pop());
+      window._forumPickerContactType = window.location.pathname.startsWith('/chat/group/') ? 'group' : 'chat';
+
+      // 等 DOM 就绪后自动进入选择模式
+      function waitForSelectionMode() {
+        if (typeof toggleSelectionMode === 'function') {
+          if (!isSelectionMode) toggleSelectionMode();
+        } else {
+          setTimeout(waitForSelectionMode, 100);
+        }
+      }
+      // 等 contacts 缓存加载后再进模式 (群聊需要名字)
+      setTimeout(waitForSelectionMode, 500);
+    })();
+
+    function forumPickerCancel() {
+      window.location.href = '/forum';
+    }
+
+    function forumPickerReturn() {
+      window.location.href = '/forum';
+    }
+
+    function forumPickerConfirm() {
+      const selectedEls = Array.from(document.querySelectorAll('.message-group.selected'));
+      if (selectedEls.length === 0) return alert('请先选择消息！');
+
+      selectedEls.sort((a, b) => {
+        return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
+      });
+
+      const messages = [];
+      selectedEls.forEach(group => {
+        const role = group.dataset.role || '';
+        const contentEl = group.querySelector('.bubble-text, .bubble, [class*="content"]');
+        const content = contentEl ? contentEl.textContent.trim() : '';
+        const timeEl = group.querySelector('.time, [class*="time"]');
+        const timestamp = timeEl ? timeEl.textContent.trim() : '';
+        if (content) {
+          let roleKey = 'assistant';
+          if (role === 'user' || group.classList.contains('user')) roleKey = 'user';
+          else if (role && role !== 'assistant') roleKey = role;
+          messages.push({ role: roleKey, content, timestamp });
+        }
+      });
+
+      if (messages.length === 0) return alert('无法解析选中消息，请重试');
+
+      const segmentData = {
+        contact_name: window._forumPickerContactName || '联系人',
+        contact_id: window._forumPickerContactId || '',
+        contact_type: window._forumPickerContactType || 'chat',
+        messages: messages
+      };
+
+      sessionStorage.setItem('forumPickerSegment', JSON.stringify(segmentData));
+      window.location.href = '/forum';
+    }
 
     // --- 【新增】多选生成 & 范围选择功能 ---
     let isSelectionMode = false;
@@ -3359,10 +5552,10 @@
 
       // --- 【修改】显示弹窗，而不是直接复制 ---
       exportResultInput.value = resultText.trim();
-      
+
       // 【新增】同时生成图片版的HTML
       generateExportImageContent();
-      
+
       exportResultModal.style.display = 'flex';
     }
 
@@ -3372,7 +5565,7 @@
       const imageContainer = document.getElementById('exportImageContainer');
       const textBtn = document.getElementById('tabTextBtn');
       const imageBtn = document.getElementById('tabImageBtn');
-      
+
       if (tab === 'text') {
         textContainer.style.display = 'flex';
         imageContainer.style.display = 'none';
@@ -3382,73 +5575,203 @@
         imageBtn.style.borderBottomColor = 'transparent';
       } else {
         textContainer.style.display = 'none';
-        
+
         imageContainer.style.visibility = 'hidden';
         imageContainer.style.display = 'flex';
-        
+
         textBtn.style.color = '#999';
         textBtn.style.borderBottomColor = 'transparent';
         imageBtn.style.color = '#444';
         imageBtn.style.borderBottomColor = '#4cd964';
-        
+
         regenerateExportImage();
         setTimeout(() => {
            imageContainer.style.visibility = 'visible';
         }, 120);
       }
     }
-    
+
+    // 【转发】打开目标选择弹窗
+    async function forwardSelectedMessages() {
+      const selectedEls = Array.from(document.querySelectorAll('.message-group.selected'));
+      if (selectedEls.length === 0) return alert('请先选择消息！');
+
+      await ensureContactsCache();
+
+      const listEl = document.getElementById('forwardModalList');
+      const contactIds = Object.keys(contactsCache);
+      if (contactIds.length === 0) {
+        listEl.innerHTML = '<div class="forum-empty-hint">暂无可转发的聊天</div>';
+      } else {
+        // 按 type 分组：chat > group
+        const sorted = contactIds.sort(function(a, b) {
+          if (contactsCache[a].type === contactsCache[b].type) return 0;
+          return contactsCache[a].type === 'chat' ? -1 : 1;
+        });
+        let html = '';
+        sorted.forEach(function(id) {
+          const c = contactsCache[id];
+          const name = c.remark || c.name || id;
+          const typeLabel = c.type === 'group' ? '群聊' : '单聊';
+          const avatarUrl = window.getCosUrl ? window.getCosUrl(c.avatar || '/static/default_avatar.png') : (c.avatar || '/static/default_avatar.png');
+          html += '<label class="forward-contact-item">' +
+            '<input type="checkbox" value="' + id + '" onchange="updateForwardCount()">' +
+            '<img class="forward-contact-avatar" src="' + avatarUrl + '" onerror="this.src=\'/static/default_avatar.png\'">' +
+            '<div class="forward-contact-info">' +
+            '<div class="forward-contact-name">' + name + '</div>' +
+            '<div class="forward-contact-type">' + typeLabel + '</div>' +
+            '</div>' +
+            '</label>';
+        });
+        listEl.innerHTML = html;
+      }
+
+      document.getElementById('forwardCount').textContent = '已选择 0 个聊天';
+      document.getElementById('forwardConfirmBtn').disabled = true;
+      document.getElementById('forwardModalOverlay').classList.add('show');
+    }
+
+    function updateForwardCount() {
+      const checked = document.querySelectorAll('#forwardModalList input[type="checkbox"]:checked');
+      document.getElementById('forwardCount').textContent = '已选择 ' + checked.length + ' 个聊天';
+      document.getElementById('forwardConfirmBtn').disabled = checked.length === 0;
+    }
+
+    function closeForwardModal() {
+      document.getElementById('forwardModalOverlay').classList.remove('show');
+    }
+
+    async function confirmForward() {
+      const checked = document.querySelectorAll('#forwardModalList input[type="checkbox"]:checked');
+      if (checked.length === 0) return;
+
+      const selectedEls = Array.from(document.querySelectorAll('.message-group.selected'));
+      selectedEls.sort(function(a, b) {
+        return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
+      });
+
+      // 判断当前来源类型和 ID（用于生成 CHATLOG 标签）
+      const sourceId = isGroupMode ? currentId : currentId;
+      let chatlogText = '[CHATLOG:' + sourceId + ']\n';
+
+      // 按日期分组并构建 [DATE] / [LOG]
+      let lastDate = '';
+      selectedEls.forEach(function(group) {
+        const sender = group.dataset.sender || 'user';
+        const ts = group.dataset.timestamp;
+        if (!ts) return;
+        const dateObj = new Date(ts);
+        const dateStr = dateObj.getFullYear() + '-' +
+          String(dateObj.getMonth() + 1).padStart(2, '0') + '-' +
+          String(dateObj.getDate()).padStart(2, '0');
+        const timeStr = String(dateObj.getHours()).padStart(2, '0') + ':' +
+          String(dateObj.getMinutes()).padStart(2, '0') + ':' +
+          String(dateObj.getSeconds()).padStart(2, '0');
+
+        if (dateStr !== lastDate) {
+          chatlogText += '[DATE:' + dateStr + ']\n';
+          lastDate = dateStr;
+        }
+
+        const content = (group.dataset.originalContent || group.dataset.resolvedFulltext || '').trim();
+        chatlogText += '[LOG:' + sender + '|' + timeStr + ']' + content + '[/LOG]\n';
+      });
+
+      chatlogText += '[/CHATLOG]';
+
+      // 发送到每个目标
+      const btn = document.getElementById('forwardConfirmBtn');
+      btn.disabled = true;
+      btn.textContent = '转发中...';
+
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const cb of checked) {
+        const targetId = cb.value;
+        const targetType = contactsCache[targetId] ? contactsCache[targetId].type : 'chat';
+        const endpoint = targetType === 'group'
+          ? '/api/group/' + encodeURIComponent(targetId) + '/chat'
+          : '/api/' + encodeURIComponent(targetId) + '/chat_v2';
+
+        try {
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: chatlogText })
+          });
+          if (res.ok) {
+            successCount++;
+          } else {
+            failCount++;
+          }
+        } catch(e) {
+          failCount++;
+        }
+      }
+
+      closeForwardModal();
+      toggleSelectionMode(); // 退出多选模式
+      document.getElementById('exportResultModal').style.display = 'none';
+
+      if (failCount === 0) {
+        alert('已成功转发给 ' + successCount + ' 个聊天');
+      } else {
+        alert('成功 ' + successCount + ' 个，失败 ' + failCount + ' 个');
+      }
+    }
+
     // 【新增】重新生成导出图片（用于复选框状态变化）
     function regenerateExportImage() {
       const hideCharName = document.getElementById('hideChatNameCheckbox').checked;
       generateExportImageContent(hideCharName);
     }
-    
+
     // 【新增】应用响应式缩放，使图片等比缩小适应预览框宽度，并修改外层容器高度
     function applyResponsiveScale() {
       const preview = document.getElementById('exportImagePreview');
       const wrapper = document.getElementById('exportImageWrapper');
       const content = document.getElementById('exportImageContent');
-      
+
       if (!preview || !wrapper || !content) return;
-      
+
       const containerStyle = window.getComputedStyle(preview);
       const paddingLeft = parseFloat(containerStyle.paddingLeft);
       const paddingRight = parseFloat(containerStyle.paddingRight);
       const availableWidth = preview.clientWidth - (paddingLeft + paddingRight);
-      
+
       const contentWidth = 430;
       let scale = availableWidth / contentWidth;
-      
+
       // Allow it to only shrink or grow correctly for the layout, but bound it decently.
       scale = Math.min(1, Math.max(0.3, scale));
-      
+
       // Explicitly center within wrapper with a left adjustment.
       content.style.transformOrigin = '0 0'; // ensure top-left origin
       content.style.transform = `scale(${scale})`;
-      
+
       const originalHeight = content.scrollHeight; // Use scrollHeight for robust content size
       if (originalHeight > 0) {
         wrapper.style.width = (contentWidth * scale) + 'px';
         wrapper.style.height = (originalHeight * scale) + 'px';
       }
     }
-    
+
     // 【新增】生成图片版本的HTML内容
     async function generateExportImageContent(hideCharName = false) {
       const selectedEls = Array.from(document.querySelectorAll('.message-group.selected'));
       if (selectedEls.length === 0) return;
-      
+
       selectedEls.sort((a, b) => {
         return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
       });
-      
+
       // 确定要显示的名字
       let displayName = currentConfig.remark || currentConfig.name || charConfig.name || '聊天';
       if (hideCharName) {
         displayName = '●●●●●';
       }
-      
+
       // 获取真实的header元素并克隆
       const headerEl = document.querySelector('.chat-header');
       let headerHtml = '';
@@ -3460,23 +5783,23 @@
           btn.disabled = true;
           btn.style.opacity = '0.5';
         });
-        
+
         // 确保 header 中的图片支持 CORS 并强刷缓存
         clonedHeader.querySelectorAll('img').forEach(img => {
             img.setAttribute('crossorigin', 'anonymous');
             if (img.src && !img.src.startsWith('data:')) {
                 const url = new URL(img.src, window.location.href);
                 // 使用更强的随机参数，确保每一次导出都是全新的请求，彻底避开旧缓存
-                url.searchParams.set('x-export-v', Date.now() + Math.random()); 
+                url.searchParams.set('x-export-v', Date.now() + Math.random());
                 img.src = url.toString();
             }
         });
-        
+
         const tempDiv = document.createElement('div');
         tempDiv.appendChild(clonedHeader);
         headerHtml = tempDiv.innerHTML;
       }
-      
+
       // 获取当前页面的背景设置
       const currentBg = window.getComputedStyle(document.body).backgroundImage;
       const currentBgColor = window.getComputedStyle(document.body).backgroundColor;
@@ -3484,22 +5807,22 @@
       // 生成聊天内容区域
       // 【关键】显式应用背景色和背景图到导出容器，并处理背景图跨域
       let messagesHtml = `<div style="background-color: ${currentBgColor}; background-image: ${currentBg}; background-size: cover; background-position: center; background-attachment: scroll; padding: 16px; flex: 1; position: relative;">`;
-      
+
       let lastDateStr = "";
       const weekDays = ['日', '月', '火', '水', '木', '金', '土'];
-      
+
       selectedEls.forEach((group) => {
         const ts = group.dataset.timestamp;
         if (!ts) return;
         const dateObj = new Date(ts);
         const dateStr = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
-        
+
         if (dateStr !== lastDateStr) {
           const weekDay = weekDays[dateObj.getDay()];
           messagesHtml += `<div style="text-align: center; color: #999; font-size: 12px; margin: 15px 0 10px 0;">${dateStr}（${weekDay}）</div>`;
           lastDateStr = dateStr;
         }
-        
+
         const clonedGroup = group.cloneNode(true);
         clonedGroup.classList.remove('selected');
         if (hideCharName) {
@@ -3508,13 +5831,13 @@
             av.src = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="#cccccc" rx="10"/></svg>');
           });
         }
-        
+
         // 确保消息中的所有图片支持 CORS 并刷新缓存
         clonedGroup.querySelectorAll('img').forEach(img => {
             img.setAttribute('crossorigin', 'anonymous');
             if (img.src && !img.src.startsWith('data:')) {
                 const url = new URL(img.src, window.location.href);
-                url.searchParams.set('x-export-v', Date.now() + Math.random()); 
+                url.searchParams.set('x-export-v', Date.now() + Math.random());
                 img.src = url.toString();
             }
         });
@@ -3523,9 +5846,9 @@
         tempDiv.appendChild(clonedGroup);
         messagesHtml += tempDiv.innerHTML;
       });
-      
+
       messagesHtml += '</div>';
-      
+
       // 获取真实的input-container并克隆
       const inputContainerEl = document.querySelector('.input-container');
       let footerHtml = '';
@@ -3538,24 +5861,24 @@
         tempDiv.appendChild(clonedFooter);
         footerHtml = `<div style="border-top: 1px solid var(--primary-lighter);">${tempDiv.innerHTML}</div>`;
       }
-      
+
       // 组合完整的布局
       let fullHtml = `<div id="export-capture-target" style="font-family: 'Segoe UI', 'PingFang SC', sans-serif; width: 430px; height: auto; display: flex; flex-direction: column; background: white;">
         ${headerHtml}
         ${messagesHtml}
         ${footerHtml}
       </div>`;
-      
+
       const imageContent = document.getElementById('exportImageContent');
       imageContent.innerHTML = fullHtml;
-      
+
       // 等待图片加载完成后计算高度并缩放，【新增】预将其转换为 Base64，彻底绝杀渲染时由于 COS 没有配置 CORS 导致的 Tainted 错误
       const images = Array.from(imageContent.querySelectorAll('img'));
       if (images.length > 0) {
         Promise.all(images.map(img => {
           return new Promise(resolve => {
             if (!img.src || img.src.startsWith('data:')) return resolve();
-            
+
             const tempImg = new Image();
             tempImg.crossOrigin = 'anonymous'; // 尝试跨域加载
             tempImg.onload = () => {
@@ -3592,7 +5915,7 @@
         setTimeout(applyResponsiveScale, 100);
       }
     }
-    
+
     // 监听窗口尺寸变化，更新预览缩放
     window.addEventListener('resize', () => {
       const modal = document.getElementById('exportResultModal');
@@ -3686,7 +6009,7 @@
       list.forEach(msg => {
         // 高亮关键词
         const highlightContent = msg.content.replace(new RegExp(kw, 'gi'), match => `<span style="color:#e91e63; font-weight:bold;">${match}</span>`);
-        const dateStr = new Date(msg.timestamp).toLocaleString();
+        const dateStr = parseChatTimestamp(msg.timestamp).toLocaleString();
         const name = msg.role === 'user' ? currentUserName : (isGroupMode ? (groupMembers[msg.role]?.remark || groupMembers[msg.role]?.name) : (currentConfig?.remark || currentConfig?.name)) || msg.role;
 
         html += `
@@ -3815,7 +6138,7 @@
           }
 
           closeAllPanels(); // 关闭更多面板
-          
+
           // 可以在这里加个 loading 提示
           const btn = document.getElementById('sendBtn');
           const originalBtnText = btn.innerText;
@@ -3825,14 +6148,14 @@
           try {
             const formData = new FormData();
             formData.append('file', file);
-            
+
             // 1. 上传图片并获取识图结果
             const uploadRes = await fetch('/api/vision/upload', {
               method: 'POST',
               body: formData
             });
             const uploadData = await uploadRes.json();
-            
+
             if (uploadData.error || uploadData.status !== 'success') {
               alert('图片上传失败：' + (uploadData.error || '未知错误'));
               btn.innerText = originalBtnText;
@@ -3846,8 +6169,8 @@
             const desc = (uploadData.description || '无').replace(/\)/g, '）'); // 避免描述里的 ) 破坏解析
             const messageContent = `[图片](${path})(${desc})`;
 
-            const endpoint = isGroupMode ? `/api/group/${encodeURIComponent(currentId)}/chat` : `/api/${encodeURIComponent(charId)}/chat`;
-            
+            const endpoint = isGroupMode ? `/api/group/${encodeURIComponent(currentId)}/chat` : `/api/${encodeURIComponent(charId)}/chat_v2`;
+
             // 3. 复用发送消息逻辑，发给当前聊天对象
             const r = await fetch(endpoint, {
               method: 'POST',
@@ -3859,7 +6182,8 @@
             const data = await r.json();
 
             if (data.affinity_delta) showAffinityToast(data.affinity_delta);
-            
+            if (data.circuit_breaker) { showCbModal(data.circuit_breaker); return; }
+
             if (data.error) {
               if (data.error === 'consecutive_tickle') {
                 alert(data.message || '操作频繁');
@@ -4350,14 +6674,17 @@
         const response = await fetch('/api/run_agent', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            url: url, 
+          body: JSON.stringify({
+            url: url,
             char_id: charId,
-            user_id: currentUserId 
+            user_id: currentUserId
           })
         });
         const data = await response.json();
         if (data.status) {
+          agentIsRunning = true;
+          updateAgentUI();
+          startAgentPolling();
           alert('Agent已启动！请查看终端或稍后查看聊天报告。');
         } else {
           alert('启动失败：' + (data.error || '未知错误'));
@@ -4367,6 +6694,69 @@
         alert('启动失败，请检查Agent API服务器（run_agent_api.py）是否正在运行。');
       }
     }
+  }
+
+  // --- 【Agent】停止函数（供 stopAgentBtn 按钮调用）---
+  function stopAgent() {
+    if (!agentIsRunning) return;
+    if (!confirm('确定要停止正在运行的 Agent 吗？')) return;
+    fetch('/api/agent/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: currentUserId })
+    }).then(() => {
+      renderSystemMessage('🛑 Agent 已停止');
+      agentIsRunning = false;
+      agentIsWaiting = false;
+      if (agentPollTimer) { clearInterval(agentPollTimer); agentPollTimer = null; }
+      updateAgentUI();
+    }).catch(e => console.error('[Agent] stop failed:', e));
+  }
+
+  // --- 【Agent】轮询状态 ---
+  async function checkAgentState() {
+    try {
+      const res = await fetch(`/api/agent/state?user_id=${currentUserId}`);
+      const state = await res.json();
+      agentIsRunning = state.running === true;
+      agentIsWaiting = state.status === 'waiting_for_user';
+      agentQuestion = state.question || '';
+      updateAgentUI();
+      if (!agentIsRunning) {
+        if (agentPollTimer) { clearInterval(agentPollTimer); agentPollTimer = null; }
+      }
+    } catch (e) {
+      // 状态文件可能不存在，忽略
+    }
+  }
+
+  function startAgentPolling() {
+    if (agentPollTimer) clearInterval(agentPollTimer);
+    agentPollTimer = setInterval(checkAgentState, 3000);
+    checkAgentState();
+  }
+
+  function updateAgentUI() {
+    const stopBtn = document.getElementById('stopAgentBtn');
+    if (stopBtn) {
+      stopBtn.style.display = agentIsRunning ? 'inline-block' : 'none';
+    }
+    const input = document.getElementById('messageInput');
+    if (input && agentIsRunning) {
+      input.placeholder = agentIsWaiting ? '回复 Agent 的提问…' : 'Agent 运行中，输入 [STOP] 可停止…';
+    } else if (input) {
+      input.placeholder = '输入消息…';
+    }
+  }
+
+  function renderSystemMessage(text) {
+    const st = document.getElementById('chatContainer');
+    const div = document.createElement('div');
+    div.className = 'system-message';
+    div.style.cssText = 'text-align:center; color:#999; font-size:12px; padding:8px 0;';
+    div.textContent = text;
+    st.appendChild(div);
+    st.scrollTop = st.scrollHeight;
   }
 
   // --- 【修正版】执行重新生成 (支持日期分隔符检测) ---
@@ -4388,6 +6778,7 @@
       const data = await res.json();
 
       if (data.affinity_delta) showAffinityToast(data.affinity_delta);
+      if (data.circuit_breaker) { showCbModal(data.circuit_breaker); return; }
 
       if (data.status === 'success') {
         // 1. 移除旧的整组消息
@@ -4551,7 +6942,7 @@
         }
     }
     const payload = { direction: `${fromLang}_to_zh` };
-    
+
     if (!Number.isNaN(msgId) && msgId > 0) {
       payload.message_id = msgId;
       if (isGroupMode) payload.group_id = currentId;
@@ -4643,7 +7034,7 @@
       }
     });
   }
-  
+
   // 复制图片按钮事件
   if (document.getElementById('copyImageBtn')) {
     document.getElementById('copyImageBtn').addEventListener('click', async () => {
@@ -4653,7 +7044,7 @@
           alert('图片生成库加载中，请稍候再试');
           return;
         }
-        
+
         const cloneContent = imageContent.cloneNode(true);
         cloneContent.style.transform = 'none';
         cloneContent.style.position = 'absolute';
@@ -4706,7 +7097,7 @@
       }
     });
   }
-  
+
   // 下载图片按钮事件
   if (document.getElementById('downloadImageBtn')) {
     document.getElementById('downloadImageBtn').addEventListener('click', async () => {
@@ -4716,7 +7107,7 @@
           alert('图片生成库加载中，请稍候再试');
           return;
         }
-        
+
         const cloneContent = imageContent.cloneNode(true);
         cloneContent.style.transform = 'none';
         cloneContent.style.position = 'absolute';
@@ -4743,14 +7134,14 @@
         });
 
         document.body.removeChild(cloneContent);
-        
+
         const link = document.createElement('a');
         link.href = canvas.toDataURL('image/png');
         link.download = `chat_export_${new Date().getTime()}.png`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        
+
         const originalText = document.getElementById('downloadImageBtn').textContent;
         document.getElementById('downloadImageBtn').textContent = "下载成功！";
         setTimeout(() => {
@@ -4761,6 +7152,70 @@
       }
     });
   }
+
+  // 【新增】创建交互式 HTML 块（iframe 沙箱隔离 ID/CSS/脚本）
+  function createHtmlBlock(htmlContent) {
+    var wrapper = document.createElement('div');
+    wrapper.classList.add('html-block-container');
+
+    var iframe = document.createElement('iframe');
+    iframe.classList.add('html-block-iframe');
+    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+    iframe.style.cssText = 'width:100%;border:none;overflow:hidden;display:block;min-height:100px;';
+
+    var autoResize = '\x3Cscript\x3E' +
+      'var __hbFull=!1,__hbFixed=[];' +
+      'function __hbSendH(why){' +
+        'var d=document.documentElement,b=document.body,' +
+        'h=Math.max(d.scrollHeight||0,d.offsetHeight||0,b.scrollHeight||0,b.offsetHeight||0);' +
+        'parent.postMessage({type:"hbResize",height:h,full:__hbFull,why:why||""},"*");' +
+      '}' +
+      'function __hbCheckFS(){' +
+        'var has=!1;' +
+        'for(var i=0;i<__hbFixed.length;i++){' +
+          'var s=getComputedStyle(__hbFixed[i]);' +
+          'if(s.position==="fixed"&&s.display!=="none"&&s.visibility!=="hidden"){has=!0;break;}' +
+        '}' +
+        'if(has!==__hbFull){__hbFull=has;__hbSendH("fs");}' +
+      '}' +
+      'window.addEventListener("load",function(){' +
+        'var els=document.querySelectorAll("*");' +
+        'for(var i=0;i<els.length;i++){' +
+          'var s=getComputedStyle(els[i]);' +
+          'if(s.position==="fixed"&&parseInt(s.zIndex)>=50){__hbFixed.push(els[i]);}' +
+        '}' +
+        'new MutationObserver(__hbCheckFS).observe(document.documentElement,{attributes:!0,subtree:!0,attributeFilter:["class","style"]});' +
+        'new ResizeObserver(function(){__hbSendH("rs");}).observe(document.documentElement);' +
+        '__hbSendH("init");' +
+      '});' +
+    '\x3C/script\x3E';
+
+    iframe.srcdoc = htmlContent + autoResize;
+
+    wrapper.appendChild(iframe);
+    return { wrapper: wrapper, iframe: iframe };
+  }
+
+  // 【监听】iframe 高度变化 + 弹窗全屏检测
+  window.addEventListener('message', function(e) {
+    if (!e.data || e.data.type !== 'hbResize') return;
+    var iframes = document.querySelectorAll('.html-block-iframe');
+    for (var i = 0; i < iframes.length; i++) {
+      if (iframes[i].contentWindow === e.source) {
+        if (e.data.full) {
+          iframes[i].style.height = '';
+          iframes[i].classList.add('fullscreen');
+        } else {
+          iframes[i].classList.remove('fullscreen');
+          // 跳过全屏切换瞬间的 fs 消息（高度仍为全屏残留值），等 ResizeObserver 的 rs 消息
+          if (e.data.why !== 'fs') {
+            iframes[i].style.height = e.data.height + 'px';
+          }
+        }
+        break;
+      }
+    }
+  });
 </script>
 
 

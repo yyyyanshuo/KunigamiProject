@@ -782,9 +782,9 @@
                 </div>
 
                 <!-- 3. 深睡眠 (修复了排版) -->
-                <div class="status-row" style="border-bottom: none;">
-                    <div>
-                        <div class="status-label">💤 深睡眠 (Deep Sleep)</div>
+	                <div class="status-row" style="border-bottom: none;">
+	                    <div>
+	                        <div class="status-label">💤 深睡眠 (Deep Sleep)</div>
                         <div class="status-desc" style="display: flex; align-items: center; flex-wrap: wrap; gap: 5px;">
                             <span>自动入睡:</span>
                             <!-- 【修改】加了一个不换行的容器 time-group -->
@@ -798,11 +798,22 @@
                     <label class="switch">
                         <!-- 【修改】只绑定 onDeepSleepChange -->
                         <input type="checkbox" id="deep-sleep-chk" onchange="onDeepSleepChange()">
-                        <span class="slider"></span>
-                    </label>
-                </div>
+	                        <span class="slider"></span>
+	                    </label>
+	                </div>
 
-            </div>
+	                <div class="status-row" style="border-bottom: none; padding-top: 4px;">
+	                    <div>
+	                        <div class="status-label">📝 睡前总结 (Bedtime Summary)</div>
+	                        <div class="status-desc">进入深睡眠时，若今天有短期记忆，则生成睡前日记</div>
+	                    </div>
+	                    <label class="switch">
+	                        <input type="checkbox" id="bedtime-diary-chk" onchange="saveStatusDirect()">
+	                        <span class="slider"></span>
+	                    </label>
+	                </div>
+
+	            </div>
         </details>
     </div>
 
@@ -1159,11 +1170,12 @@
                 document.getElementById('intimacy-range').value = intimacyVal;
                 document.getElementById('intimacy-num').value = intimacyVal;
 
-                // 睡眠时间
-                document.getElementById('ds-start').value = data.ds_start || '23:00';
-                document.getElementById('ds-end').value = data.ds_end || '07:00';
+	                // 睡眠时间
+	                document.getElementById('ds-start').value = data.ds_start || '23:00';
+	                document.getElementById('ds-end').value = data.ds_end || '07:00';
+	                document.getElementById('bedtime-diary-chk').checked = data.bedtime_diary_enabled !== false;
 
-                // 睡眠开关 (注意顺序，先设值，再跑逻辑检查)
+	                // 睡眠开关 (注意顺序，先设值，再跑逻辑检查)
                 document.getElementById('deep-sleep-chk').checked = data.deep_sleep || false;
                 // 浅睡眠：如果没存，默认 true
                 document.getElementById('light-sleep-chk').checked = (data.light_sleep !== undefined) ? data.light_sleep : true;
@@ -2094,6 +2106,16 @@
         loadRelationMemberCandidates();
     }
 
+    function escapeRelationHtml(value) {
+        return String(value).replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[char]);
+    }
+
     async function loadRelationMemberCandidates() {
         const listContainer = document.getElementById('relation-member-list');
         const module = document.getElementById('module-relation');
@@ -2103,30 +2125,29 @@
         const existingNames = Array.from(editMode.querySelectorAll('.input-key')).map(input => input.value);
 
         try {
-            const res = await fetch('/api/contacts');
-            const contacts = await res.json();
+            const [contactsRes, profileRes] = await Promise.all([
+                fetch('/api/contacts'),
+                fetch('/api/user/profile_settings')
+            ]);
+
+            if (!contactsRes.ok) throw new Error('联系人加载失败');
+
+            const contacts = await contactsRes.json();
+            const profile = profileRes.ok ? await profileRes.json() : null;
             
             let html = '';
 
-            // 1. 【新增】手动添加“当前用户”选项 (仅正向模式，且如果列表中不存在)
-            // 通过获取 user_settings.json 对应的名称 (篠原桐奈)
-            // 之前后端已经去掉了，我们这里前端通过获取 profile 界面可能存在的名称或者单独 fetch
-            // 为了最稳妥且满足“不加入通讯录”的要求，我们在这里单独请求一次用户信息或使用缓存
-            
-            let currentUserName = "篠原桐奈"; // 兜底使用您提到的名称，或尝试从页面其它地方获取
-            try {
-                const profileName = document.querySelector('.user-info .name')?.innerText;
-                if(profileName) currentUserName = profileName.trim();
-            } catch(e) {}
+            // 当前用户不在通讯录中，单独从当前账号的用户设置读取。
+            const currentUserName = typeof profile?.name === 'string' ? profile.name.trim() : '';
 
-            if (!existingNames.includes(currentUserName)) {
+            if (currentUserName && !existingNames.includes(currentUserName)) {
                 html += `
-                    <div style="padding:12px; border-bottom:1px solid #f9f9f9; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="appendRelRowByName('${currentUserName.replace(/'/g, "\\'")}')">
+                    <div class="relation-member-candidate" data-relation-name="${escapeRelationHtml(currentUserName)}" style="padding:12px; border-bottom:1px solid #f9f9f9; display:flex; align-items:center; justify-content:space-between; cursor:pointer;">
                         <div style="display:flex; align-items:center;">
                             <div style="width:30px; height:30px; border-radius:50%; margin-right:10px; background:#e3f2fd; display:flex; align-items:center; justify-content:center; color:#1e88e5;">
                                 <i class="fas fa-user-circle"></i>
                             </div>
-                            <span style="font-size:14px; color:#444; font-weight:bold;">${currentUserName} (你)</span>
+                            <span style="font-size:14px; color:#444; font-weight:bold;">${escapeRelationHtml(currentUserName)} (你)</span>
                         </div>
                         <span style="color:var(--primary-color); font-size:12px;">+ 选择</span>
                     </div>
@@ -2143,10 +2164,10 @@
 
                 if (c.id !== charId && c.type !== 'group' && !existingNames.includes(name)) {
                     html += `
-                        <div style="padding:12px; border-bottom:1px solid #f9f9f9; border-top:none; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="appendRelRowByName('${name.replace(/'/g, "\\'")}')">
+                        <div class="relation-member-candidate" data-relation-name="${escapeRelationHtml(name)}" style="padding:12px; border-bottom:1px solid #f9f9f9; border-top:none; display:flex; align-items:center; justify-content:space-between; cursor:pointer;">
                             <div style="display:flex; align-items:center;">
-                                <img src="${avatarUrl}" style="width:30px; height:30px; border-radius:50%; margin-right:10px; object-fit:cover;">
-                                <span style="font-size:14px; color:#444;">${displayName}</span>
+                                <img src="${escapeRelationHtml(avatarUrl)}" style="width:30px; height:30px; border-radius:50%; margin-right:10px; object-fit:cover;">
+                                <span style="font-size:14px; color:#444;">${escapeRelationHtml(displayName)}</span>
                             </div>
                             <span style="color:var(--primary-color); font-size:12px;">+ 选择</span>
                         </div>
@@ -2156,6 +2177,9 @@
 
             if (!html) html = '<div style="padding:20px; text-align:center; color:#999; font-size:13px;">没有可添加的角色</div>';
             listContainer.innerHTML = html;
+            listContainer.querySelectorAll('.relation-member-candidate').forEach(item => {
+                item.addEventListener('click', () => appendRelRowByName(item.dataset.relationName));
+            });
         } catch(e) {
             listContainer.innerHTML = '<div style="padding:20px; text-align:center; color:red;">加载失败</div>';
         }
@@ -2169,7 +2193,7 @@
         
         const row = `<div class="rel-edit-card" style="background: #fffdfd; border-left: 4px solid var(--primary-color);">
            <div class="input-group">
-               <input type="text" class="input-key" value="${name}" placeholder="姓名" readonly>
+               <input type="text" class="input-key" value="${escapeRelationHtml(name)}" placeholder="姓名" readonly>
                <input type="text" class="input-val" value="" placeholder="关系定位">
                <label class="rel-score-wrap" title="该角色认为自己与此人关系的程度">
                    <span class="rel-score-label">指数</span>
@@ -3209,9 +3233,10 @@
         const momentsIndex = document.getElementById('moments-index-num').value;
         const intimacy = document.getElementById('intimacy-num').value;
         const lightSleep = document.getElementById('light-sleep-chk').checked;
-        const deepSleep = document.getElementById('deep-sleep-chk').checked;
-        const dsStart = document.getElementById('ds-start').value;
-        const dsEnd = document.getElementById('ds-end').value;
+	        const deepSleep = document.getElementById('deep-sleep-chk').checked;
+	        const dsStart = document.getElementById('ds-start').value;
+	        const dsEnd = document.getElementById('ds-end').value;
+	        const bedtimeDiaryEnabled = document.getElementById('bedtime-diary-chk').checked;
 
         // === 【核心修改】决定存什么值 ===
         // 如果深睡眠开着，我们不存页面上那个强制勾选的 true，而是存用户之前的设定 cachedLightSleep
@@ -3229,11 +3254,12 @@
                     emotion: emotion,
                     moments_index: parseFloat(momentsIndex) || 1,
                     intimacy: Math.max(0, Math.min(100, parseInt(intimacy, 10) || 60)),
-                    light_sleep: lightSleepToSave, // <--- 传这个修正后的值
-                    deep_sleep: deepSleep,
-                    ds_start: dsStart,
-                    ds_end: dsEnd,
-                    chat_mode: document.getElementById('chat-mode-chk').checked ? 'offline' : 'online'
+	                    light_sleep: lightSleepToSave, // <--- 传这个修正后的值
+	                    deep_sleep: deepSleep,
+	                    ds_start: dsStart,
+	                    ds_end: dsEnd,
+	                    bedtime_diary_enabled: bedtimeDiaryEnabled,
+	                    chat_mode: document.getElementById('chat-mode-chk').checked ? 'offline' : 'online'
                 })
             });
 

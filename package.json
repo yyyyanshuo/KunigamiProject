@@ -1,0 +1,27 @@
+{
+  "name": "kunigamiproject",
+  "version": "1.0.0",
+  "description": "一个轻量级、重沉浸的多角色 AI 聊天应用。支持单聊/群聊、朋友圈、分级记忆系统（短期/中期/长期）、主动消息与表情包系统，致力于提供无尽历史记录与拟人化社交体验。",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yyyyanshuo/KunigamiProject.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/yyyyanshuo/KunigamiProject/issues"
+  },
+  "homepage": "https://github.com/yyyyanshuo/KunigamiProject#readme",
+  "dependencies": {
+    "express": "^5.2.1",
+    "playwright": "^1.60.0"
+  }
+}
