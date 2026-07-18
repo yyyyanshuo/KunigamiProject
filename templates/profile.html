@@ -152,6 +152,20 @@
 
     .config-card { padding: 12px 16px; }
 
+    .guide-entry {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 15px 16px; color: var(--text-main); text-decoration: none;
+    }
+    .guide-entry-main { display: flex; align-items: center; gap: 10px; }
+    .guide-entry-icon {
+      width: 34px; height: 34px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--primary-rgba-light); font-size: 18px;
+    }
+    .guide-entry-title { font-size: 14px; font-weight: 600; }
+    .guide-entry-tip { margin-top: 2px; font-size: 11px; color: var(--text-muted); }
+    .guide-entry-arrow { color: var(--text-muted); font-size: 18px; }
+
     /* 表单与输入框 */
     .field-row {
       display: flex; align-items: center; justify-content: space-between;
@@ -454,6 +468,20 @@
   </div>
 </div>
 
+<!-- 公开使用文档入口 -->
+<div class="section-container">
+  <a class="guide-entry" href="/guide">
+    <span class="guide-entry-main">
+      <span class="guide-entry-icon">📖</span>
+      <span>
+        <span class="guide-entry-title">使用文档</span>
+        <span class="guide-entry-tip">注册、个人信息、通知与模型配置指南</span>
+      </span>
+    </span>
+    <span class="guide-entry-arrow">›</span>
+  </a>
+</div>
+
 <!-- 账号与通知设置 -->
 <div class="section-container collapsed">
   <div class="section-header" onclick="toggleSectionByHeader(this)">
@@ -607,6 +635,10 @@
             <div class="api-label">生图 (Image)</div>
             <div id="view-image-model" class="api-badge">-</div>
           </div>
+          <div class="api-status-item">
+            <div class="api-label">论坛 (Forum)</div>
+            <div id="view-forum-model" class="api-badge">-</div>
+          </div>
         </div>
       </div>
 
@@ -664,6 +696,7 @@
             <div><div class="input-label">记忆提取总结</div><select id="model-summary" class="model-select"></select></div>
             <div><div class="input-label">人设自动演进</div><select id="model-gen" class="model-select"></select></div>
             <div><div class="input-label">AI 生图模型</div><select id="model-image" class="model-select"></select></div>
+            <div><div class="input-label">论坛生成</div><select id="model-forum" class="model-select"></select></div>
           </div>
         </div>
 
@@ -1490,6 +1523,7 @@
     document.getElementById('view-summary-model').textContent = models.summary;
     document.getElementById('view-gen-model').textContent = models.gen_persona;
     document.getElementById('view-image-model').textContent = models.image != null ? models.image : (route === 'gemini' ? 'gemini-2.5-flash-image' : 'Kwai-Kolors/Kolors');
+    document.getElementById('view-forum-model').textContent = models.forum != null ? models.forum : (route === 'gemini' ? 'gemini-3.5-flash' : 'gpt-5-mini');
   }
 
   // 3. 切换编辑状态
@@ -1579,6 +1613,7 @@
     document.getElementById('model-summary').innerHTML = optionsHtml;
     document.getElementById('model-gen').innerHTML = optionsHtml;
     document.getElementById('model-image').innerHTML = optionsHtml;
+    document.getElementById('model-forum').innerHTML = optionsHtml;
 
     // B. 选中当前(或默认)值
     // 注意：这里我们优先显示配置文件里存的值。如果那个值不在列表里了(被删了)，就选列表第一个。
@@ -1591,6 +1626,7 @@
     setSelectValue('model-summary', savedModels.summary);
     setSelectValue('model-gen', savedModels.gen_persona);
     setSelectValue('model-image', savedModels.image != null ? savedModels.image : (route === 'gemini' ? 'gemini-2.5-flash-image' : 'Kwai-Kolors/Kolors'));
+    setSelectValue('model-forum', savedModels.forum != null ? savedModels.forum : (route === 'gemini' ? 'gemini-3.5-flash' : 'gpt-5-mini'));
 
     // C. 渲染管理标签列表
     const listEl = document.getElementById('model-tags-list');
@@ -1677,6 +1713,7 @@
     apiConfig.routes[activeRoute].models.summary = document.getElementById('model-summary').value;
     apiConfig.routes[activeRoute].models.gen_persona = document.getElementById('model-gen').value;
     apiConfig.routes[activeRoute].models.image = document.getElementById('model-image').value;
+    apiConfig.routes[activeRoute].models.forum = document.getElementById('model-forum').value;
 
     // 【新增】保存 relay 中转商选择
     if (activeRoute === 'relay') {
@@ -1931,27 +1968,37 @@
       return;
     }
 
-    // 1. 获取公钥
     try {
+      // 1. 确保 Service Worker 已注册（首次访问 profile 页时兜底）
+      let registration = await navigator.serviceWorker.getRegistration();
+      if (!registration) {
+        registration = await navigator.serviceWorker.register('/sw.js');
+        await navigator.serviceWorker.ready;
+      }
+
+      // 2. 获取 VAPID 公钥
       const resKey = await fetch('/api/vapid_public_key');
       const dataKey = await resKey.json();
       const publicVapidKey = dataKey.publicKey;
+      if (!publicVapidKey) {
+        alert('VAPID 公钥未配置，请联系管理员');
+        return;
+      }
 
-      // 2. 请求权限
+      // 3. 请求通知权限
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') {
         alert('您拒绝了通知权限');
         return;
       }
 
-      // 3. 注册订阅
-      const registration = await navigator.serviceWorker.ready;
+      // 4. 注册推送订阅
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
       });
 
-      // 4. 发送给后端保存
+      // 5. 发送给后端保存
       await fetch('/api/subscribe', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -1962,7 +2009,11 @@
 
     } catch (e) {
       console.error(e);
-      alert('开启失败: ' + e.message);
+      if (e.message && e.message.includes('push service')) {
+        alert('开启失败: 推送服务不可达（国内网络可能无法连接 Google FCM），请使用代理/VPN 后重试');
+      } else {
+        alert('开启失败: ' + e.message);
+      }
     }
   }
 </script>

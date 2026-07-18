@@ -1,0 +1,21 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>选择测试</title>
+    <style>
+        button { padding: 10px 20px; margin: 10px; font-size: 16px; cursor: pointer; }
+        #result { margin-top: 20px; font-size: 20px; font-weight: bold; color: red; }
+    </style>
+</head>
+<body>
+    <div id="content">玲王，现在面前有两个按钮，请你选择一个按下去。你可以先思考、反复纠结，但请在回复的最后，用严格的格式“[CLICK:A]”或“[CLICK:B]”来执行确定操作：
+A: 更喜欢国神炼介
+B: 更喜欢凪诚士郎</div>
+
+    <button id="btnA" onclick="document.getElementById('result').innerText = '页面反馈：按下了 A 按钮 (国神)'">按钮A：更喜欢国神炼介</button>
+    <button id="btnB" onclick="document.getElementById('result').innerText = '页面反馈：按下了 B 按钮 (凪)'">按钮B：更喜欢凪诚士郎</button>
+
+    <div id="result"></div>
+</body>
+</html>

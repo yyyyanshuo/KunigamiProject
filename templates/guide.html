@@ -1,0 +1,1319 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#fff3f8">
+  <title>使用文档 | Kunigami</title>
+  <link rel="manifest" href="/manifest.json">
+  <style>
+    :root {
+      --primary: #e75b86;
+      --primary-dark: #c93d68;
+      --primary-soft: #fff0f5;
+      --text: #34343c;
+      --muted: #73737f;
+      --line: #eee5e9;
+      --card: rgba(255, 255, 255, 0.94);
+      --shadow: 0 10px 30px rgba(128, 69, 88, 0.09);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--text);
+      background: linear-gradient(145deg, #fff8fb 0%, #fffdf9 46%, #f8f5ff 100%);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.75;
+    }
+    a { color: var(--primary-dark); }
+    .topbar {
+      position: sticky; top: 0; z-index: 10;
+      display: flex; align-items: center; justify-content: space-between;
+      height: 58px; padding: 0 18px;
+      background: rgba(255, 255, 255, 0.88);
+      border-bottom: 1px solid rgba(238, 229, 233, 0.85);
+      backdrop-filter: blur(14px);
+    }
+    .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; }
+    .brand img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
+    .top-link {
+      padding: 6px 12px; border-radius: 999px; text-decoration: none;
+      background: var(--primary-soft); font-size: 13px; font-weight: 600;
+    }
+    .top-actions { display: flex; align-items: center; gap: 8px; }
+    .top-nav { position: relative; }
+    .top-nav summary { list-style: none; cursor: pointer; user-select: none; }
+    .top-nav summary::-webkit-details-marker { display: none; }
+    .top-nav[open] summary { color: #fff; background: var(--primary); }
+    .top-nav-panel {
+      position: absolute; top: calc(100% + 10px); right: 0; width: 250px;
+      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px;
+      padding: 10px; border: 1px solid var(--line); border-radius: 14px;
+      background: rgba(255, 255, 255, .98); box-shadow: 0 14px 34px rgba(73, 38, 50, .16);
+    }
+    .top-nav-panel a {
+      padding: 8px 9px; border-radius: 9px; color: var(--text);
+      text-decoration: none; font-size: 12px; line-height: 1.4;
+    }
+    .top-nav-panel a:hover, .top-nav-panel a:focus {
+      outline: 0; color: var(--primary-dark); background: var(--primary-soft);
+    }
+    .page { width: min(900px, calc(100% - 28px)); margin: 28px auto 70px; }
+    .hero {
+      padding: 36px 34px; border-radius: 24px;
+      background: linear-gradient(135deg, rgba(255,255,255,.98), rgba(255,240,245,.94));
+      box-shadow: var(--shadow); border: 1px solid #fff;
+    }
+    .eyebrow { color: var(--primary-dark); font-size: 13px; font-weight: 700; letter-spacing: .08em; }
+    h1 { margin: 8px 0 10px; font-size: clamp(28px, 6vw, 42px); line-height: 1.25; }
+    .hero p { margin: 0; color: var(--muted); }
+    .quick-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+    .quick-nav a {
+      padding: 7px 12px; border: 1px solid #f2dbe4; border-radius: 999px;
+      background: #fff; text-decoration: none; font-size: 13px;
+    }
+    .guide-search { position: relative; margin-top: 22px; }
+    .search-box {
+      display: flex; align-items: center; gap: 9px; padding: 0 13px;
+      border: 1px solid #efd7df; border-radius: 13px; background: #fff;
+      box-shadow: 0 5px 18px rgba(128, 69, 88, .06);
+    }
+    .search-icon { color: var(--primary-dark); font-size: 18px; }
+    .search-input {
+      width: 100%; padding: 12px 0; border: 0; outline: 0; background: transparent;
+      color: var(--text); font: inherit; font-size: 14px;
+    }
+    .search-clear {
+      display: none; padding: 4px 7px; border: 0; border-radius: 50%;
+      color: var(--muted); background: #f7f2f4; cursor: pointer;
+    }
+    .search-clear.visible { display: block; }
+    .search-results {
+      position: absolute; top: calc(100% + 7px); left: 0; right: 0; z-index: 20;
+      max-height: 360px; overflow-y: auto; padding: 7px;
+      border: 1px solid var(--line); border-radius: 14px; background: #fff;
+      box-shadow: 0 14px 34px rgba(73, 38, 50, .15);
+    }
+    .search-results[hidden] { display: none; }
+    .search-result {
+      display: block; width: 100%; padding: 10px 11px; border: 0;
+      border-radius: 10px; color: var(--text); background: transparent;
+      text-align: left; cursor: pointer;
+    }
+    .search-result:hover, .search-result:focus { outline: 0; background: var(--primary-soft); }
+    .search-result-title { display: block; color: var(--primary-dark); font-size: 12px; font-weight: 700; }
+    .search-result-text {
+      display: -webkit-box; margin-top: 2px; overflow: hidden; color: var(--muted);
+      font-size: 12px; line-height: 1.55; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    }
+    .search-empty { padding: 18px 10px; color: var(--muted); text-align: center; font-size: 13px; }
+    .search-hit { animation: searchPulse 1.8s ease; }
+    @keyframes searchPulse {
+      0%, 100% { background-color: transparent; }
+      20%, 65% { background-color: #fff0a8; border-radius: 6px; }
+    }
+    .route-picker {
+      margin: 18px 0; padding: 16px; border-radius: 15px; background: #fff7fa;
+      border: 1px solid #f2dbe4;
+    }
+    .route-picker-title { margin: 0 0 10px; font-size: 15px; }
+    .route-picker-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+    .route-choice {
+      display: flex; flex-direction: column; padding: 11px 12px; border-radius: 11px;
+      color: var(--text); background: #fff; border: 1px solid var(--line); text-decoration: none;
+    }
+    .route-choice:hover { border-color: #e9abc0; background: #fffafd; }
+    .route-choice strong { color: var(--primary-dark); font-size: 13px; }
+    .route-choice span { margin-top: 2px; color: var(--muted); font-size: 11px; }
+    #route-gemini, #route-api2d, #route-newapi, #route-deepseek { scroll-margin-top: 74px; }
+    .doc-section {
+      margin-top: 18px; padding: 28px 30px; border-radius: 20px;
+      background: var(--card); border: 1px solid rgba(255,255,255,.9); box-shadow: var(--shadow);
+      scroll-margin-top: 74px;
+    }
+    h2 { margin: 0 0 16px; font-size: 22px; line-height: 1.4; }
+    h3 { margin: 24px 0 8px; font-size: 17px; }
+    h4 { margin: 18px 0 7px; font-size: 15px; }
+    p { margin: 8px 0; }
+    ol, ul { margin: 8px 0; padding-left: 24px; }
+    li + li { margin-top: 7px; }
+    .path {
+      display: inline-block; padding: 1px 7px; border-radius: 6px;
+      color: #9f3154; background: var(--primary-soft); font-size: .92em; font-weight: 600;
+    }
+    .notice {
+      margin: 14px 0; padding: 12px 14px; border-left: 4px solid #f0a2bb;
+      border-radius: 8px; color: #65545a; background: #fff7fa;
+    }
+    .route-card {
+      margin-top: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 14px;
+      background: #fff;
+    }
+    .route-title { margin: 0; font-size: 16px; }
+    .screenshot-placeholder {
+      min-height: 180px; margin: 12px 0 16px; padding: 24px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      border: 2px dashed #e8cbd5; border-radius: 14px; text-align: center;
+      color: #9a7a85; background: #fffafb;
+    }
+    .screenshot-placeholder strong { color: #7d5965; }
+    .screenshot-placeholder span { margin-top: 4px; font-size: 12px; }
+    .step-gallery {
+      display: grid; gap: 12px; margin: 12px 0 16px;
+    }
+    .step-gallery.cols-1 { grid-template-columns: minmax(0, 1fr); }
+    .step-gallery.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .step-gallery.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .step-gallery.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .step-shot {
+      margin: 0; padding: 7px; border: 1px solid var(--line);
+      border-radius: 14px; background: #fff;
+    }
+    .step-shot img {
+      display: block; width: 100%; aspect-ratio: 4 / 3; border-radius: 9px;
+      background: #f7f7f8; object-fit: cover; object-position: top; cursor: zoom-in;
+    }
+    .step-shot figcaption {
+      padding: 8px 4px 1px; color: var(--muted); text-align: center; font-size: 12px;
+    }
+    .model-shot {
+      margin: 12px 0 16px; padding: 9px; border: 1px solid var(--line);
+      border-radius: 14px; background: #fff;
+    }
+    .model-shot img {
+      display: block; width: 100%; max-height: 340px; border-radius: 9px;
+      background: #f7f7f8; object-fit: contain; cursor: zoom-in;
+    }
+    .model-shot figcaption {
+      padding: 8px 4px 1px; color: var(--muted); text-align: center; font-size: 12px;
+    }
+    .image-lightbox {
+      position: fixed; inset: 0; z-index: 100; display: flex; align-items: center;
+      justify-content: center; padding: 20px; background: rgba(24, 18, 21, .9);
+      backdrop-filter: blur(8px);
+    }
+    .image-lightbox[hidden] { display: none; }
+    .image-lightbox img {
+      display: block; max-width: 94vw; max-height: 88vh; object-fit: contain;
+      border-radius: 10px; box-shadow: 0 18px 60px rgba(0, 0, 0, .4);
+    }
+    .lightbox-close {
+      position: absolute; top: 14px; right: 14px; width: 40px; height: 40px;
+      border: 0; border-radius: 50%; color: #fff; background: rgba(255,255,255,.16);
+      font-size: 27px; line-height: 1; cursor: pointer;
+    }
+    .model-list {
+      margin: 12px 0 18px; border: 1px solid var(--line); border-radius: 13px;
+      background: #fffafd; overflow: hidden;
+    }
+    .model-list summary {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 14px; color: var(--primary-dark); font-size: 13px;
+      font-weight: 700; cursor: pointer; user-select: none;
+    }
+    .model-list summary::after { content: '展开'; color: var(--muted); font-size: 11px; font-weight: 500; }
+    .model-list[open] summary::after { content: '收起'; }
+    .model-list-body { padding: 0 12px 12px; border-top: 1px solid var(--line); }
+    .model-list-tip { margin: 10px 0; color: var(--muted); font-size: 12px; }
+    .model-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+    .model-item {
+      min-width: 0; display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; padding: 8px 9px; border: 1px solid #f0e5e9; border-radius: 9px; background: #fff;
+    }
+    .model-name { min-width: 0; display: flex; flex-direction: column; }
+    .model-name code {
+      overflow-wrap: anywhere; color: #554149; font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 11px;
+    }
+    .model-warning { margin-top: 2px; color: #c03d32; font-size: 10px; font-weight: 600; }
+    .model-copy {
+      flex: 0 0 auto; padding: 5px 9px; border: 0; border-radius: 8px;
+      color: var(--primary-dark); background: var(--primary-soft); font-size: 11px;
+      font-weight: 700; cursor: pointer;
+    }
+    .model-copy:hover { background: #f9dce6; }
+    .model-copy.copied { color: #26794b; background: #e5f7ec; }
+    .model-source-link {
+      display: inline-flex; margin-top: 3px; padding: 8px 12px; border-radius: 9px;
+      color: #fff; background: var(--primary); text-decoration: none; font-size: 12px; font-weight: 700;
+    }
+    .breaker-flow {
+      display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px; margin: 15px 0;
+    }
+    .breaker-step {
+      padding: 13px; border: 1px solid var(--line); border-radius: 12px;
+      background: #fff;
+    }
+    .breaker-step strong { display: block; color: var(--primary-dark); font-size: 13px; }
+    .breaker-step span { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+    .error-group {
+      margin: 10px 0; border: 1px solid var(--line); border-radius: 13px;
+      background: #fff; overflow: hidden;
+    }
+    .error-group summary {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 14px; color: var(--text); font-size: 14px; font-weight: 700;
+      cursor: pointer; user-select: none;
+    }
+    .error-group summary::after { content: '展开'; color: var(--muted); font-size: 11px; font-weight: 500; }
+    .error-group[open] summary::after { content: '收起'; }
+    .error-group-body { padding: 12px; border-top: 1px solid var(--line); }
+    .error-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .error-item {
+      min-width: 0; padding: 11px; border: 1px solid #f0e5e9;
+      border-radius: 10px; background: #fffafd;
+    }
+    .error-item strong { display: block; color: var(--primary-dark); font-size: 13px; }
+    .error-item code {
+      display: inline-block; margin-right: 5px; padding: 1px 6px; border-radius: 6px;
+      color: #9f3154; background: var(--primary-soft); font-size: 12px;
+    }
+    .error-item p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+    .fatal-badge { color: #b83333; font-size: 10px; font-weight: 700; }
+    .temporary-badge { color: #6f7580; font-size: 10px; font-weight: 700; }
+    .install-flow {
+      display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px; margin: 15px 0;
+    }
+    .install-step {
+      padding: 14px; border: 1px solid var(--line); border-radius: 13px;
+      background: #fff;
+    }
+    .install-step-number {
+      display: flex; width: 28px; height: 28px; align-items: center; justify-content: center;
+      border-radius: 50%; color: #fff; background: var(--primary); font-size: 13px; font-weight: 800;
+    }
+    .install-step strong { display: block; margin-top: 8px; color: var(--text); font-size: 14px; }
+    .install-step span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+    .platform-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .pwa-card {
+      padding: 15px; border: 1px solid var(--line); border-radius: 13px; background: #fff;
+    }
+    .pwa-card h3 { margin: 0 0 8px; font-size: 15px; }
+    .pwa-card ol, .pwa-card ul { margin-bottom: 0; }
+    .pwa-card li { color: var(--muted); font-size: 12px; line-height: 1.7; }
+    .pwa-card li strong { color: var(--text); }
+    .pwa-path {
+      display: inline-block; padding: 2px 8px; border-radius: 7px;
+      color: #9f3154; background: var(--primary-soft); font-size: 12px; font-weight: 700;
+    }
+    .external-link { overflow-wrap: anywhere; font-weight: 600; }
+    .footer { padding-top: 26px; color: var(--muted); text-align: center; font-size: 13px; }
+    .back-to-top {
+      position: fixed; right: 18px; bottom: 22px; z-index: 9;
+      display: flex; align-items: center; gap: 5px; padding: 9px 12px;
+      border: 1px solid #efd7df; border-radius: 999px; color: var(--primary-dark);
+      background: rgba(255, 255, 255, .94); box-shadow: 0 8px 24px rgba(73, 38, 50, .14);
+      font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+      opacity: 0; pointer-events: none; transform: translateY(8px);
+      transition: opacity .2s ease, transform .2s ease;
+    }
+    .back-to-top.visible { opacity: 1; pointer-events: auto; transform: translateY(0); }
+    .back-to-top:hover, .back-to-top:focus { outline: 0; background: var(--primary-soft); }
+    @media (max-width: 600px) {
+      .topbar { padding: 0 10px; }
+      .brand { gap: 6px; font-size: 13px; }
+      .brand img { width: 29px; height: 29px; }
+      .top-actions { gap: 5px; }
+      .top-link { padding: 6px 9px; font-size: 12px; }
+      .top-nav-panel { width: min(250px, calc(100vw - 20px)); }
+      .page { width: min(100% - 20px, 900px); margin-top: 14px; }
+      .hero { padding: 26px 20px; border-radius: 18px; }
+      .route-picker-grid { grid-template-columns: minmax(0, 1fr); }
+      .search-results { max-height: 300px; }
+      .model-shot img { max-height: 250px; }
+      .model-grid { grid-template-columns: minmax(0, 1fr); }
+      .breaker-flow { grid-template-columns: minmax(0, 1fr); }
+      .error-grid { grid-template-columns: minmax(0, 1fr); }
+      .install-flow { grid-template-columns: minmax(0, 1fr); }
+      .platform-grid { grid-template-columns: minmax(0, 1fr); }
+      .doc-section { padding: 22px 18px; border-radius: 16px; }
+      .screenshot-placeholder { min-height: 145px; }
+      .step-gallery.cols-3,
+      .step-gallery.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="/static/logo.png" alt="Kunigami" onerror="this.src='/static/default_avatar.png'">
+      <span>Kunigami 使用文档</span>
+    </div>
+    <div class="top-actions">
+      <details class="top-nav" id="guide-top-nav">
+        <summary class="top-link">目录</summary>
+        <nav class="top-nav-panel" aria-label="快捷切换章节">
+          <a href="#account">登录 / 注册</a>
+          <a href="#profile-settings">个人信息</a>
+          <a href="#notifications">接收通知</a>
+          <a href="#models">线路与模型</a>
+          <a href="#errors">错误码与熔断</a>
+          <a href="#pwa-install">安装成应用</a>
+        </nav>
+      </details>
+      {% if session.get('user_id') or session.get('logged_in') %}
+        <a class="top-link" href="/profile">个人主页</a>
+      {% else %}
+        <a class="top-link" href="/login">登录</a>
+      {% endif %}
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="hero">
+      <div class="eyebrow">GETTING STARTED</div>
+      <h1>从注册到开始使用</h1>
+      <p>按照下面的步骤完成账号、个人信息、消息通知、线路与模型配置。</p>
+      <div class="guide-search" role="search">
+        <div class="search-box">
+          <span class="search-icon" aria-hidden="true">⌕</span>
+          <input id="guide-search-input" class="search-input" type="search" placeholder="搜索：通知邮箱、DeepSeek、拍一拍……" autocomplete="off" aria-label="搜索使用文档" aria-controls="guide-search-results">
+          <button id="guide-search-clear" class="search-clear" type="button" aria-label="清空搜索">×</button>
+        </div>
+        <div id="guide-search-results" class="search-results" role="listbox" aria-live="polite" hidden></div>
+      </div>
+      <nav class="quick-nav" aria-label="文档目录">
+        <a href="#account">登录 / 注册</a>
+        <a href="#profile-settings">配置个人信息</a>
+        <a href="#notifications">接收通知</a>
+        <a href="#models">线路与模型</a>
+        <a href="#errors">错误码与熔断</a>
+        <a href="#pwa-install">安装成应用</a>
+      </nav>
+    </section>
+
+    <section class="doc-section" id="account">
+      <h2>1. 登录 / 注册</h2>
+      <h3>注册账号</h3>
+      <p>打开<a href="/register">注册页面</a>，填写邮箱、用户名和密码后提交。</p>
+      <div class="notice">
+        邮箱形式不受限制，格式不正确也可以注册。但如果之后忘记密码，将无法通过邮箱找回。遇到这种情况，请联系管理员迁移账号。
+      </div>
+      <h3>登录账号</h3>
+      <p>打开<a href="/login">登录页面</a>，填写注册时使用的邮箱和密码即可登录。</p>
+    </section>
+
+    <section class="doc-section" id="profile-settings">
+      <h2>2. 配置个人信息</h2>
+      <ol>
+        <li><span class="path">个人主页</span>：设置头像和 name（显示名称）。</li>
+        <li><span class="path">个人主页 → 账号与通知设置</span>：设置年龄、拍一拍后缀和语言。</li>
+        <li><span class="path">个人主页 → 全局用户设定 → 编辑 Edit</span>：填入你自己的人设，完成后保存设定。</li>
+      </ol>
+    </section>
+
+    <section class="doc-section" id="notifications">
+      <h2>3. 接收通知</h2>
+      <ol>
+        <li><strong>邮箱通知：</strong>进入<span class="path">个人主页 → 账号与通知设置</span>，在“通知邮箱”中填入用于接收通知的邮箱。</li>
+        <li><strong>浏览器消息推送：</strong>进入<span class="path">个人主页 → 浏览器消息推送</span>，点击“开启通知权限”。推荐使用 Firefox（火狐）浏览器，其他浏览器可能开启失败。</li>
+      </ol>
+      <div class="notice">
+        <strong>同一设备使用多个账号：</strong>请分别登录每个需要接收推送的账号，并在每个账号中单独点击一次“开启通知权限”。同一设备可以同时接收这些已主动开启账号的通知。
+      </div>
+    </section>
+
+    <section class="doc-section" id="models">
+      <h2>4. 配置线路与模型</h2>
+      <p>进入<span class="path">个人主页 → 线路与模型设置 (API) → 配置 Configuration</span>，根据自己是否有 Gemini Key 选择线路。</p>
+      <div class="route-picker" aria-label="线路分类快捷入口">
+        <h3 class="route-picker-title">先选择符合你的情况</h3>
+        <div class="route-picker-grid">
+          <a class="route-choice" href="#route-gemini">
+            <strong>我有 Gemini Key</strong>
+            <span>选择 Gemini 直连</span>
+          </a>
+          <a class="route-choice" href="#route-api2d">
+            <strong>我使用 api2d</strong>
+            <span>选择国内中转 → 新中转商</span>
+          </a>
+          <a class="route-choice" href="#route-newapi">
+            <strong>我使用 vg / newapi</strong>
+            <span>选择国内中转 → 旧中转商</span>
+          </a>
+          <a class="route-choice" href="#route-deepseek">
+            <strong>我使用 DeepSeek</strong>
+            <span>选择国内中转 → 自定义网址</span>
+          </a>
+        </div>
+      </div>
+
+      <div class="route-card" id="route-gemini">
+        <h3 class="route-title">方案 A：你有 Gemini Key</h3>
+        <p>在线路中选择<strong>“Gemini 直连”</strong>。</p>
+        <h4>① 模型配置</h4>
+        <figure class="model-shot">
+          <img src="{{ url_for('static', filename='guide/模型参考/Gemini.jpg') }}" alt="Gemini 直连推荐模型配置" loading="lazy">
+          <figcaption>Gemini 直连推荐模型配置</figcaption>
+        </figure>
+        <h4>② 填写 Key</h4>
+        <p>将 Gemini Key 填入<span class="path">个人主页 → 账号与通知设置 → Gemini Key</span>。</p>
+      </div>
+
+      <div class="route-card">
+        <h3 class="route-title">方案 B：你没有 Gemini Key</h3>
+        <p>在线路中选择<strong>“国内中转”</strong>，再根据使用的中转服务选择下面的一种配置。</p>
+
+        <h3 id="route-api2d">B-1. 新中转（api2d）</h3>
+        <p>中转商选择<strong>“新中转商 (api2d)”</strong>。</p>
+        <h4>① 模型配置</h4>
+        <figure class="model-shot">
+          <img src="{{ url_for('static', filename='guide/模型参考/新中转.jpg') }}" alt="api2d 新中转推荐模型配置" loading="lazy">
+          <figcaption>api2d 新中转推荐模型配置</figcaption>
+        </figure>
+        <details class="model-list" id="new-relay-models">
+          <summary>新中转可用模型（66 个）</summary>
+          <div class="model-list-body">
+            <p class="model-list-tip">点击模型右侧的“复制”，再粘贴到扩展模型列表中。</p>
+            <div class="model-grid">
+          <div class="model-item">
+            <span class="model-name"><code>gemini-2.0-flash</code></span>
+            <button class="model-copy" type="button" data-copy-model="gemini-2.0-flash">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gemini-2.0-flash-lite</code></span>
+            <button class="model-copy" type="button" data-copy-model="gemini-2.0-flash-lite">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gemini-2.0-flash-lite-preview-02-05</code></span>
+            <button class="model-copy" type="button" data-copy-model="gemini-2.0-flash-lite-preview-02-05">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gemini-2.5-pro-preview-03-25</code></span>
+            <button class="model-copy" type="button" data-copy-model="gemini-2.5-pro-preview-03-25">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gemini-2.5-pro-exp-03-25</code></span>
+            <button class="model-copy" type="button" data-copy-model="gemini-2.5-pro-exp-03-25">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gemini-2.5-pro-preview-05-06</code></span>
+            <button class="model-copy" type="button" data-copy-model="gemini-2.5-pro-preview-05-06">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gemini-3-pro-preview</code></span>
+            <button class="model-copy" type="button" data-copy-model="gemini-3-pro-preview">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gemini-3.1-pro-preview</code></span>
+            <button class="model-copy" type="button" data-copy-model="gemini-3.1-pro-preview">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>claude-opus-4-7</code></span>
+            <button class="model-copy" type="button" data-copy-model="claude-opus-4-7">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>claude-sonnet-4-6</code></span>
+            <button class="model-copy" type="button" data-copy-model="claude-sonnet-4-6">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>claude-opus-4-6</code></span>
+            <button class="model-copy" type="button" data-copy-model="claude-opus-4-6">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>claude-haiku-4-5</code></span>
+            <button class="model-copy" type="button" data-copy-model="claude-haiku-4-5">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>claude-opus-4-5</code></span>
+            <button class="model-copy" type="button" data-copy-model="claude-opus-4-5">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>claude-sonnet-4-5</code></span>
+            <button class="model-copy" type="button" data-copy-model="claude-sonnet-4-5">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>claude-opus-4-20250514</code></span>
+            <button class="model-copy" type="button" data-copy-model="claude-opus-4-20250514">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>claude-sonnet-4-20250514</code></span>
+            <button class="model-copy" type="button" data-copy-model="claude-sonnet-4-20250514">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>claude-3-7-sonnet-20250219</code></span>
+            <button class="model-copy" type="button" data-copy-model="claude-3-7-sonnet-20250219">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>claude-3-7-sonnet-latest</code></span>
+            <button class="model-copy" type="button" data-copy-model="claude-3-7-sonnet-latest">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>claude-3-5-haiku-20241022</code></span>
+            <button class="model-copy" type="button" data-copy-model="claude-3-5-haiku-20241022">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>claude-3-5-haiku-latest</code></span>
+            <button class="model-copy" type="button" data-copy-model="claude-3-5-haiku-latest">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>claude-3-5-sonnet-20241022</code></span>
+            <button class="model-copy" type="button" data-copy-model="claude-3-5-sonnet-20241022">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>claude-3-5-sonnet-latest</code></span>
+            <button class="model-copy" type="button" data-copy-model="claude-3-5-sonnet-latest">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>claude-3-opus-latest</code></span>
+            <button class="model-copy" type="button" data-copy-model="claude-3-opus-latest">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-3.5-turbo-0301</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-3.5-turbo-0301">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-3.5-turbo</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-3.5-turbo">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4-0613</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4-0613">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-3.5-turbo-0613</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-3.5-turbo-0613">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-3.5-turbo-16k</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-3.5-turbo-16k">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-3.5-turbo-16k-0613</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-3.5-turbo-16k-0613">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4-vision-preview</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4-vision-preview">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4-1106-preview</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4-1106-preview">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-3.5-turbo-1106</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-3.5-turbo-1106">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-3.5-turbo-0125</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-3.5-turbo-0125">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4-0125-preview</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4-0125-preview">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4o</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4o">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4o-2024-05-13</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4o-2024-05-13">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4-0314</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4-0314">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4-turbo</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4-turbo">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4-turbo-2024-04-09</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4-turbo-2024-04-09">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4-turbo-preview</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4-turbo-preview">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4-1106-vision-preview</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4-1106-vision-preview">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4o-2024-08-06</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4o-2024-08-06">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4o-mini</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4o-mini">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>o1-preview</code></span>
+            <button class="model-copy" type="button" data-copy-model="o1-preview">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>o1</code></span>
+            <button class="model-copy" type="button" data-copy-model="o1">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>o1-2024-12-17</code></span>
+            <button class="model-copy" type="button" data-copy-model="o1-2024-12-17">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>o1-preview-2024-09-12</code></span>
+            <button class="model-copy" type="button" data-copy-model="o1-preview-2024-09-12">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>o1-mini-2024-09-12</code></span>
+            <button class="model-copy" type="button" data-copy-model="o1-mini-2024-09-12">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>o1-mini</code></span>
+            <button class="model-copy" type="button" data-copy-model="o1-mini">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>o3</code></span>
+            <button class="model-copy" type="button" data-copy-model="o3">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>o3-mini</code></span>
+            <button class="model-copy" type="button" data-copy-model="o3-mini">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>o3-mini-2025-01-31</code></span>
+            <button class="model-copy" type="button" data-copy-model="o3-mini-2025-01-31">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4.5-preview-2025-02-27</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4.5-preview-2025-02-27">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4.1</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4.1">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4.1-2025-04-14</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4.1-2025-04-14">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4.1-mini</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4.1-mini">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4.1-mini-2025-04-14</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4.1-mini-2025-04-14">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4.1-nano</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4.1-nano">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-4.1-nano-2025-04-14</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-4.1-nano-2025-04-14">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>o4-mini</code></span>
+            <button class="model-copy" type="button" data-copy-model="o4-mini">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-5-mini</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-5-mini">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-5-nano</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-5-nano">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-5</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-5">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-5.1-2025-11-13</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-5.1-2025-11-13">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>gpt-5.1</code></span>
+            <button class="model-copy" type="button" data-copy-model="gpt-5.1">复制</button>
+          </div>
+            </div>
+          </div>
+        </details>
+        <h4>② 获取并填写 Key</h4>
+        <p>前往 <a class="external-link" href="https://api2d.com" target="_blank" rel="noopener noreferrer">https://api2d.com</a>，找到自己的 Key，并填入<span class="path">个人主页 → 账号与通知设置 → OpenRouter</span>。</p>
+        <h4>③ 充值</h4>
+        <p>在 <a class="external-link" href="https://api2d.com" target="_blank" rel="noopener noreferrer">api2d.com</a> 充值一定金额。</p>
+        <div class="step-gallery cols-2">
+        <figure class="step-shot">
+          <img src="{{ url_for('static', filename='guide/新/首页（点击复制密钥）.jpg') }}" alt="api2d 首页点击复制密钥" loading="lazy">
+          <figcaption>② 在 api2d 首页点击复制密钥</figcaption>
+        </figure>
+        <figure class="step-shot">
+          <img src="{{ url_for('static', filename='guide/新/首页（点击充值）.jpg') }}" alt="api2d 首页点击充值" loading="lazy">
+          <figcaption>③ 在 api2d 首页点击充值</figcaption>
+        </figure>
+        </div>
+
+        <h3 id="route-newapi">B-2. 旧中转（newapi）</h3>
+        <p>中转商选择<strong>“旧中转商 (vg)”</strong>。</p>
+        <h4>① 模型配置</h4>
+        <figure class="model-shot">
+          <img src="{{ url_for('static', filename='guide/模型参考/旧中转.jpg') }}" alt="newapi 旧中转推荐模型配置" loading="lazy">
+          <figcaption>newapi 旧中转推荐模型配置</figcaption>
+        </figure>
+        <details class="model-list" id="old-relay-models">
+          <summary>查看旧中转可用模型</summary>
+          <div class="model-list-body">
+            <p class="model-list-tip">旧中转的模型列表可能更新。请打开网站的“模型”模块，搜索需要的模型并复制模型 ID。</p>
+            <a class="model-source-link" href="https://vg.a3e.top" target="_blank" rel="noopener noreferrer">前往 vg.a3e.top 查看模型</a>
+          </div>
+        </details>
+        <h4>② 获取并填写 Key</h4>
+        <p>前往 <a class="external-link" href="https://vg.a3e.top" target="_blank" rel="noopener noreferrer">https://vg.a3e.top</a>，找到自己的 Key，并填入<span class="path">个人主页 → 账号与通知设置 → OpenRouter</span>。</p>
+        <div class="step-gallery cols-4">
+        <figure class="step-shot">
+          <img src="{{ url_for('static', filename='guide/旧/首页（点击控制台）.jpg') }}" alt="旧中转首页点击控制台" loading="lazy">
+          <figcaption>1. 在首页点击控制台</figcaption>
+        </figure>
+        <figure class="step-shot">
+          <img src="{{ url_for('static', filename='guide/旧/控制台（点击侧栏）.jpg') }}" alt="旧中转控制台点击侧栏" loading="lazy">
+          <figcaption>2. 在控制台打开侧栏</figcaption>
+        </figure>
+        <figure class="step-shot">
+          <img src="{{ url_for('static', filename='guide/旧/侧栏（点击令牌管理）.jpg') }}" alt="旧中转侧栏点击令牌管理" loading="lazy">
+          <figcaption>3. 在侧栏点击令牌管理</figcaption>
+        </figure>
+        <figure class="step-shot">
+          <img src="{{ url_for('static', filename='guide/旧/令牌管理（点击复制令牌）.jpg') }}" alt="旧中转复制令牌" loading="lazy">
+          <figcaption>4. 在令牌管理中复制令牌</figcaption>
+        </figure>
+        </div>
+        <h4>③ 充值</h4>
+        <p>在 <a class="external-link" href="https://vg.a3e.top" target="_blank" rel="noopener noreferrer">vg.a3e.top</a> 充值一定金额。</p>
+        <div class="step-gallery cols-2">
+        <figure class="step-shot">
+          <img src="{{ url_for('static', filename='guide/旧/侧栏（点击钱包管理）.jpg') }}" alt="旧中转侧栏点击钱包管理" loading="lazy">
+          <figcaption>1. 在侧栏点击钱包管理</figcaption>
+        </figure>
+        <figure class="step-shot">
+          <img src="{{ url_for('static', filename='guide/旧/钱包管理（充值）.jpg') }}" alt="旧中转钱包管理充值" loading="lazy">
+          <figcaption>2. 在钱包管理中完成充值</figcaption>
+        </figure>
+        </div>
+
+        <h3 id="route-deepseek">B-3. DeepSeek</h3>
+        <p>中转商选择<strong>“自定义网址”</strong>，在自定义 API 网址中填入 <strong>https://api.deepseek.com</strong>。</p>
+        <h4>① 模型配置</h4>
+        <figure class="model-shot">
+          <img src="{{ url_for('static', filename='guide/模型参考/Deepseek.jpg') }}" alt="DeepSeek 推荐模型配置" loading="lazy">
+          <figcaption>DeepSeek 推荐模型配置</figcaption>
+        </figure>
+        <details class="model-list" id="deepseek-models">
+          <summary>DeepSeek 可用模型（4 个）</summary>
+          <div class="model-list-body">
+            <p class="model-list-tip">点击右侧按钮复制模型 ID。请留意标有弃用日期的旧模型。</p>
+            <div class="model-grid">
+          <div class="model-item">
+            <span class="model-name"><code>deepseek-v4-flash</code></span>
+            <button class="model-copy" type="button" data-copy-model="deepseek-v4-flash">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>deepseek-v4-pro</code></span>
+            <button class="model-copy" type="button" data-copy-model="deepseek-v4-pro">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>deepseek-chat</code><span class="model-warning">将于 2026/07/24 弃用</span></span>
+            <button class="model-copy" type="button" data-copy-model="deepseek-chat">复制</button>
+          </div>
+          <div class="model-item">
+            <span class="model-name"><code>deepseek-reasoner</code><span class="model-warning">将于 2026/07/24 弃用</span></span>
+            <button class="model-copy" type="button" data-copy-model="deepseek-reasoner">复制</button>
+          </div>
+            </div>
+          </div>
+        </details>
+        <h4>② 创建并填写 Key</h4>
+        <p>前往 <a class="external-link" href="https://platform.deepseek.com" target="_blank" rel="noopener noreferrer">https://platform.deepseek.com</a> 创建 Key。请在创建时立即复制并妥善保存，之后将无法再次查看完整 Key。将 Key 填入<span class="path">个人主页 → 账号与通知设置 → OpenRouter</span>。</p>
+        <div class="step-gallery cols-3">
+        <figure class="step-shot">
+          <img src="{{ url_for('static', filename='guide/Deepseek/首页（点击侧栏）.jpg') }}" alt="DeepSeek 首页点击侧栏" loading="lazy">
+          <figcaption>1. 在 DeepSeek 首页打开侧栏</figcaption>
+        </figure>
+        <figure class="step-shot">
+          <img src="{{ url_for('static', filename='guide/Deepseek/侧栏（点击API keys）.jpg') }}" alt="DeepSeek 侧栏点击 API keys" loading="lazy">
+          <figcaption>2. 在侧栏点击 API keys</figcaption>
+        </figure>
+        <figure class="step-shot">
+          <img src="{{ url_for('static', filename='guide/Deepseek/API keys（点击创建API key）.jpg') }}" alt="DeepSeek 点击创建 API key" loading="lazy">
+          <figcaption>3. 点击创建 API key</figcaption>
+        </figure>
+        <figure class="step-shot">
+          <img src="{{ url_for('static', filename='guide/Deepseek/创建API key（填入名称并创建）.jpg') }}" alt="DeepSeek 填写 API key 名称并创建" loading="lazy">
+          <figcaption>4. 填写名称并创建 API key</figcaption>
+        </figure>
+        <figure class="step-shot">
+          <img src="{{ url_for('static', filename='guide/Deepseek/创建API key（点击复制）.jpg') }}" alt="DeepSeek 复制新创建的 API key" loading="lazy">
+          <figcaption>5. 立即复制并保存新创建的 API key</figcaption>
+        </figure>
+        </div>
+        <h4>③ 充值</h4>
+        <p>在 <a class="external-link" href="https://platform.deepseek.com" target="_blank" rel="noopener noreferrer">platform.deepseek.com</a> 充值一定金额。</p>
+        <div class="step-gallery cols-2">
+        <figure class="step-shot">
+          <img src="{{ url_for('static', filename='guide/Deepseek/侧栏（点击充值）.jpg') }}" alt="DeepSeek 侧栏点击充值" loading="lazy">
+          <figcaption>1. 在侧栏点击充值</figcaption>
+        </figure>
+        <figure class="step-shot">
+          <img src="{{ url_for('static', filename='guide/Deepseek/充值.jpg') }}" alt="DeepSeek 充值页面" loading="lazy">
+          <figcaption>2. 在充值页面完成充值</figcaption>
+        </figure>
+        </div>
+      </div>
+
+      <div class="notice">
+        如果模型不在下拉列表中，请在<span class="path">线路与模型设置 → 扩展模型列表</span>中输入模型 ID 并添加，然后再为对应功能选择该模型。
+      </div>
+    </section>
+
+
+    <section class="doc-section" id="errors">
+      <h2>5. 错误码、报错与熔断机制</h2>
+      <p>遇到 API 报错时，先停止连续重试，记下错误码并确认自己正在使用 <strong>Gemini 直连</strong>还是<strong>国内中转</strong>。不同线路的同一个错误码可能代表不同问题。</p>
+      <div class="notice">
+        请勿把完整 API Key、登录密码或含有 Key 的截图发给他人。联系管理员时只需提供错误码、所用线路、发生时间和已遮盖敏感信息的截图。
+      </div>
+
+      <h3>熔断是怎么工作的？</h3>
+      <p>熔断用于阻止错误配置持续请求服务商。它按“当前用户 + API 线路 + 同一错误码”分别计数，只影响出错的线路，不会冻结整个账号。</p>
+      <div class="breaker-flow">
+        <div class="breaker-step">
+          <strong>第 1 次：警告</strong>
+          <span>立即停止重试，根据错误码检查 Key、余额、模型 ID 或线路选择。</span>
+        </div>
+        <div class="breaker-step">
+          <strong>第 2 次：冷却 10 分钟</strong>
+          <span>倒计时结束前不要反复发送。利用冷却时间修正配置，再尝试一次。</span>
+        </div>
+        <div class="breaker-step">
+          <strong>第 3 次：禁用该 API 线路</strong>
+          <span>先修正配置，再联系管理员解除。另一条配置正确的线路仍可使用。</span>
+        </div>
+      </div>
+      <div class="notice">
+        非禁用状态下，某线路成功调用后会清除该线路的临时计数；同一错误超过约 30 分钟未再次触发，也会自动复位。已被禁用的线路不会自动恢复，需要管理员解除。
+      </div>
+
+      <details class="error-group" id="relay-errors">
+        <summary>国内中转常见错误码</summary>
+        <div class="error-group-body">
+          <div class="error-grid">
+            <div class="error-item">
+              <strong><code>401</code>身份验证失败 <span class="fatal-badge">计入熔断</span></strong>
+              <p>检查<span class="path">个人主页 → 账号与通知设置 → OpenRouter</span>是否填入了当前中转商的 Key。重新复制时不要带空格或换行。</p>
+            </div>
+            <div class="error-item">
+              <strong><code>402</code>账户点数或余额不足 <span class="fatal-badge">计入熔断</span></strong>
+              <p>登录正在使用的 API 服务商检查余额。完成充值后先确认到账，再返回重试。</p>
+            </div>
+            <div class="error-item">
+              <strong><code>403</code>模型代码或 Key 权限异常 <span class="fatal-badge">计入熔断</span></strong>
+              <p>确认中转商选择正确、模型 ID 完整且该 Key 有权使用此模型。优先从文档的可用模型列表复制。</p>
+            </div>
+            <div class="error-item">
+              <strong><code>525</code>中转服务器连接异常 <span class="fatal-badge">计入熔断</span></strong>
+              <p>通常是中转服务器连接问题。稍后再试；持续出现时记录时间并联系管理员。</p>
+            </div>
+            <div class="error-item">
+              <strong><code>429</code>请求过于频繁 <span class="temporary-badge">不计入熔断</span></strong>
+              <p>停止发送并等待至少一分钟，之后放慢发送频率。</p>
+            </div>
+            <div class="error-item">
+              <strong><code>524</code>AI 思考或请求超时 <span class="temporary-badge">不计入熔断</span></strong>
+              <p>缩短本次聊天内容，精简角色或全局人设后再试。</p>
+            </div>
+            <div class="error-item">
+              <strong><code>500+</code>服务商繁忙或临时故障 <span class="temporary-badge">通常不计入熔断</span></strong>
+              <p>等待几分钟再试，不要连续点击发送。若长时间持续，联系管理员并提供具体错误码。</p>
+            </div>
+            <div class="error-item">
+              <strong>Cloudflare 安全拦截</strong>
+              <p>系统会暂停所有国内中转请求约 3 分钟。这是服务器级临时保护，不一定是你的 Key 错误；等待倒计时结束即可。</p>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="error-group" id="gemini-errors">
+        <summary>Gemini 直连常见错误码</summary>
+        <div class="error-group-body">
+          <div class="error-grid">
+            <div class="error-item">
+              <strong><code>400</code>请求参数异常 <span class="fatal-badge">计入熔断</span></strong>
+              <p>先确认使用文档中的推荐模型配置。仍然出现时不要反复发送，联系管理员检查请求配置。</p>
+            </div>
+            <div class="error-item">
+              <strong><code>403</code>访问被拒绝 <span class="fatal-badge">计入熔断</span></strong>
+              <p>检查<span class="path">个人主页 → 账号与通知设置 → Gemini Key</span>是否正确，重新复制时不要带空格或换行。</p>
+            </div>
+            <div class="error-item">
+              <strong><code>429</code>访问频率受限 <span class="temporary-badge">不计入熔断</span></strong>
+              <p>停止发送并等待一段时间，之后降低发送频率。</p>
+            </div>
+            <div class="error-item">
+              <strong><code>500 / 503 / 504</code>谷歌服务临时故障 <span class="temporary-badge">不计入熔断</span></strong>
+              <p>系统会先自动重试；仍失败时等待几分钟。持续超时可精简聊天内容和人设。</p>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="error-group" id="other-errors">
+        <summary>其他常见提示</summary>
+        <div class="error-group-body">
+          <div class="error-grid">
+            <div class="error-item">
+              <strong>连接超时 / 网络连接波动</strong>
+              <p>检查当前网络，稍后重新发送一次。不要连续点击发送，以免造成重复消息或触发服务商限流。</p>
+            </div>
+            <div class="error-item">
+              <strong>AI 返回无法解析的异常信号</strong>
+              <p>通常是上游返回内容异常。稍后重试；反复出现时记录所用模型并联系管理员。</p>
+            </div>
+            <div class="error-item">
+              <strong>登录失效 / Unauthorized / 401</strong>
+              <p>如果是在页面接口而不是 AI 中转提示中看到，请重新登录账号，然后回到原页面重试。</p>
+            </div>
+            <div class="error-item">
+              <strong>记忆同步失败</strong>
+              <p>本次回复仍可能生成，但可能缺少部分单聊或群聊上下文。可稍后重试；持续出现时联系管理员。</p>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <h3>线路被禁用后怎么办？</h3>
+      <ol>
+        <li>不要继续重复发送，先根据最后一个错误码修正 Key、余额、模型或线路设置。</li>
+        <li>可以切换到另一条已经正确配置的 API 线路继续使用；线路禁用不等于账号冻结。</li>
+        <li>确认配置已经修正后联系管理员解除，并提供错误码、线路、发生时间和已遮盖敏感信息的截图。</li>
+        <li>解除后先发送一条短消息测试。若仍报同一错误，停止重试并再次检查配置。</li>
+      </ol>
+    </section>
+
+
+    <section class="doc-section" id="pwa-install">
+      <h2>6. 把网站安装成 PWA 应用</h2>
+      <p>把“Sakura 樱语”添加到手机桌面后，可以像打开普通 App 一样点击图标进入，不必每次重新寻找网址。这是网站的 PWA 版本，不需要下载 APK，也不需要经过应用商店。</p>
+      <div class="notice">
+        PWA 仍然需要网络才能正常聊天。安装只会添加应用入口，不会创建新账号；请继续使用原来的邮箱和密码登录。
+      </div>
+
+      <div class="install-flow">
+        <div class="install-step">
+          <span class="install-step-number">1</span>
+          <strong>打开网站</strong>
+          <span>在手机浏览器访问 <a href="/">Sakura 樱语首页</a>，等待页面完整加载。</span>
+        </div>
+        <div class="install-step">
+          <span class="install-step-number">2</span>
+          <strong>打开浏览器菜单</strong>
+          <span>Android 点击“⋮”或菜单按钮；iPhone Safari 点击分享按钮。</span>
+        </div>
+        <div class="install-step">
+          <span class="install-step-number">3</span>
+          <strong>确认安装</strong>
+          <span>选择“安装应用”或“添加到主屏幕”，确认后桌面会出现“樱语”图标。</span>
+        </div>
+      </div>
+
+      <div class="platform-grid">
+        <div class="pwa-card">
+          <h3>Android · Chrome</h3>
+          <ol>
+            <li>使用 Chrome 打开 Sakura 樱语首页。</li>
+            <li>点击地址栏右侧或右上角的<strong>三个点“⋮”</strong>。</li>
+            <li>选择<span class="pwa-path">添加到主屏幕 → 安装</span>；部分版本会直接显示“安装应用”。</li>
+            <li>按照屏幕提示确认，返回桌面查看“樱语”图标。</li>
+          </ol>
+        </div>
+
+        <div class="pwa-card">
+          <h3>Android · Firefox（推荐）</h3>
+          <ol>
+            <li>使用 Firefox 打开 Sakura 樱语首页。</li>
+            <li>点击浏览器的<strong>菜单按钮</strong>。</li>
+            <li>选择<span class="pwa-path">安装</span>。如果只看到“添加到主屏幕”，选择它也可以。</li>
+            <li>点击“自动添加”，或按照提示把图标拖到桌面。</li>
+          </ol>
+        </div>
+
+        <div class="pwa-card">
+          <h3>iPhone / iPad · Safari</h3>
+          <ol>
+            <li>请使用 Safari 打开 Sakura 樱语首页。</li>
+            <li>点击<strong>分享按钮</strong>（方框上方有一个向上的箭头）；部分 Safari 布局需要先点“更多”，再点“分享”。</li>
+            <li>向下滚动，选择<span class="pwa-path">添加到主屏幕</span>。</li>
+            <li>如果看到“作为 Web App 打开”，将它开启，然后点击右上角“添加”。</li>
+          </ol>
+        </div>
+
+        <div class="pwa-card">
+          <h3>其他 Android 浏览器</h3>
+          <ol>
+            <li>打开网站后点击右上角“三个点”或“三条横线”。</li>
+            <li>寻找“安装应用”“添加到桌面”“添加到主屏幕”等选项。</li>
+            <li>确认名称和图标后完成添加。不同手机品牌的文字和位置可能略有不同。</li>
+          </ol>
+        </div>
+      </div>
+
+      <details class="error-group" id="pwa-troubleshooting">
+        <summary>找不到安装入口怎么办？</summary>
+        <div class="error-group-body">
+          <div class="error-grid">
+            <div class="error-item">
+              <strong>菜单里没有“安装应用”</strong>
+              <p>继续寻找“添加到主屏幕”或“添加至桌面”。先等待网站完整加载并刷新一次，也可以更新浏览器后重试。</p>
+            </div>
+            <div class="error-item">
+              <strong>iPhone 没有“添加到主屏幕”</strong>
+              <p>确认正在使用 Safari。在分享菜单底部选择“编辑操作”，把“添加到主屏幕”加入可用操作。</p>
+            </div>
+            <div class="error-item">
+              <strong>安装后仍显示浏览器地址栏</strong>
+              <p>当前添加的可能只是网页快捷方式。删除该图标后重新操作，并优先选择“安装应用”或开启“作为 Web App 打开”。</p>
+            </div>
+            <div class="error-item">
+              <strong>安装后无法离线聊天</strong>
+              <p>这是正常现象。PWA 提供接近 App 的打开方式，但聊天、同步和 AI 回复仍需要网络。</p>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <div class="notice">
+        iPhone / iPad 如需浏览器消息推送，请先把网站添加到主屏幕，再从桌面的“樱语”图标打开，然后进入<span class="path">个人主页 → 浏览器消息推送</span>开启权限。
+      </div>
+    </section>
+
+    <div class="footer">本文档可直接通过 <strong>/guide</strong> 访问，无需登录。</div>
+  </main>
+  <button id="guide-back-to-top" class="back-to-top" type="button" aria-label="返回文档顶部">
+    <span aria-hidden="true">↑</span><span>顶部</span>
+  </button>
+  <div id="guide-image-lightbox" class="image-lightbox" role="dialog" aria-modal="true" aria-label="查看原图" hidden>
+    <button id="guide-lightbox-close" class="lightbox-close" type="button" aria-label="关闭原图">×</button>
+    <img id="guide-lightbox-image" src="" alt="">
+  </div>
+  <script>
+    (function () {
+      const input = document.getElementById('guide-search-input');
+      const clearButton = document.getElementById('guide-search-clear');
+      const results = document.getElementById('guide-search-results');
+      const targets = Array.from(document.querySelectorAll(
+        '.doc-section h2, .doc-section h3, .doc-section h4, .doc-section p, .doc-section li, .doc-section figcaption, .doc-section .notice, .doc-section .model-name, .doc-section .error-item, .doc-section .breaker-step, .doc-section .install-step, .doc-section .pwa-card'
+      ));
+      const headings = Array.from(document.querySelectorAll('.doc-section h2, .doc-section h3, .doc-section h4'));
+
+      function headingFor(target) {
+        if (target.matches('h2, h3, h4')) return target.textContent.trim();
+        let nearest = '';
+        for (const heading of headings) {
+          if (heading.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_FOLLOWING) {
+            nearest = heading.textContent.trim();
+          } else if (heading !== target) {
+            break;
+          }
+        }
+        return nearest || '使用文档';
+      }
+
+      function closeResults() {
+        results.hidden = true;
+        results.replaceChildren();
+      }
+
+      function goToTarget(target) {
+        closeResults();
+        const collapsedList = target.closest('details');
+        if (collapsedList) collapsedList.open = true;
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.classList.remove('search-hit');
+        void target.offsetWidth;
+        target.classList.add('search-hit');
+        window.setTimeout(() => target.classList.remove('search-hit'), 1900);
+      }
+
+      function renderResults() {
+        const query = input.value.trim().toLocaleLowerCase();
+        clearButton.classList.toggle('visible', Boolean(query));
+        if (!query) {
+          closeResults();
+          return;
+        }
+
+        const matched = targets.filter((target) =>
+          target.textContent.trim().toLocaleLowerCase().includes(query)
+        ).slice(0, 12);
+
+        results.replaceChildren();
+        results.hidden = false;
+        if (!matched.length) {
+          const empty = document.createElement('div');
+          empty.className = 'search-empty';
+          empty.textContent = '没有找到相关内容，试试更短的关键词';
+          results.appendChild(empty);
+          return;
+        }
+
+        for (const target of matched) {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'search-result';
+          button.setAttribute('role', 'option');
+
+          const title = document.createElement('span');
+          title.className = 'search-result-title';
+          title.textContent = headingFor(target);
+
+          const snippet = document.createElement('span');
+          snippet.className = 'search-result-text';
+          snippet.textContent = target.textContent.trim();
+
+          button.append(title, snippet);
+          button.addEventListener('click', () => goToTarget(target));
+          results.appendChild(button);
+        }
+      }
+
+      input.addEventListener('input', renderResults);
+      input.addEventListener('focus', renderResults);
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          input.value = '';
+          renderResults();
+          input.blur();
+        }
+        if (event.key === 'Enter') {
+          const first = results.querySelector('.search-result');
+          if (first) first.click();
+        }
+      });
+      clearButton.addEventListener('click', () => {
+        input.value = '';
+        renderResults();
+        input.focus();
+      });
+      document.addEventListener('click', (event) => {
+        if (!event.target.closest('.guide-search')) closeResults();
+      });
+    })();
+  </script>
+  <script>
+    (function () {
+      const lightbox = document.getElementById('guide-image-lightbox');
+      const lightboxImage = document.getElementById('guide-lightbox-image');
+      const closeButton = document.getElementById('guide-lightbox-close');
+      let previousFocus = null;
+
+      function closeLightbox() {
+        if (lightbox.hidden) return;
+        lightbox.hidden = true;
+        lightboxImage.src = '';
+        document.body.style.overflow = '';
+        if (previousFocus) previousFocus.focus();
+      }
+
+      document.querySelectorAll('.step-shot img, .model-shot img').forEach((image) => {
+        image.tabIndex = 0;
+        image.setAttribute('role', 'button');
+        image.setAttribute('aria-label', '查看原图：' + image.alt);
+
+        function openLightbox() {
+          previousFocus = image;
+          lightboxImage.src = image.currentSrc || image.src;
+          lightboxImage.alt = image.alt;
+          lightbox.hidden = false;
+          document.body.style.overflow = 'hidden';
+          closeButton.focus();
+        }
+
+        image.addEventListener('click', openLightbox);
+        image.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            openLightbox();
+          }
+        });
+      });
+
+      closeButton.addEventListener('click', closeLightbox);
+      lightbox.addEventListener('click', (event) => {
+        if (event.target === lightbox) closeLightbox();
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeLightbox();
+      });
+    })();
+  </script>
+  <script>
+    (function () {
+      const topNav = document.getElementById('guide-top-nav');
+      const backToTop = document.getElementById('guide-back-to-top');
+
+      topNav.querySelectorAll('a').forEach((link) => {
+        link.addEventListener('click', () => topNav.removeAttribute('open'));
+      });
+      document.addEventListener('click', (event) => {
+        if (!event.target.closest('#guide-top-nav')) topNav.removeAttribute('open');
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') topNav.removeAttribute('open');
+      });
+
+      function updateBackToTop() {
+        backToTop.classList.toggle('visible', window.scrollY > 480);
+      }
+      window.addEventListener('scroll', updateBackToTop, { passive: true });
+      backToTop.addEventListener('click', () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+      updateBackToTop();
+    })();
+  </script>
+  <script>
+    (function () {
+      async function copyText(value) {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(value);
+          return;
+        }
+        const helper = document.createElement('textarea');
+        helper.value = value;
+        helper.setAttribute('readonly', '');
+        helper.style.position = 'fixed';
+        helper.style.opacity = '0';
+        document.body.appendChild(helper);
+        helper.select();
+        document.execCommand('copy');
+        helper.remove();
+      }
+
+      document.addEventListener('click', async (event) => {
+        const button = event.target.closest('[data-copy-model]');
+        if (!button) return;
+        const originalLabel = button.textContent;
+        try {
+          await copyText(button.dataset.copyModel);
+          button.textContent = '已复制';
+          button.classList.add('copied');
+        } catch (error) {
+          button.textContent = '复制失败';
+        }
+        window.setTimeout(() => {
+          button.textContent = originalLabel;
+          button.classList.remove('copied');
+        }, 1400);
+      });
+    })();
+  </script>
+</body>
+</html>

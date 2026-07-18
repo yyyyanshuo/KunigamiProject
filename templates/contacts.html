@@ -58,14 +58,20 @@
         }
 
         /* 顶部加号按钮 */
-        .header-add-btn {
-            display: flex; align-items: center; justify-content: center;
-            width: 30px; height: 30px; border-radius: 50%;
-            background: var(--primary-light); color: var(--primary-dark);
-            cursor: pointer; transition: all 0.2s;
-        }
-        .header-add-btn:active { transform: scale(0.9); background: var(--primary-color); color: #fff; }
-        .header-add-btn svg { width: 16px; height: 16px; stroke-width: 2.5px; }
+	        .header-add-btn {
+	            display: flex; align-items: center; justify-content: center;
+	            width: 30px; height: 30px; border-radius: 50%;
+	            background: var(--primary-light); color: var(--primary-dark);
+	            cursor: pointer; transition: all 0.2s;
+	        }
+	        .header-add-btn:active { transform: scale(0.9); background: var(--primary-color); color: #fff; }
+	        .header-add-btn svg { width: 16px; height: 16px; stroke-width: 2.5px; }
+	        .header-toggle-btn {
+	            height: 30px; padding: 0 10px; border-radius: 16px; border: 1px solid var(--border-color);
+	            background: #fff; color: var(--primary-dark); font-size: 12px; font-weight: 700;
+	            cursor: pointer; white-space: nowrap; box-shadow: var(--shadow-sm);
+	        }
+	        .header-toggle-btn.off { color: #94a3b8; background: #f8fafc; }
 
         /* 消息列表区 */
         .contact-list { padding-bottom: 100px; }
@@ -245,8 +251,9 @@
     <span class="header-title" id="headerTitle">消息</span>
     <div class="header-actions" style="position:relative;">
         <!-- 多选/加号（进入多选后整块隐藏） -->
-        <div class="header-add-wrap">
-            <div class="header-add-btn" id="btnMultiselect" onclick="toggleSelectMode()" title="多选">
+	        <div class="header-add-wrap">
+	            <button type="button" class="header-toggle-btn" id="globalBedtimeDiaryBtn" onclick="toggleGlobalBedtimeDiary()" title="全局睡前总结">关闭睡前总结</button>
+	            <div class="header-add-btn" id="btnMultiselect" onclick="toggleSelectMode()" title="多选">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" id="iconMultiselect">
                     <rect x="3" y="3" width="7" height="7"></rect>
                     <rect x="14" y="3" width="7" height="7"></rect>
@@ -262,6 +269,7 @@
             </div>
         </div>
         <div id="plusMenu">
+            <div onclick="location.href='/forum'"><span style="font-size:14px;">💬</span> 论坛生成</div>
             <div onclick="location.href='/square'"><span style="font-size:14px;">🌟</span> 角色广场</div>
             <div onclick="openAddCharModal()"><span style="font-size:14px;">👤</span> 新建联系人</div>
             <div onclick="openAddGroupModal()"><span style="font-size:14px;">👥</span> 新建群聊</div>
@@ -348,12 +356,14 @@
             <div data-action="delete">删除</div>
             <div data-action="pin">置顶</div>
             <div data-action="unpin">取消置顶</div>
-            <div data-action="light_sleep_on">开启浅睡眠（仅单聊）</div>
-            <div data-action="light_sleep_off">关闭浅睡眠（仅单聊）</div>
-            <div data-action="deep_sleep_on">开启深睡眠（仅单聊）</div>
-            <div data-action="deep_sleep_off">关闭深睡眠（仅单聊）</div>
-            <div data-action="deep_sleep_time">设置深睡眠时间（仅单聊）</div>
-            <div data-action="active_mode_on">开启主动消息（仅群聊）</div>
+	            <div data-action="light_sleep_on">开启浅睡眠（仅单聊）</div>
+	            <div data-action="light_sleep_off">关闭浅睡眠（仅单聊）</div>
+	            <div data-action="deep_sleep_on">开启深睡眠（仅单聊）</div>
+	            <div data-action="deep_sleep_off">关闭深睡眠（仅单聊）</div>
+	            <div data-action="deep_sleep_time">设置深睡眠时间（仅单聊）</div>
+	            <div data-action="bedtime_diary_on">开启睡前总结（仅单聊）</div>
+	            <div data-action="bedtime_diary_off">关闭睡前总结（仅单聊）</div>
+	            <div data-action="active_mode_on">开启主动消息（仅群聊）</div>
             <div data-action="active_mode_off">关闭主动消息（仅群聊）</div>
         </div>
     </div>
@@ -381,8 +391,43 @@
 </div>
 
 <script>
-    // --- 全局变量缓存 ---
-    let allContactsData = []; // 存一下API返回的数据，方便弹窗里复用
+	    // --- 全局变量缓存 ---
+	    let allContactsData = []; // 存一下API返回的数据，方便弹窗里复用
+	    let globalBedtimeDiaryEnabled = true;
+
+	    function renderGlobalBedtimeDiaryButton() {
+	        const btn = document.getElementById('globalBedtimeDiaryBtn');
+	        if (!btn) return;
+	        btn.textContent = globalBedtimeDiaryEnabled ? '关闭睡前总结' : '开启睡前总结';
+	        btn.classList.toggle('off', !globalBedtimeDiaryEnabled);
+	    }
+
+	    async function loadGlobalBedtimeDiarySetting() {
+	        try {
+	            const res = await fetch('/api/bedtime_diary_settings');
+	            const data = await res.json();
+	            globalBedtimeDiaryEnabled = data.enabled !== false;
+	        } catch (e) {
+	            globalBedtimeDiaryEnabled = true;
+	        }
+	        renderGlobalBedtimeDiaryButton();
+	    }
+
+	    async function toggleGlobalBedtimeDiary() {
+	        const next = !globalBedtimeDiaryEnabled;
+	        try {
+	            const res = await fetch('/api/bedtime_diary_settings', {
+	                method: 'POST',
+	                headers: {'Content-Type': 'application/json'},
+	                body: JSON.stringify({ enabled: next })
+	            });
+	            if (!res.ok) throw new Error('save failed');
+	            globalBedtimeDiaryEnabled = next;
+	            renderGlobalBedtimeDiaryButton();
+	        } catch (e) {
+	            alert('保存失败，请稍后重试');
+	        }
+	    }
 
     // 菜单逻辑
     function toggleMenu() {
@@ -635,15 +680,19 @@
                         else await fetch(`/api/${x.id}/update_meta`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ pinned: false }) });
                     } catch (e) { console.error(e); }
                 }
-            } else if (op.action === 'light_sleep') {
-                for (const x of op.items) {
-                    try { await fetch(`/api/${x.id}/update_meta`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ light_sleep: op.value }) }); } catch (e) { console.error(e); }
-                }
-            } else if (op.action === 'deep_sleep') {
-                for (const x of op.items) {
-                    try { await fetch(`/api/${x.id}/update_meta`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ deep_sleep: op.value }) }); } catch (e) { console.error(e); }
-                }
-            } else if (op.action === 'deep_sleep_time') {
+	            } else if (op.action === 'light_sleep') {
+	                for (const x of op.items) {
+	                    try { await fetch(`/api/${x.id}/update_meta`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ light_sleep: op.value }) }); } catch (e) { console.error(e); }
+	                }
+	            } else if (op.action === 'deep_sleep') {
+	                for (const x of op.items) {
+	                    try { await fetch(`/api/${x.id}/update_meta`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ deep_sleep: op.value }) }); } catch (e) { console.error(e); }
+	                }
+	            } else if (op.action === 'bedtime_diary') {
+	                for (const x of op.items) {
+	                    try { await fetch(`/api/${x.id}/update_meta`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ bedtime_diary_enabled: op.value }) }); } catch (e) { console.error(e); }
+	                }
+	            } else if (op.action === 'deep_sleep_time') {
                 for (const x of op.items) {
                     try { await fetch(`/api/${x.id}/update_meta`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ ds_start: op.value.ds_start, ds_end: op.value.ds_end }) }); } catch (e) { console.error(e); }
                 }
@@ -687,11 +736,12 @@
                 if (!ids.has(c.id)) return;
                 const item = op.items.find(i => i.id === c.id);
                 if (!item || (item.type === 'group' && c.type !== 'group') || (item.type === 'char' && c.type !== 'char')) return;
-                if (op.action === 'pin') c.pinned = true;
-                else if (op.action === 'unpin') c.pinned = false;
-                else if (op.action === 'light_sleep') c.light_sleep = op.value;
-                else if (op.action === 'deep_sleep') c.deep_sleep = op.value;
-                else if (op.action === 'deep_sleep_time') { c.ds_start = op.value.ds_start; c.ds_end = op.value.ds_end; }
+	                if (op.action === 'pin') c.pinned = true;
+	                else if (op.action === 'unpin') c.pinned = false;
+	                else if (op.action === 'light_sleep') c.light_sleep = op.value;
+	                else if (op.action === 'deep_sleep') c.deep_sleep = op.value;
+	                else if (op.action === 'bedtime_diary') c.bedtime_diary_enabled = op.value;
+	                else if (op.action === 'deep_sleep_time') { c.ds_start = op.value.ds_start; c.ds_end = op.value.ds_end; }
                 else if (op.action === 'active_mode') c.active_mode = op.value;
             });
         }
@@ -730,14 +780,22 @@
             applyOpLocally({ action: 'light_sleep', value: val, items: chars });
             return;
         }
-        if (action === 'deep_sleep_on' || action === 'deep_sleep_off') {
-            if (chars.length === 0) { alert('请选择单聊联系人后再操作。'); return; }
-            if (!confirm(`将对选中的 ${chars.length} 个单聊${action === 'deep_sleep_on' ? '开启' : '关闭'}深睡眠（点保存后生效）。`)) return;
-            const val = action === 'deep_sleep_on';
-            pendingOps.push({ action: 'deep_sleep', value: val, items: chars });
-            applyOpLocally({ action: 'deep_sleep', value: val, items: chars });
-            return;
-        }
+	        if (action === 'deep_sleep_on' || action === 'deep_sleep_off') {
+	            if (chars.length === 0) { alert('请选择单聊联系人后再操作。'); return; }
+	            if (!confirm(`将对选中的 ${chars.length} 个单聊${action === 'deep_sleep_on' ? '开启' : '关闭'}深睡眠（点保存后生效）。`)) return;
+	            const val = action === 'deep_sleep_on';
+	            pendingOps.push({ action: 'deep_sleep', value: val, items: chars });
+	            applyOpLocally({ action: 'deep_sleep', value: val, items: chars });
+	            return;
+	        }
+	        if (action === 'bedtime_diary_on' || action === 'bedtime_diary_off') {
+	            if (chars.length === 0) { alert('请选择单聊联系人后再操作。'); return; }
+	            if (!confirm(`将对选中的 ${chars.length} 个单聊${action === 'bedtime_diary_on' ? '开启' : '关闭'}睡前总结（点保存后生效）。`)) return;
+	            const val = action === 'bedtime_diary_on';
+	            pendingOps.push({ action: 'bedtime_diary', value: val, items: chars });
+	            applyOpLocally({ action: 'bedtime_diary', value: val, items: chars });
+	            return;
+	        }
         if (action === 'deep_sleep_time') {
             if (chars.length === 0) { alert('请选择单聊联系人后再操作。'); return; }
             document.getElementById('ds_start_input').value = '';
@@ -773,8 +831,9 @@
         closeDeepSleepTimeModal();
     }
 
-    // 页面加载时请求
-    loadContacts();
+	    // 页面加载时请求
+	    loadGlobalBedtimeDiarySetting();
+	    loadContacts();
 
     // 页面重新显示时也刷新(比如从聊天页退回来)
     window.onpageshow = function(event) {

@@ -1,0 +1,1792 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>世界</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#1a1a2e">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <script src="/static/theme-loader.js"></script>
+  <script>
+    window.GLOBAL_COS_BASE_URL = "{{ COS_BASE_URL | default('') }}";
+    window.GLOBAL_USER_PREFIX = "users/{{ session.get('user_id', 1) }}";
+  </script>
+  <style>
+    :root {
+      --primary-color: #ff9eb5;
+      --primary-hover: #ff89a5;
+
+      --secondary-color: #6ea8ff;
+
+      --bg-color: #fafafb;
+      --card-bg: rgba(255,255,255,0.78);
+
+      --text-main: #1f2937;
+      --text-muted: #6b7280;
+
+      --border-color: rgba(0,0,0,0.08);
+
+      --shadow-sm:
+        0 4px 20px rgba(0,0,0,0.06);
+
+      --shadow-md:
+        0 10px 30px rgba(0,0,0,0.08);
+
+      --glass-blur: blur(18px);
+    }
+
+    *{
+      box-sizing:border-box;
+      -webkit-tap-highlight-color:transparent;
+    }
+
+    html,
+    body{
+      width:100%;
+      height:100%;
+      margin:0;
+      padding:0;
+    }
+
+    body{
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "SF Pro Display",
+        "PingFang SC",
+        "Helvetica Neue",
+        sans-serif;
+
+      background:var(--bg-color);
+      color:var(--text-main);
+
+      overflow:hidden;
+      touch-action:none;
+    }
+
+    /* =========================
+      顶部栏
+      ========================= */
+
+    #top-bar{
+      position:fixed;
+      top:0;
+      left:0;
+      width:100%;
+
+      height:72px;
+
+      padding:
+        calc(env(safe-area-inset-top) + 12px)
+        16px
+        12px;
+
+      display:flex;
+      align-items:center;
+      gap:12px;
+
+      z-index:100;
+
+      background:rgba(255,255,255,0.85);
+
+      backdrop-filter:var(--glass-blur);
+      -webkit-backdrop-filter:var(--glass-blur);
+
+      border-bottom:1px solid var(--border-color);
+
+      box-shadow:var(--shadow-sm);
+    }
+
+    .map-title {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      margin-right: auto;
+    }
+
+    .map-title .title-text {
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--text-main);
+      letter-spacing: 1px;
+    }
+
+    .map-title .title-sub {
+      font-size: 10px;
+      color: var(--text-muted);
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+
+    #char-select{
+      flex:1;
+
+      height:44px;
+
+      border:none;
+      outline:none;
+
+      border-radius:16px;
+
+      padding:0 14px;
+
+      font-size:14px;
+      font-weight:500;
+
+      color:var(--text-main);
+
+      background:
+        rgba(255,255,255,0.9);
+
+      box-shadow:
+        inset 0 0 0 1px rgba(0,0,0,0.06);
+    }
+
+    #char-select:focus{
+      box-shadow:
+        inset 0 0 0 2px rgba(110,168,255,.4);
+    }
+
+    .btn-me{
+      width:44px;
+      height:44px;
+
+      border:none;
+      cursor:pointer;
+
+      border-radius:50%;
+
+      font-size:14px;
+      font-weight:700;
+
+      color:white;
+
+      background:
+        linear-gradient(
+          135deg,
+          #6ea8ff,
+          #5d8fff
+        );
+
+      box-shadow:
+        0 8px 20px rgba(110,168,255,.3);
+    }
+
+    .btn-me.active{
+      background:
+        linear-gradient(
+          135deg,
+          #ff9eb5,
+          #ff89a5
+        );
+
+      box-shadow:
+        0 8px 20px rgba(255,158,181,.35);
+    }
+
+    /* =========================
+      动作控制栏 (Action Bar)
+      ========================= */
+    #action-bar {
+      position: fixed;
+      top: 72px;
+      left: 0;
+      width: 100%;
+      height: 52px;
+      padding: 0 12px;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: nowrap;
+      overflow: hidden;
+      z-index: 90;
+      background: rgba(255,255,255,0.85);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border-bottom: 1px solid var(--border-color);
+      box-shadow: var(--shadow-sm);
+    }
+
+    #action-current-loc {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 90px;
+      flex-shrink: 0;
+    }
+
+    #loc-input {
+      flex: 1 1 auto;
+      min-width: 60px;
+      max-width: 130px;
+      height: 36px;
+      border: none;
+      border-radius: 12px;
+      padding: 0 12px;
+      font-size: 13px;
+      outline: none;
+      background: #f5f6fa;
+      color: var(--text-main);
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06);
+      transition: all 0.2s;
+    }
+
+    #loc-input:focus {
+      background: white;
+      box-shadow: inset 0 0 0 2px rgba(110,168,255,0.4);
+    }
+
+    #btn-move {
+      height: 36px;
+      padding: 0 14px;
+      border: none;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 700;
+      color: white;
+      background: linear-gradient(135deg, #6ea8ff, #5d8fff);
+      cursor: pointer;
+      box-shadow: 0 4px 10px rgba(110,168,255,0.2);
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+    #btn-move:active {
+      transform: scale(0.96);
+    }
+
+    .edit-known-btn {
+      height: 36px;
+      padding: 0 10px;
+      border: 1px solid rgba(0,0,0,0.1);
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-main);
+      background: rgba(255,255,255,0.8);
+      cursor: pointer;
+      transition: 0.2s;
+      flex-shrink: 0;
+      white-space: nowrap;
+      display: none;
+    }
+    .edit-known-btn.visible { display: block; }
+    .edit-known-btn:active { transform: scale(0.96); background: #f0f0f5; }
+
+    /* =========================
+      地图
+      ========================= */
+
+    canvas{
+      position:absolute;
+      top:72px;
+      left:0;
+
+      display:block;
+
+      background:
+        linear-gradient(
+          to bottom,
+          #ffffff,
+          #f7f8fb
+        );
+    }
+
+    /* =========================
+      底部控制栏
+      ========================= */
+
+    #bottom-bar{
+      position:fixed;
+
+      left:50%;
+      transform:translateX(-50%);
+
+      bottom:72px;
+
+      height:56px;
+
+      padding:0 10px;
+
+      display:flex;
+      align-items:center;
+      gap:8px;
+
+      z-index:100;
+
+      border-radius:999px;
+
+      background:rgba(255,255,255,0.85);
+
+      backdrop-filter:var(--glass-blur);
+      -webkit-backdrop-filter:var(--glass-blur);
+
+      border:1px solid var(--border-color);
+
+      box-shadow:var(--shadow-md);
+    }
+
+    #bottom-bar button{
+      height:40px;
+
+      border:1px solid rgba(0,0,0,0.08);
+      cursor:pointer;
+
+      border-radius:12px;
+
+      padding:0 14px;
+
+      background:white;
+
+      color:var(--text-main);
+
+      font-size:13px;
+      font-weight:600;
+
+      transition:.2s;
+    }
+
+    #bottom-bar button:hover{
+      transform:translateY(-1px);
+    }
+
+    #bottom-bar button:active{
+      transform:scale(.96);
+    }
+
+    #bottom-bar button.primary{
+      color:white;
+      border: 1px solid rgba(255,137,165,0.8);
+      background:
+        linear-gradient(
+          135deg,
+          #ff9eb5,
+          #ff89a5
+        );
+    }
+
+    /* =========================
+      地点气泡
+      ========================= */
+
+    .location-info-bubble{
+      position:fixed;
+
+      max-width:260px;
+
+      padding:14px 16px;
+
+      border-radius:18px;
+
+      z-index:150;
+
+      display:none;
+
+      background:rgba(255,255,255,0.9);
+
+      backdrop-filter:var(--glass-blur);
+      -webkit-backdrop-filter:var(--glass-blur);
+
+      border:1px solid var(--border-color);
+
+      box-shadow:var(--shadow-md);
+    }
+
+    .location-info-bubble.show{
+      display:block;
+    }
+
+    .location-info-bubble .name{
+      font-size:16px;
+      font-weight:700;
+      color:var(--text-main);
+      margin-bottom:0;
+    }
+
+    .location-info-bubble .desc{
+      font-size:13px;
+      line-height:1.5;
+
+      color:var(--text-muted);
+
+      margin-bottom:8px;
+    }
+
+    .location-info-bubble .coords{
+      font-size:11px;
+
+      color:#9ca3af;
+    }
+
+    /* =========================
+      弹窗
+      ========================= */
+
+    .modal-overlay{
+      position:fixed;
+      inset:0;
+
+      display:none;
+
+      align-items:center;
+      justify-content:center;
+
+      z-index:2000;
+
+      background:
+        rgba(0,0,0,.35);
+
+      backdrop-filter:blur(8px);
+    }
+
+    .modal-overlay.show{
+      display:flex;
+    }
+
+    .modal-box{
+      width:90%;
+      max-width:420px;
+
+      padding:24px;
+
+      border-radius:28px;
+
+      background:white;
+
+      border:1px solid rgba(0,0,0,.06);
+
+      box-shadow:
+        0 10px 30px rgba(0,0,0,.15);
+    }
+
+    .modal-box h3{
+      margin:0 0 20px;
+
+      font-size:22px;
+      font-weight:700;
+
+      color:var(--text-main);
+    }
+
+    .modal-box label{
+      display:block;
+
+      margin-bottom:6px;
+
+      font-size:12px;
+      font-weight:600;
+
+      color:var(--text-muted);
+    }
+
+    .modal-box input,
+    .modal-box textarea{
+      width:100%;
+
+      border:none;
+      outline:none;
+
+      padding:12px 14px;
+
+      margin-bottom:14px;
+
+      border-radius:14px;
+
+      background:#f5f6fa;
+
+      font-size:14px;
+
+      color:var(--text-main);
+
+      font-family:inherit;
+    }
+
+    .modal-box input:focus,
+    .modal-box textarea:focus{
+      background:white;
+
+      box-shadow:
+        inset 0 0 0 2px rgba(110,168,255,.35);
+    }
+
+    .modal-box textarea{
+      resize:vertical;
+      min-height:90px;
+    }
+
+    .modal-box .btn-row{
+      display:flex;
+      gap:10px;
+
+      margin-top:8px;
+    }
+
+    .modal-box .btn-row button{
+      flex:1;
+
+      height:44px;
+
+      border:none;
+      cursor:pointer;
+
+      border-radius:14px;
+
+      font-size:14px;
+      font-weight:700;
+    }
+
+    .btn-cancel{
+      background:#f3f4f6;
+      color:#6b7280;
+      border: 1px solid rgba(0,0,0,0.08);
+    }
+
+    .btn-ok{
+      color:white;
+      border: 1px solid rgba(255,137,165,0.8);
+      background:
+        linear-gradient(
+          135deg,
+          #ff9eb5,
+          #ff89a5
+        );
+    }
+  </style>
+</head>
+<body>
+<div id="top-bar">
+  <div class="map-title">
+    <div class="title-text">世界地图</div>
+    <div class="title-sub">World Map</div>
+  </div>
+
+  <select id="char-select" onchange="onSelectCharacter()">
+    <option value="">-- 选择角色 --</option>
+  </select>
+  <button class="btn-me" id="btn-me" onclick="toggleUserMode()" title="我的位置">我</button>
+</div>
+
+<div id="action-bar">
+  <span id="action-current-loc">当前: -</span>
+  <input type="text" id="loc-input" list="loc-datalist" placeholder="地点或坐标x,y">
+  <datalist id="loc-datalist"></datalist>
+  <button id="btn-move" onclick="moveSelected()">移动</button>
+  <button id="btn-known" class="edit-known-btn" onclick="openKnownLocationsModal()">✎ 认知</button>
+</div>
+
+<canvas id="map-canvas"></canvas>
+<div id="bottom-bar">
+  <button onclick="resetView()" title="回中">⟲</button>
+  <button onclick="zoomIn()">+</button>
+  <button onclick="zoomOut()">-</button>
+  <button class="primary" onclick="showAddLocationModal()" title="新增地点">⊕</button>
+</div>
+<!-- 地点详情气泡 -->
+<div class="location-info-bubble" id="location-bubble">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+    <div class="name" id="bubble-name" style="margin-bottom:0;"></div>
+    <button onclick="openEditLocationModal()" style="background:none;border:none;font-size:14px;cursor:pointer;padding:2px 6px;color:var(--text-muted);">✎</button>
+  </div>
+  <div class="desc" id="bubble-desc"></div>
+  <div class="coords" id="bubble-coords"></div>
+  <div class="coords" id="bubble-weather" style="color:#3b82f6;font-size:12px;margin-top:4px;display:none;"></div>
+  <button id="btn-open-bulk" class="btn-ok" onclick="openBulkMoveModal()" style="margin-top: 10px; width: 100%; height: 32px; border-radius: 8px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; transition: 0.2s;">将角色移动至此</button>
+</div>
+<!-- 编辑地点弹窗 -->
+<div class="modal-overlay" id="edit-location-modal">
+  <div class="modal-box">
+    <h3>编辑地点</h3>
+    <label>名称</label>
+    <input type="text" id="edit-loc-name" placeholder="输入地点名称">
+    <label>描述</label>
+    <textarea id="edit-loc-desc" placeholder="描述这个地方..."></textarea>
+    <label>坐标</label>
+    <div style="display: flex; gap: 10px; margin-bottom: 14px;">
+      <input type="number" step="0.1" id="edit-loc-x" placeholder="X 坐标" style="margin-bottom: 0;">
+      <input type="number" step="0.1" id="edit-loc-y" placeholder="Y 坐标" style="margin-bottom: 0;">
+    </div>
+    <label style="margin-top:8px;">真实世界地点（用于天气）</label>
+    <div style="display:flex;gap:8px;">
+      <input type="text" id="edit-loc-city" placeholder="城市名（如：东京）" style="flex:1;margin-bottom:8px;">
+      <button type="button" onclick="autoGeocode('edit')" style="height:40px;padding:0 12px;border:none;border-radius:10px;background:var(--primary-color);color:#fff;font-size:13px;cursor:pointer;white-space:nowrap;">查询</button>
+    </div>
+    <input type="text" id="edit-loc-country" placeholder="国家（可选，如：日本）" style="margin-bottom:8px;">
+    <div style="display: flex; gap: 10px; margin-bottom: 4px;">
+      <input type="text" id="edit-loc-lat" placeholder="纬度（自动查询，无需手动填写）" style="margin-bottom: 0;">
+      <input type="text" id="edit-loc-lon" placeholder="经度（自动查询，无需手动填写）" style="margin-bottom: 0;">
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">输入城市名后点击「查询」可自动获取经纬度，或留空由系统自动查询</div>
+    <div class="btn-row">
+      <button class="btn-cancel" onclick="closeEditLocationModal()">取消</button>
+      <button class="btn-ok" onclick="saveEditLocation()">保存</button>
+    </div>
+  </div>
+</div>
+<!-- 批量移动弹窗 -->
+<div class="modal-overlay" id="bulk-move-modal">
+  <div class="modal-box">
+    <h3>批量移动角色</h3>
+    <div style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">选择要移动到 <strong id="bulk-target-name"></strong> 的角色：</div>
+
+    <div style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between;">
+      <label style="margin:0; display:flex; align-items:center; cursor:pointer;">
+        <input type="checkbox" id="bulk-select-all" onclick="toggleBulkSelectAll()" style="width:16px; margin:0 8px 0 0;">
+        <span style="font-size:14px; font-weight:bold; color:var(--text-main);">全选</span>
+      </label>
+    </div>
+
+    <div id="bulk-move-list" style="max-height: 220px; overflow-y: auto; margin-bottom: 16px;">
+      <!-- Checkboxes will be injected here -->
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-cancel" onclick="closeBulkMoveModal()">取消</button>
+      <button class="btn-ok" onclick="confirmBulkMove()">确认移动</button>
+    </div>
+  </div>
+</div>
+<!-- 编辑认知地点弹窗 -->
+<div class="modal-overlay" id="known-locations-modal">
+  <div class="modal-box">
+    <h3>编辑认知地点</h3>
+    <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
+      勾选 <strong id="known-char-name"></strong> 能感知到的地点：
+    </div>
+    <div style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;">
+      <label style="margin:0;display:flex;align-items:center;cursor:pointer;">
+        <input type="checkbox" id="known-select-all" onclick="toggleKnownSelectAll()" style="width:16px;margin:0 8px 0 0;">
+        <span style="font-size:14px;font-weight:bold;">全选</span>
+      </label>
+      <button onclick="toggleKnownSelectAll(true)" style="border:none;background:none;font-size:12px;color:var(--primary-color);cursor:pointer;font-weight:600;">取消全选</button>
+    </div>
+    <div id="known-locations-list" style="max-height: 260px; overflow-y: auto; margin-bottom: 16px;"></div>
+    <div class="btn-row">
+      <button class="btn-cancel" onclick="closeKnownLocationsModal()">取消</button>
+      <button class="btn-ok" onclick="saveKnownLocations()">保存</button>
+    </div>
+  </div>
+</div>
+<!-- 新增地点弹窗 -->
+<div class="modal-overlay" id="add-location-modal">
+  <div class="modal-box">
+    <h3>新增地点</h3>
+    <label>名称</label>
+    <input type="text" id="new-loc-name" placeholder="输入地点名称">
+    <label>描述</label>
+    <textarea id="new-loc-desc" placeholder="描述这个地方..."></textarea>
+    <label>坐标</label>
+    <div style="display: flex; gap: 10px; margin-bottom: 14px;">
+      <input type="number" step="0.1" id="new-loc-x" placeholder="X 坐标" style="margin-bottom: 0;">
+      <input type="number" step="0.1" id="new-loc-y" placeholder="Y 坐标" style="margin-bottom: 0;">
+    </div>
+    <label style="margin-top:8px;">真实世界地点（可选，用于天气）</label>
+    <div style="display:flex;gap:8px;">
+      <input type="text" id="new-loc-city" placeholder="城市名（如：东京）" style="flex:1;margin-bottom:8px;">
+      <button type="button" onclick="autoGeocode('new')" style="height:40px;padding:0 12px;border:none;border-radius:10px;background:var(--primary-color);color:#fff;font-size:13px;cursor:pointer;white-space:nowrap;">查询</button>
+    </div>
+    <input type="text" id="new-loc-country" placeholder="国家（可选，如：日本）" style="margin-bottom:8px;">
+    <div style="display: flex; gap: 10px; margin-bottom: 4px;">
+      <input type="text" id="new-loc-lat" placeholder="纬度（自动查询，无需手动填写）" style="margin-bottom: 0;">
+      <input type="text" id="new-loc-lon" placeholder="经度（自动查询，无需手动填写）" style="margin-bottom: 0;">
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">输入城市名后点击「查询」可自动获取经纬度，或留空由系统自动查询</div>
+    <div class="btn-row">
+      <button class="btn-cancel" onclick="closeAddLocationModal()">取消</button>
+      <button class="btn-ok" onclick="addLocation()">确认</button>
+    </div>
+  </div>
+</div>
+{% include 'tabbar.html' %}
+<script>
+(function(){
+  const canvas = document.getElementById('map-canvas');
+  const ctx = canvas.getContext('2d');
+
+  let locations = [];
+  let charPositions = {};
+  let userPos = {x:0,y:0,location_id:"home"};
+  let weatherData = {};
+  let selectedCharId = null;
+  let userMode = false;
+
+  let offsetX = 0, offsetY = 0;
+  let pixelsPerGrid = 80;
+  const DEFAULT_PPG = 80;
+  let dragStart = null;
+  let isDragging = false;
+  let dragTarget = null;
+  let pinchStartDist = 0;
+  let pinchStartPPG = 0;
+  let pinchMidX = 0, pinchMidY = 0;
+
+  function resizeCanvas() {
+    cssW = window.innerWidth;
+    cssH = window.innerHeight - 50 - 48 - 55;
+    canvas.width = cssW;
+    canvas.height = cssH;
+    canvas.style.width = cssW + 'px';
+    canvas.style.height = cssH + 'px';
+  }
+  window.addEventListener('resize', () => { resizeCanvas(); draw(); });
+  resizeCanvas();
+
+  const LOCATION_COLORS = [
+    '#ffb6b9','#ffd166','#06d6a0','#118ab2','#073b4c',
+    '#ef476f','#ffd166','#06d6a0','#a29bfe','#fd79a8',
+    '#00cec9','#e17055','#6c5ce7','#fdcb6e','#e84393'
+  ];
+  function getLocColor(id) {
+    let h = 0;
+    for (let i = 0; i < id.length; i++) h = ((h << 5) - h) + id.charCodeAt(i);
+    return LOCATION_COLORS[Math.abs(h) % LOCATION_COLORS.length];
+  }
+
+  function toScreen(gx, gy) {
+    return {
+      x: cssW/2 + gx * pixelsPerGrid - offsetX,
+      y: cssH/2 - gy * pixelsPerGrid - offsetY
+    };
+  }
+  function toGrid(sx, sy) {
+    return {
+      x: (sx - cssW/2 + offsetX) / pixelsPerGrid,
+      y: -(sy - cssH/2 + offsetY) / pixelsPerGrid
+    };
+  }
+
+  async function loadData() {
+    try {
+      let [locRes, posRes, weaRes] = await Promise.all([
+        fetch('/api/map/locations'),
+        fetch('/api/map/positions'),
+        fetch('/api/map/weather')
+      ]);
+      let locData = await locRes.json();
+      locations = locData.locations || [];
+      let posData = await posRes.json();
+      charPositions = posData.characters || {};
+      userPos = posData.user || {x:0,y:0,location_id:"home"};
+      try { weatherData = await weaRes.json(); } catch(e) { weatherData = {}; }
+
+      populateCharSelect();
+      populateLocationDatalist();
+      updateActionBar();
+    } catch(e) {
+      console.error('Failed to load map data:', e);
+    }
+  }
+
+  function populateLocationDatalist() {
+    let dl = document.getElementById('loc-datalist');
+    dl.innerHTML = '';
+    for (let loc of locations) {
+      dl.innerHTML += `<option value="${loc.name}">`;
+    }
+  }
+
+  function populateCharSelect() {
+    let sel = document.getElementById('char-select');
+    let currentVal = sel.value;
+    sel.innerHTML = '<option value="">-- 选择角色 --</option>';
+    for (let cid in charPositions) {
+      let name = charPositions[cid].name || cid;
+      sel.innerHTML += `<option value="${cid}">${name}</option>`;
+    }
+    if (selectedCharId && charPositions[selectedCharId]) {
+      sel.value = selectedCharId;
+    } else if (currentVal) {
+      sel.value = currentVal;
+    }
+  }
+
+  window.onSelectCharacter = function() {
+    let sel = document.getElementById('char-select');
+    selectedCharId = sel.value || null;
+    userMode = false;
+    document.getElementById('btn-me').classList.remove('active');
+    if (selectedCharId && charPositions[selectedCharId]) {
+      let p = charPositions[selectedCharId];
+      offsetX = p.x * pixelsPerGrid;
+      offsetY = -p.y * pixelsPerGrid;
+    }
+    updateActionBar();
+    draw();
+  };
+
+  window.toggleUserMode = function() {
+    userMode = !userMode;
+    selectedCharId = null;
+    document.getElementById('char-select').value = '';
+    if (userMode) {
+      document.getElementById('btn-me').classList.add('active');
+      offsetX = userPos.x * pixelsPerGrid;
+      offsetY = -userPos.y * pixelsPerGrid;
+    } else {
+      document.getElementById('btn-me').classList.remove('active');
+    }
+    updateActionBar();
+    draw();
+  };
+
+  function updateActionBar() {
+    let bar = document.getElementById('action-bar');
+    let curSpan = document.getElementById('action-current-loc');
+    let input = document.getElementById('loc-input');
+    let knownBtn = document.getElementById('btn-known');
+
+    if (userMode) {
+      bar.style.display = 'flex';
+      knownBtn.classList.remove('visible');
+      let locName = userPos.location_id ? (locations.find(l=>l.id===userPos.location_id)?.name || userPos.location_id) : '无命名地点';
+      curSpan.textContent = `当前: ${locName}(${userPos.x}, ${userPos.y})`;
+      input.value = '';
+    } else if (selectedCharId) {
+      bar.style.display = 'flex';
+      knownBtn.classList.add('visible');
+      let p = charPositions[selectedCharId];
+      let locName = p.location_id ? (locations.find(l=>l.id===p.location_id)?.name || p.location_id) : '无命名地点';
+      curSpan.textContent = `当前: ${locName}(${p.x}, ${p.y})`;
+      input.value = '';
+    } else {
+      bar.style.display = 'none';
+      knownBtn.classList.remove('visible');
+    }
+  }
+
+  window.moveSelected = async function() {
+    let val = document.getElementById('loc-input').value.trim();
+    if (!val) return;
+    let x, y, loc_id = null;
+
+    let coordMatch = val.match(/^(-?[\d.]+)[,\s]+(-?[\d.]+)$/);
+    if (coordMatch) {
+      x = parseFloat(coordMatch[1]);
+      y = parseFloat(coordMatch[2]);
+      if (isNaN(x) || isNaN(y)) { alert("坐标格式错误"); return; }
+    } else {
+      let loc = locations.find(l => l.name === val || l.id === val);
+      if (!loc) { alert("未找到地点，请选择下拉列表中的地点或输入坐标(如 1, 2)"); return; }
+      x = loc.x; y = loc.y; loc_id = loc.id;
+    }
+
+    if (userMode) {
+      try {
+        let res = await fetch('/api/map/user/position', {
+          method: 'PUT',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({x, y, location_id: loc_id})
+        });
+        if (res.ok) {
+          userPos = await res.json();
+          offsetX = userPos.x * pixelsPerGrid;
+          offsetY = -userPos.y * pixelsPerGrid;
+          updateActionBar();
+          draw();
+        }
+      } catch(e) { alert(e.message); }
+    } else if (selectedCharId) {
+      try {
+        let res = await fetch(`/api/map/character/${selectedCharId}/position`, {
+          method: 'PUT',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({x, y, location_id: loc_id, force: true})
+        });
+        if (res.ok) {
+          let r = await res.json();
+          charPositions[selectedCharId] = r.position;
+          offsetX = r.position.x * pixelsPerGrid;
+          offsetY = -r.position.y * pixelsPerGrid;
+          updateActionBar();
+          draw();
+        } else {
+          let err = await res.json();
+          alert("移动失败: " + err.error);
+        }
+      } catch(e) { alert(e.message); }
+    }
+  };
+
+  window.resetView = function() {
+    offsetX = 0; offsetY = 0;
+    pixelsPerGrid = DEFAULT_PPG;
+    draw();
+  };
+
+  window.zoomIn = function() {
+    let cx = cssW/2, cy = cssH/2;
+    let g = toGrid(cx, cy);
+    let oldPPG = pixelsPerGrid;
+    pixelsPerGrid = Math.min(300, pixelsPerGrid * 1.25);
+    offsetX = (g.x * oldPPG) - (g.x * pixelsPerGrid) + offsetX;
+    offsetY = -(g.y * oldPPG) + (g.y * pixelsPerGrid) + offsetY;
+    draw();
+  };
+
+  window.zoomOut = function() {
+    let cx = cssW/2, cy = cssH/2;
+    let g = toGrid(cx, cy);
+    let oldPPG = pixelsPerGrid;
+    pixelsPerGrid = Math.max(10, pixelsPerGrid / 1.25);
+    offsetX = (g.x * oldPPG) - (g.x * pixelsPerGrid) + offsetX;
+    offsetY = -(g.y * oldPPG) + (g.y * pixelsPerGrid) + offsetY;
+    draw();
+  };
+
+  let newLocX = 0, newLocY = 0;
+  window.showAddLocationModal = function() {
+    let cx = cssW/2, cy = cssH/2;
+    let g = toGrid(cx, cy);
+    newLocX = Math.round(g.x * 100) / 100;
+    newLocY = Math.round(g.y * 100) / 100;
+    document.getElementById('new-loc-x').value = newLocX;
+    document.getElementById('new-loc-y').value = newLocY;
+    document.getElementById('new-loc-name').value = '';
+    document.getElementById('new-loc-desc').value = '';
+    document.getElementById('new-loc-city').value = '';
+    document.getElementById('new-loc-country').value = '';
+    document.getElementById('new-loc-lat').value = '';
+    document.getElementById('new-loc-lon').value = '';
+    document.getElementById('add-location-modal').classList.add('show');
+  };
+  window.closeAddLocationModal = function() {
+    document.getElementById('add-location-modal').classList.remove('show');
+  };
+
+  window.autoGeocode = async function(prefix) {
+    let city = document.getElementById(prefix + '-loc-city').value.trim();
+    if (!city) { alert('请输入城市名'); return; }
+    let country = document.getElementById(prefix + '-loc-country').value.trim();
+    let btn = document.querySelector(`#${prefix}-loc-city + button, #${prefix}-location-modal button[onclick*="autoGeocode('${prefix}'"]`);
+    try {
+      let url = '/api/map/geocode?city=' + encodeURIComponent(city);
+      if (country) url += '&country=' + encodeURIComponent(country);
+      let res = await fetch(url);
+      if (res.ok) {
+        let data = await res.json();
+        document.getElementById(prefix + '-loc-lat').value = data.lat;
+        document.getElementById(prefix + '-loc-lon').value = data.lon;
+      } else {
+        alert('未找到该城市，请检查拼写或手动填写经纬度');
+      }
+    } catch(e) {
+      alert('查询失败: ' + e.message);
+    }
+  };
+
+  window.addLocation = async function() {
+    let name = document.getElementById('new-loc-name').value.trim();
+    let desc = document.getElementById('new-loc-desc').value.trim();
+    let finalX = parseFloat(document.getElementById('new-loc-x').value);
+    let finalY = parseFloat(document.getElementById('new-loc-y').value);
+
+    if (!name) { alert('请输入地点名称'); return; }
+    if (isNaN(finalX) || isNaN(finalY)) { alert('坐标格式错误'); return; }
+
+    let city = document.getElementById('new-loc-city').value.trim();
+    let country = document.getElementById('new-loc-country').value.trim();
+    let latStr = document.getElementById('new-loc-lat').value.trim();
+    let lonStr = document.getElementById('new-loc-lon').value.trim();
+    let real_world = null;
+    if (city) {
+      let lat = parseFloat(latStr);
+      let lon = parseFloat(lonStr);
+      real_world = {
+        city: city,
+        country: country,
+        lat: isNaN(lat) ? null : lat,
+        lon: isNaN(lon) ? null : lon
+      };
+    }
+
+    let id = 'loc_' + Date.now();
+    try {
+      let res = await fetch('/api/map/locations', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({id, name, description: desc, x: finalX, y: finalY, real_world})
+      });
+      if (!res.ok) {
+        let e = await res.json();
+        alert(e.error || '创建失败');
+        return;
+      }
+      closeAddLocationModal();
+      await loadData();
+      draw();
+    } catch(e) {
+      alert('请求失败: ' + e.message);
+    }
+  };
+
+  function draw() {
+    ctx.clearRect(0, 0, cssW, cssH);
+
+    // Fill background with light gradient
+    let bgGrad = ctx.createLinearGradient(0, 0, 0, cssH);
+    bgGrad.addColorStop(0, '#ffffff');
+    bgGrad.addColorStop(1, '#f0f2f5');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, cssW, cssH);
+
+    let cx = cssW/2 - offsetX, cy = cssH/2 - offsetY;
+    let maxR = Math.max(5, (Math.max(cssW,cssH) / pixelsPerGrid) * 1.5);
+
+    // Draw concentric circles
+    ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+    ctx.lineWidth = 1;
+    for (let r = 1; r <= maxR; r += 0.5) {
+      let s = toScreen(r, 0); let radius = Math.abs(s.x - toScreen(0,0).x);
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI*2);
+      ctx.stroke();
+      if (r === Math.floor(r) && r >= 1) {
+        ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI*2);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+        ctx.lineWidth = 1;
+      }
+    }
+
+    // Draw radial lines
+    ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+    ctx.lineWidth = 1;
+    for (let a = 0; a < 360; a += 45) {
+      let rad = a * Math.PI / 180;
+      let ex = cx + Math.cos(rad) * maxR * pixelsPerGrid;
+      let ey = cy - Math.sin(rad) * maxR * pixelsPerGrid;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+    }
+    for (let a = 0; a < 360; a += 90) {
+      let rad = a * Math.PI / 180;
+      let ex = cx + Math.cos(rad) * maxR * pixelsPerGrid;
+      let ey = cy - Math.sin(rad) * maxR * pixelsPerGrid;
+      ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+      ctx.lineWidth = 1;
+    }
+
+    // Origin point (Home)
+    ctx.fillStyle = '#ffb6b9';
+    ctx.beginPath();
+    let s0 = toScreen(0,0);
+    ctx.arc(s0.x, s0.y, 8, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,182,185,0.3)';
+    ctx.beginPath();
+    ctx.arc(s0.x, s0.y, 14, 0, Math.PI*2);
+    ctx.fill();
+
+    let knownIds = null;
+    if (selectedCharId && charPositions[selectedCharId]) {
+      knownIds = new Set(charPositions[selectedCharId].known_location_ids || []);
+    }
+
+    // Draw locations
+    for (let loc of locations) {
+      let s = toScreen(loc.x, loc.y);
+      let isKnown = knownIds ? knownIds.has(loc.id) : false;
+      let color = isKnown ? getLocColor(loc.id) : '#cbd5e1';
+      let alpha = isKnown ? 1.0 : 0.7;
+
+      // 如果未选择任何角色或为userMode，或者选择的角色知道该地点，或者是默认起点
+      if (!selectedCharId || userMode || isKnown || loc.is_default) {
+        alpha = 1.0;
+        color = getLocColor(loc.id);
+      }
+
+      ctx.globalAlpha = alpha;
+
+      // 绘制地图坐标图钉 (Map Pin) 代替原本的圆点
+      let pinRadius = 9;
+      let pinHeight = 26;
+      let pcx = s.x;
+      let pcy = s.y - pinHeight + pinRadius;
+
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.bezierCurveTo(s.x + pinRadius/1.5, s.y - pinHeight/2.5, pcx + pinRadius, pcy + pinRadius/1.5, pcx + pinRadius, pcy);
+      ctx.arc(pcx, pcy, pinRadius, 0, Math.PI, true);
+      ctx.bezierCurveTo(pcx - pinRadius, pcy + pinRadius/1.5, s.x - pinRadius/1.5, s.y - pinHeight/2.5, s.x, s.y);
+      ctx.fill();
+
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // 图钉中间的白色小圆孔
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(pcx, pcy, pinRadius * 0.4, 0, Math.PI*2);
+      ctx.fill();
+
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#374151'; // Dark text for light theme
+      ctx.font = 'bold 12px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+
+      // Text outline for readability
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 3;
+      ctx.strokeText(loc.name, s.x, s.y - 28);
+
+      ctx.fillText(loc.name, s.x, s.y - 28);
+
+      if (loc.is_default) {
+        ctx.fillStyle = '#ff89a5';
+        ctx.font = '10px -apple-system, sans-serif';
+        ctx.strokeText('(起点)', s.x, s.y - 42);
+        ctx.fillText('(起点)', s.x, s.y - 42);
+      }
+
+      let w = weatherData[loc.id];
+      if (w && w.emoji) {
+        ctx.font = '16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(w.emoji + ' ' + (w.temperature != null ? w.temperature + '°' : ''), s.x, s.y - 46);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    let drawnChars = {};
+    for (let cid in charPositions) {
+      let cp = charPositions[cid];
+      let s = toScreen(cp.x, cp.y);
+      let isSelected = cid === selectedCharId;
+
+      if (isSelected) {
+        // 大高亮光环
+        ctx.fillStyle = 'rgba(110,168,255,0.15)';
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, pixelsPerGrid * 1.0, 0, Math.PI*2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(110,168,255,0.6)';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = isSelected ? '#3b82f6' : '#9ca3af'; // 鲜蓝色或灰色
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, isSelected ? 12 : 10, 0, Math.PI*2);
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = isSelected ? 3 : 2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, isSelected ? 12 : 10, 0, Math.PI*2);
+      ctx.stroke();
+
+      // Draw character name
+      ctx.fillStyle = isSelected ? '#1d4ed8' : '#374151'; // 更深的蓝色文字
+      ctx.font = (isSelected ? 'bold 13px' : 'bold 11px') + ' -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      let label = (cp.name || cid).substring(0, 4);
+
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 3;
+      ctx.strokeText(label, s.x, s.y + (isSelected ? 24 : 22));
+
+      ctx.fillText(label, s.x, s.y + (isSelected ? 24 : 22));
+      drawnChars[cid] = {x: cp.x, y: cp.y, sx: s.x, sy: s.y};
+    }
+
+    // Draw user
+    let us = toScreen(userPos.x, userPos.y);
+    ctx.fillStyle = userMode ? '#ff9eb5' : '#6ea8ff';
+    ctx.beginPath();
+    ctx.arc(us.x, us.y, 10, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(us.x, us.y, 10, 0, Math.PI*2);
+    ctx.stroke();
+
+    ctx.fillStyle = '#374151';
+    ctx.font = 'bold 11px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 3;
+    ctx.strokeText('我', us.x, us.y + 22);
+
+    ctx.fillText('我', us.x, us.y + 22);
+
+    canvas._drawnChars = drawnChars;
+    canvas._drawnLocs = locations.map(loc => {
+      let s = toScreen(loc.x, loc.y);
+      return {...loc, sx: s.x, sy: s.y};
+    });
+    canvas._userSX = us.x;
+    canvas._userSY = us.y;
+  }
+
+  function getTouchedElement(sx, sy) {
+    let drawnChars = canvas._drawnChars || {};
+    for (let cid in drawnChars) {
+      let d = drawnChars[cid];
+      let dist = Math.sqrt((sx-d.sx)**2 + (sy-d.sy)**2);
+      if (dist < 20) return {type:'character', id: cid, ...d};
+    }
+    let drawnLocs = canvas._drawnLocs || [];
+    for (let loc of drawnLocs) {
+      // Offset hit target by half the pin height (-13px) to better match the pin shape
+      let dist = Math.sqrt((sx-loc.sx)**2 + (sy-(loc.sy - 13))**2);
+      if (dist < 18) return {type:'location', loc};
+    }
+    let userSX = canvas._userSX, userSY = canvas._userSY;
+    if (userSX !== undefined) {
+      let dist = Math.sqrt((sx-userSX)**2 + (sy-userSY)**2);
+      if (dist < 20) return {type:'user'};
+    }
+    return null;
+  }
+
+  canvas.addEventListener('mousedown', e => { onPointerDown(e.clientX, e.clientY, e); });
+  canvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (e.touches.length === 1) {
+      onPointerDown(e.touches[0].clientX, e.touches[0].clientY, e);
+    } else if (e.touches.length === 2) {
+      if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+      let dx = e.touches[0].clientX - e.touches[1].clientX;
+      let dy = e.touches[0].clientY - e.touches[1].clientY;
+      pinchStartDist = Math.sqrt(dx*dx + dy*dy);
+      pinchStartPPG = pixelsPerGrid;
+      pinchMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      pinchMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    }
+  }, {passive: false});
+
+  let longPressTimer = null;
+  function onPointerDown(px, py, e) {
+    let rect = canvas.getBoundingClientRect();
+    let sx = px - rect.left, sy = py - rect.top;
+    let target = getTouchedElement(sx, sy);
+    if (target) {
+      dragTarget = target;
+      isDragging = false;
+      dragStart = {x:px, y:py};
+    } else {
+      dragTarget = null;
+      isDragging = true;
+      dragStart = {x:px, y:py, ox: offsetX, oy: offsetY};
+      longPressTimer = setTimeout(() => {
+        if (!isDragging || dragTarget) return;
+        let g = toGrid(px - rect.left, py - rect.top);
+        newLocX = Math.round(g.x * 100) / 100;
+        newLocY = Math.round(g.y * 100) / 100;
+        document.getElementById('new-loc-x').value = newLocX;
+        document.getElementById('new-loc-y').value = newLocY;
+        document.getElementById('new-loc-name').value = '';
+        document.getElementById('new-loc-desc').value = '';
+        document.getElementById('add-location-modal').classList.add('show');
+        isDragging = false;
+      }, 800);
+    }
+  }
+
+  window.addEventListener('mousemove', e => { onPointerMove(e.clientX, e.clientY); });
+  canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (e.touches.length === 1) {
+      onPointerMove(e.touches[0].clientX, e.touches[0].clientY);
+    } else if (e.touches.length === 2) {
+      let dx = e.touches[0].clientX - e.touches[1].clientX;
+      let dy = e.touches[0].clientY - e.touches[1].clientY;
+      let dist = Math.sqrt(dx*dx + dy*dy);
+      if (pinchStartDist > 0) {
+        let scale = dist / pinchStartDist;
+        let newPPG = pinchStartPPG * scale;
+        pixelsPerGrid = Math.max(10, Math.min(300, newPPG));
+        draw();
+      }
+    }
+  }, {passive: false});
+
+  function onPointerMove(px, py) {
+    if (longPressTimer && dragTarget === null && dragStart) {
+      let dx2 = px - dragStart.x;
+      let dy2 = py - dragStart.y;
+      if (Math.abs(dx2) > 5 || Math.abs(dy2) > 5) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+        isDragging = true;
+        dragStart.ox = offsetX;
+        dragStart.oy = offsetY;
+      }
+    }
+    if (dragTarget) {
+      let dx = px - dragStart.x;
+      let dg = Math.abs(dx);
+      if (dg > 3) isDragging = true;
+    }
+    if (isDragging && !dragTarget && dragStart) {
+      offsetX = dragStart.ox - (px - dragStart.x);
+      offsetY = dragStart.oy - (py - dragStart.y);
+      draw();
+      hideBubble();
+    }
+    if (isDragging && dragTarget) {
+      let rect = canvas.getBoundingClientRect();
+      let g = toGrid(px - rect.left, py - rect.top);
+      updateDragPreview(g);
+    }
+  }
+
+    function updateDragPreview(g) {
+    draw();
+    if (!dragTarget) return;
+    let s = toScreen(g.x, g.y);
+    if (dragTarget.type === 'character') {
+      let fromX = dragTarget.x, fromY = dragTarget.y;
+      let dist = Math.sqrt((g.x-fromX)**2 + (g.y-fromY)**2);
+      let color = dist <= 1.0 ? 'rgba(0, 200, 83, 0.5)' : 'rgba(255, 59, 48, 0.5)';
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 12, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#374151';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'center';
+
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 3;
+      ctx.strokeText(`${dist.toFixed(1)}格`, s.x, s.y - 20);
+      ctx.fillText(`${dist.toFixed(1)}格`, s.x, s.y - 20);
+    } else if (dragTarget.type === 'user') {
+      ctx.fillStyle = 'rgba(110,168,255,0.5)';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 12, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  window.addEventListener('mouseup', e => { onPointerUp(e.clientX, e.clientY); });
+  canvas.addEventListener('touchend', e => {
+    e.preventDefault();
+    if (e.touches.length === 0 && e.changedTouches.length > 0) {
+      let touch = e.changedTouches[0];
+      onPointerUp(touch.clientX, touch.clientY, true);
+    } else if (e.touches.length === 0) {
+      let rect = canvas.getBoundingClientRect();
+      if (dragTarget && dragStart) {
+        let g = toGrid(dragStart.x - rect.left, dragStart.y - rect.top);
+        onPointerUp(g.x, g.y, true);
+      } else {
+        onPointerUp(0, 0, false);
+      }
+    }
+  }, {passive: false});
+
+  window.deselectAll = function() {
+    if (selectedCharId || userMode) {
+      selectedCharId = null;
+      userMode = false;
+      document.getElementById('char-select').value = '';
+      document.getElementById('btn-me').classList.remove('active');
+      updateActionBar();
+      draw();
+    }
+  };
+
+  async function onPointerUp(px, py, fromTouch) {
+    if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+
+    let wasTap = false;
+    if (dragStart) {
+      let dx = px - dragStart.x;
+      let dy = py - dragStart.y;
+      if (Math.sqrt(dx*dx + dy*dy) < 5) wasTap = true;
+    }
+
+    if (dragTarget && isDragging) {
+      let rect = canvas.getBoundingClientRect();
+      let g;
+      if (fromTouch) {
+        // Approximate to grid using screen coords if directly passed
+        g = toGrid(px - rect.left, py - rect.top);
+      } else {
+        g = toGrid(px - rect.left, py - rect.top);
+      }
+      await handleDrop(g);
+    } else if (dragTarget && !isDragging) {
+      if (dragTarget.type === 'location') {
+        showBubble(dragTarget.loc);
+        deselectAll();
+      } else if (dragTarget.type === 'character') {
+        let sel = document.getElementById('char-select');
+        sel.value = dragTarget.id;
+        onSelectCharacter();
+      } else if (dragTarget.type === 'user') {
+        userMode = false; // toggle User mode effectively
+        toggleUserMode();
+      }
+    } else if (!dragTarget && wasTap) {
+      // Tap on empty space
+      deselectAll();
+    }
+    dragTarget = null;
+    isDragging = false;
+    dragStart = null;
+    pinchStartDist = 0;
+    draw();
+  }
+
+  async function handleDrop(g) {
+    if (!dragTarget) return;
+    if (dragTarget.type === 'character') {
+      let fromX = dragTarget.x, fromY = dragTarget.y;
+      let dist = Math.sqrt((g.x-fromX)**2 + (g.y-fromY)**2);
+      if (dist > 1.0) { alert(`距离 ${dist.toFixed(1)} > 1格，无法移动`); return; }
+      try {
+        let res = await fetch(`/api/map/character/${dragTarget.id}/position`, {
+          method: 'PUT',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({x: Math.round(g.x*100)/100, y: Math.round(g.y*100)/100, force: true})
+        });
+        if (!res.ok) {
+          let e = await res.json();
+          alert(e.error || '移动失败');
+          return;
+        }
+        let r = await res.json();
+        await loadData();
+        draw();
+        if (r.encounters && r.encounters.length > 0) {
+          let msgs = [];
+          for (let eid of r.encounters) {
+            if (eid === 'user') msgs.push('与你相遇');
+            else msgs.push(`与${charPositions[eid]?.name || eid}相遇`);
+          }
+          console.log('Encounters:', msgs.join('；'));
+        }
+
+        // Update Action bar if this character was selected
+        if (selectedCharId === dragTarget.id) {
+           updateActionBar();
+        }
+      } catch(e) {
+        alert('请求失败: ' + e.message);
+      }
+    } else if (dragTarget.type === 'user') {
+      try {
+        let res = await fetch('/api/map/user/position', {
+          method: 'PUT',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({x: Math.round(g.x*100)/100, y: Math.round(g.y*100)/100})
+        });
+        if (!res.ok) { alert('移动失败'); return; }
+        let r = await res.json();
+        userPos = r;
+        if (userMode) updateActionBar();
+        draw();
+      } catch(e) {
+        alert('请求失败: ' + e.message);
+      }
+    }
+  }
+
+  window.currentBubbleLoc = null;
+  function showBubble(loc) {
+    window.currentBubbleLoc = loc;
+    let bubble = document.getElementById('location-bubble');
+    document.getElementById('bubble-name').textContent = loc.name;
+    document.getElementById('bubble-desc').textContent = loc.description || '';
+    document.getElementById('bubble-coords').textContent = `坐标: (${loc.x}, ${loc.y}) 极坐标: (${loc.r}, ${loc.theta?.toFixed(2)})`;
+
+    let weatherEl = document.getElementById('bubble-weather');
+    let w = weatherData[loc.id];
+    if (w && w.emoji) {
+      let cityStr = w.city ? w.city + ' ' : '';
+      weatherEl.textContent = `${cityStr}${w.emoji} ${w.condition} ${w.temperature}°C 湿度${w.humidity}%`;
+      weatherEl.style.display = 'block';
+    } else {
+      weatherEl.style.display = 'none';
+    }
+
+    let s = toScreen(loc.x, loc.y);
+    bubble.style.left = Math.min(s.x + 16, window.innerWidth-240) + 'px';
+    bubble.style.top = Math.max(60, s.y - 40) + 'px';
+    bubble.classList.add('show');
+    if (bubbleTimeout) clearTimeout(bubbleTimeout);
+  }
+  function hideBubble() {
+    document.getElementById('location-bubble').classList.remove('show');
+    window.currentBubbleLoc = null;
+  }
+
+  window.openBulkMoveModal = function() {
+    if (!window.currentBubbleLoc) return;
+    let loc = window.currentBubbleLoc;
+
+    // 隐藏气泡但不清空 currentBubbleLoc
+    document.getElementById('location-bubble').classList.remove('show');
+
+    document.getElementById('bulk-target-name').textContent = loc.name;
+    document.getElementById('bulk-select-all').checked = false;
+
+    let listDiv = document.getElementById('bulk-move-list');
+    listDiv.innerHTML = '';
+
+    // Add User checkbox
+    let isUserHere = (userPos.location_id === loc.id) || (Math.abs(userPos.x - loc.x) < 0.01 && Math.abs(userPos.y - loc.y) < 0.01);
+    let uHtml = `
+      <label style="display:flex; align-items:center; margin-bottom:8px; cursor:pointer;">
+        <input type="checkbox" class="bulk-cb" value="user" style="width:16px; margin:0 8px 0 0;" ${isUserHere ? 'disabled checked title="已在此处"' : ''}>
+        <span style="font-size:14px; color:var(--text-main);">我 (用户)</span>
+      </label>
+    `;
+    listDiv.innerHTML += uHtml;
+
+    // Add character checkboxes
+    for (let cid in charPositions) {
+      let cp = charPositions[cid];
+      let isHere = (cp.location_id === loc.id) || (Math.abs(cp.x - loc.x) < 0.01 && Math.abs(cp.y - loc.y) < 0.01);
+      let name = cp.name || cid;
+      let cHtml = `
+        <label style="display:flex; align-items:center; margin-bottom:8px; cursor:pointer;">
+          <input type="checkbox" class="bulk-cb" value="${cid}" style="width:16px; margin:0 8px 0 0;" ${isHere ? 'disabled checked title="已在此处"' : ''}>
+          <span style="font-size:14px; color:var(--text-main);">${name}</span>
+        </label>
+      `;
+      listDiv.innerHTML += cHtml;
+    }
+
+    document.getElementById('bulk-move-modal').classList.add('show');
+  };
+
+  window.closeBulkMoveModal = function() {
+    document.getElementById('bulk-move-modal').classList.remove('show');
+  };
+
+  // ========= 编辑认知地点 =========
+  window.openKnownLocationsModal = function() {
+    if (!selectedCharId) return;
+    let p = charPositions[selectedCharId];
+    let charName = p.name || selectedCharId;
+    document.getElementById('known-char-name').textContent = charName;
+
+    let knownSet = new Set(p.known_location_ids || []);
+    let listDiv = document.getElementById('known-locations-list');
+    listDiv.innerHTML = '';
+
+    for (let loc of locations) {
+      let checked = knownSet.has(loc.id) ? 'checked' : '';
+      listDiv.innerHTML += `
+        <label style="display:flex;align-items:center;margin-bottom:8px;cursor:pointer;">
+          <input type="checkbox" class="known-cb" value="${loc.id}" ${checked} style="width:16px;margin:0 8px 0 0;">
+          <span style="font-size:14px;">${loc.name}</span>
+          <span style="font-size:11px;color:var(--text-muted);margin-left:6px;">(${loc.x}, ${loc.y})</span>
+        </label>
+      `;
+    }
+
+    document.getElementById('known-select-all').checked = false;
+    document.getElementById('known-locations-modal').classList.add('show');
+  };
+
+  window.closeKnownLocationsModal = function() {
+    document.getElementById('known-locations-modal').classList.remove('show');
+  };
+
+  window.toggleKnownSelectAll = function(invert) {
+    let cbs = document.querySelectorAll('.known-cb');
+    let checkState = invert ? false : !document.getElementById('known-select-all').checked;
+    document.getElementById('known-select-all').checked = checkState;
+    cbs.forEach(cb => { cb.checked = checkState; });
+  };
+
+  window.saveKnownLocations = async function() {
+    if (!selectedCharId) return;
+    let cbs = document.querySelectorAll('.known-cb');
+    let ids = [];
+    cbs.forEach(cb => { if (cb.checked) ids.push(cb.value); });
+
+    try {
+      let res = await fetch(`/api/map/character/${selectedCharId}/known_locations`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ known_location_ids: ids })
+      });
+      if (res.ok) {
+        let r = await res.json();
+        charPositions[selectedCharId].known_location_ids = r.known_location_ids;
+        closeKnownLocationsModal();
+        draw();
+      }
+    } catch(e) {
+      alert('保存失败: ' + e.message);
+    }
+  };
+  // ========= 编辑认知地点 结束 =========
+
+  // ========= 编辑地点 =========
+  window.editingLocId = null;
+  window.openEditLocationModal = function() {
+    if (!window.currentBubbleLoc) return;
+    let loc = window.currentBubbleLoc;
+    window.editingLocId = loc.id;
+    document.getElementById('location-bubble').classList.remove('show');
+    document.getElementById('edit-loc-name').value = loc.name;
+    document.getElementById('edit-loc-desc').value = loc.description || '';
+    document.getElementById('edit-loc-x').value = loc.x;
+    document.getElementById('edit-loc-y').value = loc.y;
+    let rw = loc.real_world || {};
+    document.getElementById('edit-loc-city').value = rw.city || '';
+    document.getElementById('edit-loc-country').value = rw.country || '';
+    document.getElementById('edit-loc-lat').value = rw.lat != null ? rw.lat : '';
+    document.getElementById('edit-loc-lon').value = rw.lon != null ? rw.lon : '';
+    document.getElementById('edit-location-modal').classList.add('show');
+  };
+
+  window.closeEditLocationModal = function() {
+    document.getElementById('edit-location-modal').classList.remove('show');
+    window.editingLocId = null;
+  };
+
+  window.saveEditLocation = async function() {
+    if (!window.editingLocId) return;
+    let locId = window.editingLocId;
+    let name = document.getElementById('edit-loc-name').value.trim();
+    let desc = document.getElementById('edit-loc-desc').value.trim();
+    let x = parseFloat(document.getElementById('edit-loc-x').value);
+    let y = parseFloat(document.getElementById('edit-loc-y').value);
+    if (!name) { alert('请输入地点名称'); return; }
+    if (isNaN(x) || isNaN(y)) { alert('坐标格式错误'); return; }
+    let city = document.getElementById('edit-loc-city').value.trim();
+    let country = document.getElementById('edit-loc-country').value.trim();
+    let latStr = document.getElementById('edit-loc-lat').value.trim();
+    let lonStr = document.getElementById('edit-loc-lon').value.trim();
+    let real_world = null;
+    if (city) {
+      let lat = parseFloat(latStr);
+      let lon = parseFloat(lonStr);
+      real_world = {
+        city: city,
+        country: country,
+        lat: isNaN(lat) ? null : lat,
+        lon: isNaN(lon) ? null : lon
+      };
+    }
+    try {
+      let res = await fetch(`/api/map/locations/${locId}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name, description: desc, x, y, real_world})
+      });
+      if (res.ok) {
+        window.editingLocId = null;
+        closeEditLocationModal();
+        await loadData();
+        draw();
+      } else {
+        let e = await res.json();
+        alert('保存失败: ' + e.error);
+      }
+    } catch(e) {
+      alert('请求失败: ' + e.message);
+    }
+  };
+  // ========= 编辑地点 结束 =========
+
+  window.toggleBulkSelectAll = function() {
+    let checked = document.getElementById('bulk-select-all').checked;
+    let cbs = document.querySelectorAll('.bulk-cb');
+    cbs.forEach(cb => {
+      if (!cb.disabled) {
+        cb.checked = checked;
+      }
+    });
+  };
+
+  window.confirmBulkMove = async function() {
+    if (!window.currentBubbleLoc) return;
+    let loc = window.currentBubbleLoc;
+    let cbs = document.querySelectorAll('.bulk-cb');
+    let toMove = [];
+    cbs.forEach(cb => {
+      if (cb.checked && !cb.disabled) {
+        toMove.push(cb.value);
+      }
+    });
+
+    if (toMove.length === 0) {
+      alert('请选择要移动的角色');
+      return;
+    }
+
+    document.querySelector('#bulk-move-modal .btn-ok').textContent = '正在移动...';
+    document.querySelector('#bulk-move-modal .btn-ok').disabled = true;
+
+    try {
+      for (let id of toMove) {
+        if (id === 'user') {
+          await fetch('/api/map/user/position', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({x: loc.x, y: loc.y, location_id: loc.id})
+          });
+        } else {
+          await fetch(`/api/map/character/${id}/position`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({x: loc.x, y: loc.y, location_id: loc.id, force: true})
+          });
+        }
+      }
+
+      closeBulkMoveModal();
+      await loadData();
+      draw();
+
+      document.querySelector('#bulk-move-modal .btn-ok').textContent = '确认移动';
+      document.querySelector('#bulk-move-modal .btn-ok').disabled = false;
+    } catch(e) {
+      alert('批量移动发生错误: ' + e.message);
+      document.querySelector('#bulk-move-modal .btn-ok').textContent = '确认移动';
+      document.querySelector('#bulk-move-modal .btn-ok').disabled = false;
+    }
+  };
+
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    let rect = canvas.getBoundingClientRect();
+    let sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+    let g = toGrid(sx, sy);
+    let oldPPG = pixelsPerGrid;
+    let scale = e.deltaY > 0 ? 0.85 : 1.18;
+    pixelsPerGrid = Math.max(10, Math.min(300, pixelsPerGrid * scale));
+    offsetX = (g.x * oldPPG) - (g.x * pixelsPerGrid) + offsetX;
+    offsetY = -(g.y * oldPPG) + (g.y * pixelsPerGrid) + offsetY;
+    draw();
+    hideBubble();
+  }, {passive: false});
+
+  setInterval(async () => {
+    await loadData();
+    draw();
+  }, 10000);
+
+  loadData().then(() => {
+    draw();
+  });
+})();
+</script>
+</body>
+</html>

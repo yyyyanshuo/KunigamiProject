@@ -14,7 +14,8 @@ chat_history.db
 
 # 3. 配置文件 (只保留通用模板，忽略个人设置)
 # 忽略用户个人设置 (用户名、语言)
-# configs/*.json
+configs/*.json
+configs/*.db*
 # 忽略全局人设
 # configs/global_user_persona.md
 configs/users.db
@@ -27,6 +28,8 @@ users/
 static/avatar_user.png
 static/alipay_qr.png
 static/wechat_qr.png
+static/qq_qr.png
+static/xhs_qr.png
 
 debug_network.py
 test_final_connect.py
@@ -56,3 +59,20 @@ push_log.txt
 SYSTEM_PROMPT_FIX_REPORT.md
 test_user4_prompt.py
 UPDATE_SUMMARY.md
+
+# --- 本地依赖与工具生成物 ---
+node_modules/
+agent-test/node_modules/
+outputs/
+tmp/
+.pytest_cache/
+.agents/
+.codex/
+.cursor/
+%SystemDrive%/
+
+# --- 本地运行数据与媒体 ---
+users.db
+Voice/*.mp3
+Voice/*.mp4
+static/square_avatars/
