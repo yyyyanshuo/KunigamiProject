@@ -122,6 +122,7 @@
         
         <div id="author-controls" style="display:none; gap:10px; margin-top: 12px;">
             <button class="btn-small" onclick="editCharacter()">编辑作品</button>
+            <button class="btn-small" onclick="editCharacter(true)">从本地更新</button>
             <button class="btn-small btn-danger" onclick="deleteCharacter()">删除作品</button>
         </div>
     </div>
@@ -293,9 +294,9 @@
             } catch(e) { console.error(e); }
         }
 
-        function editCharacter() {
+        function editCharacter(syncFromLocal = false) {
             localStorage.setItem('edit_square_char', JSON.stringify(currentData));
-            location.href = '/square/upload?mode=edit';
+            location.href = syncFromLocal ? '/square/upload?mode=edit&sync=local' : '/square/upload?mode=edit';
         }
 
         async function deleteCharacter() {

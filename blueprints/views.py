@@ -1,6 +1,51 @@
+import os
+from datetime import datetime
+
 from flask import Blueprint, render_template, make_response, send_from_directory, request, jsonify
 
+from core.time_utils import BEIJING_TZ, beijing_now
+
 views_bp = Blueprint('views', __name__)
+
+VOICE_ANNOUNCEMENT_ID = "voice-service-change-2026-08"
+VOICE_ANNOUNCEMENT_START = os.getenv(
+    "VOICE_ANNOUNCEMENT_START",
+    "2026-08-06T00:00:00+08:00",
+)
+VOICE_ANNOUNCEMENT_END = os.getenv(
+    "VOICE_ANNOUNCEMENT_END",
+    "2026-08-13T00:00:00+08:00",
+)
+VOICE_LEGACY_DELETE_AT = os.getenv(
+    "VOICE_LEGACY_DELETE_AT",
+    VOICE_ANNOUNCEMENT_END,
+)
+ELEVENLABS_REFERRAL_URL = "https://try.elevenlabs.io/8f8ks0unlqsw"
+
+
+def _parse_announcement_time(value):
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=BEIJING_TZ)
+    return parsed.astimezone(BEIJING_TZ)
+
+
+def _voice_announcement_payload(now=None):
+    current = beijing_now(now)
+    start = _parse_announcement_time(VOICE_ANNOUNCEMENT_START)
+    end = _parse_announcement_time(VOICE_ANNOUNCEMENT_END)
+    delete_at = _parse_announcement_time(VOICE_LEGACY_DELETE_AT)
+    return {
+        "id": VOICE_ANNOUNCEMENT_ID,
+        "active": start <= current < end,
+        "server_date": current.strftime("%Y-%m-%d"),
+        "starts_at": start.isoformat(),
+        "ends_at": end.isoformat(),
+        "legacy_voice_deletes_at": delete_at.isoformat(),
+        "legacy_voice_deletes_on": delete_at.strftime("%Y年%m月%d日"),
+        "title": "语音功能调整通知",
+        "cta_url": ELEVENLABS_REFERRAL_URL,
+    }
 
 
 @views_bp.route('/manifest.json')
@@ -14,6 +59,11 @@ def service_worker():
     response.headers['Content-Type'] = 'application/javascript'
     response.headers['Service-Worker-Allowed'] = '/'
     return response
+
+
+@views_bp.route('/api/app/announcement')
+def app_announcement():
+    return jsonify(_voice_announcement_payload())
 
 
 @views_bp.route("/")
@@ -34,7 +84,13 @@ def guide_view():
 
 @views_bp.route("/chat/<char_id>")
 def chat_view(char_id):
-    return render_template("chat.html", char_id=char_id)
+    from core.time_utils import get_user_timezone
+    from core.utils import _load_user_settings
+    return render_template(
+        "chat.html",
+        char_id=char_id,
+        user_timezone=get_user_timezone(_load_user_settings()),
+    )
 
 
 @views_bp.route("/sakura")

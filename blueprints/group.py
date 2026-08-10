@@ -19,15 +19,47 @@ from cos_utils import upload_to_cos
 from core.config import GROUPS_DIR, USERS_ROOT, BASE_DIR
 from core.context import get_current_user_id, set_background_user
 from core.circuit_breaker import get_circuit_breaker_info
+from core.time_utils import (
+    beijing_now,
+    get_character_timezone,
+    get_zone,
+    parse_beijing_timestamp,
+    utc_now,
+)
 from core.utils import (
     get_paths,
     safe_save_json,
     _get_characters_config_file,
     _get_groups_config_file,
     _add_furigana_to_japanese,
+    ensure_group_chat_storage,
+    is_character_available_for_group_chat,
+)
+from services.memory_store import (
+    append_short_memory_events,
+    atomic_write_json,
+    load_json_object,
+    memory_file_lock,
+)
+from services.voice_messages import (
+    VoiceMessageError,
+    attach_voice_message,
+    delete_voice_message_for_message,
+    parse_voice_message_tag,
+    validate_voice_message_for_scope,
+    voice_message_for_ai,
 )
 
 group_bp = Blueprint('group', __name__)
+
+
+def _character_now(char_id):
+    try:
+        with open(_get_characters_config_file(), "r", encoding="utf-8") as f:
+            info = (json.load(f) or {}).get(char_id, {}) or {}
+    except Exception:
+        info = {}
+    return utc_now().astimezone(get_zone(get_character_timezone(info)))
 
 
 def _group_circuit_breaker_response(user_msg_id=None, memory_sync_warning=None, affinity_delta=None):
@@ -94,7 +126,7 @@ def extract_group_recent_messages_with_labels(group_id, limit=20) -> list:
             try:
                 msg_dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
             except Exception:
-                msg_dt = datetime.now()
+                msg_dt = beijing_now().replace(tzinfo=None)
 
             role_label = "user" if role == "user" else get_char_name(role)
             time_label = msg_dt.strftime("%H:%M")
@@ -183,63 +215,17 @@ def distribute_group_memory(group_id, group_name, members, new_events, date_str)
         if char_id == "user": continue # 跳过用户
 
         try:
-            # 1. 找到该角色的文件路径
             _, prompts_dir = get_paths(char_id)
-            # 【修改】目标文件改为 6_memory_short.json
             short_file = os.path.join(prompts_dir, "6_memory_short.json")
-
-            # 2. 读取现有数据
-            current_data = {}
-            if os.path.exists(short_file):
-                with open(short_file, "r", encoding="utf-8") as f:
-                    try: current_data = json.load(f)
-                    except: pass
-
-            # 兼容新旧格式 (获取当天的 dict)
-            day_data = current_data.get(date_str, {})
-            # 如果是旧格式列表，转为字典结构
-            if isinstance(day_data, list):
-                existing_events = day_data
-                last_id = 0
-            else:
-                existing_events = day_data.get("events", [])
-                last_id = day_data.get("last_id", 0)
-
-            # 3. 追加新事件 (格式化一下，标明来源)
-            count_added = 0
+            prepared = []
             for event in new_events:
-                # 格式化内容：[群聊:群名] 事件
-                # 【修改】这里确保 event['event'] 是纯文本，不包含奇怪的 AI 生成头信息
                 clean_event_text = event['event'].replace('AI生成信息发送的内容', '').strip()
-                event_content = f"[群聊:{group_name}] {clean_event_text}"
-
-                # 简单去重
-                is_duplicate = False
-                for old in existing_events:
-                    if old['time'] == event['time'] and event_content in old['event']:
-                        is_duplicate = True
-                        break
-
-                if not is_duplicate:
-                    existing_events.append({
-                        "time": event['time'],
-                        "event": event_content
-                    })
-                    count_added += 1
-
-            if count_added > 0:
-                # 按时间重新排序 (保证群聊和私聊按时间穿插)
-                existing_events.sort(key=lambda x: x['time'])
-
-                # 保存回文件 (保持 last_id 不变，因为这些群聊消息不属于私聊数据库)
-                current_data[date_str] = {
-                    "events": existing_events,
-                    "last_id": last_id
-                }
-
-                with open(short_file, "w", encoding="utf-8") as f:
-                    json.dump(current_data, f, ensure_ascii=False, indent=2)
-
+                prepared.append({
+                    "time": event['time'],
+                    "event": f"[群聊:{group_name}] {clean_event_text}",
+                })
+            count_added = append_short_memory_events(short_file, date_str, prepared)
+            if count_added:
                 print(f"     -> [{char_id}] 合并成功 (+{count_added}条)")
 
         except Exception as e:
@@ -277,19 +263,19 @@ def sync_memory_before_group_chat(group_id):
     except Exception:
         members = []
 
-    now = datetime.now()
+    now = beijing_now()
     today_str = now.strftime("%Y-%m-%d")
-    dates = [today_str]
-    if now.hour < 4:
-        yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
-        dates.insert(0, yesterday_str)
+    yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    dates = [yesterday_str, today_str]
 
     try:
         # 1. 各成员单聊记忆
         for char_id in members:
             for d in dates:
                 try:
-                    update_short_memory_for_date(char_id, d)
+                    result = update_short_memory_for_date(char_id, d)
+                    if not result.ok:
+                        return False, f"成员单聊记忆同步失败: {result.status} {result.message}"
                 except Exception as e:
                     print(f"   [Sync] 成员 {char_id} 单聊日期 {d} 同步失败: {e}")
                     return False, f"成员单聊记忆同步失败: {e}"
@@ -347,8 +333,9 @@ def _get_group_chat_bg_config_file(group_id):
     return os.path.join(group_dir, "chat_bg_config.json")
 
 
-def update_group_short_memory(group_id, target_date_str):
+def _update_group_short_memory_locked(group_id, target_date_str):
     from app import call_ai_to_summarize
+    from services.memory import _chunk_items, _parse_short_summary
 
     # 1. 路径准备
     group_dir = get_group_dir(group_id)
@@ -368,11 +355,7 @@ def update_group_short_memory(group_id, target_date_str):
     members = group_info.get("members", [])
 
     # 3. 读取现有群记忆 (获取 last_id)
-    current_data = {}
-    if os.path.exists(memory_file):
-        with open(memory_file, "r", encoding="utf-8") as f:
-            try: current_data = json.load(f)
-            except: pass
+    current_data = load_json_object(memory_file)
 
     day_data = current_data.get(target_date_str, {})
     # 兼容处理：如果是列表转字典
@@ -392,13 +375,17 @@ def update_group_short_memory(group_id, target_date_str):
     end_time = f"{target_date_str} 23:59:59"
 
     # 只读取 ID > last_id 的新消息
-    cursor.execute("SELECT id, timestamp, role, content FROM messages WHERE timestamp >= ? AND timestamp <= ? AND id > ?", (start_time, end_time, last_id))
+    cursor.execute(
+        "SELECT id, timestamp, role, content FROM messages "
+        "WHERE timestamp >= ? AND timestamp <= ? AND id > ? ORDER BY id ASC",
+        (start_time, end_time, last_id),
+    )
     rows = cursor.fetchall()
     conn.close()
 
     if not rows: return 0, []
 
-    new_max_id = rows[-1][0]
+    new_max_id = max(row[0] for row in rows)
 
     # 5. 拼接文本 (需要转换 role ID 为名字)
     # 加载名字映射 (使用 per-user 配置)
@@ -410,31 +397,26 @@ def update_group_short_memory(group_id, target_date_str):
             for k, v in c_conf.items(): id_to_name[k] = v.get("name", k)
     except: pass
 
-    chat_log = ""
-    for _, ts, role, content in rows:
+    def render_row(row):
+        _, ts, role, content = row
         time_part = ts.split(' ')[1][:5]
-        # 如果是 user 显示用户，如果是 char_id 显示名字
         name = "ユーザー" if role == "user" else id_to_name.get(role, role)
-        chat_log += f"[{time_part}] {name}: {content}\n"
+        return f"[{time_part}] {name}: {content}\n"
 
-    # 6. 调用 AI 总结
-    # 这里我们复用 call_ai_to_summarize，用 "short" 模式提取事件
-    # 这里的 char_id 可以随便传一个群成员的，或者传 None，因为 short 模式主要是提取事实
-    summary_text = call_ai_to_summarize(chat_log, "group_log", "system")
-
-    if not summary_text: return 0, []
-
-    # 7. 解析 AI 返回结果
     new_events = []
-    for line in summary_text.split('\n'):
-        line = line.strip()
-        if line:
-            match_time = re.search(r'\[(\d{2}:\d{2})\]', line)
-            event_time = match_time.group(1) if match_time else datetime.now().strftime("%H:%M")
-            event_text = re.sub(r'\[\d{2}:\d{2}\]', '', line).strip('- ').strip()
-            new_events.append({"time": event_time, "event": event_text})
-
-    if not new_events: return 0, []
+    chunks = list(_chunk_items(rows, max_items=36, max_chars=12000, render=render_row))
+    for index, chunk in enumerate(chunks, start=1):
+        summary_text = call_ai_to_summarize(
+            "".join(render_row(row) for row in chunk), "group_log", "system"
+        )
+        if not summary_text:
+            print(f"   [Group Memory] 第 {index}/{len(chunks)} 批失败，游标未推进")
+            return 0, []
+        valid, batch_events = _parse_short_summary(summary_text)
+        if not valid:
+            print(f"   [Group Memory] 第 {index}/{len(chunks)} 批格式错误，游标未推进")
+            return 0, []
+        new_events.extend(batch_events)
 
     # 8. 保存到群聊记忆 (追加模式)
     final_events = existing_events + new_events
@@ -446,8 +428,7 @@ def update_group_short_memory(group_id, target_date_str):
         "last_id": new_max_id
     }
 
-    with open(memory_file, "w", encoding="utf-8") as f:
-        json.dump(current_data, f, ensure_ascii=False, indent=2)
+    atomic_write_json(memory_file, current_data)
 
     # ================= 关键修复点 =================
     # 9. 【必须】调用分发函数，传给个人
@@ -459,11 +440,25 @@ def update_group_short_memory(group_id, target_date_str):
     return len(new_events), new_events
 
 
+def update_group_short_memory(group_id, target_date_str):
+    """Serialize group summarization across web workers and the scheduler."""
+    group_dir = get_group_dir(group_id)
+    memory_file = os.path.join(group_dir, "memory_short.json")
+    with memory_file_lock(memory_file):
+        return _update_group_short_memory_locked(group_id, target_date_str)
+
+
 # ==================== 群聊页面路由 ====================
 
 @group_bp.route("/chat/group/<group_id>")
 def group_chat_view(group_id):
-    return render_template("chat.html", group_id=group_id)
+    from core.time_utils import get_user_timezone
+    from core.utils import _load_user_settings
+    return render_template(
+        "chat.html",
+        group_id=group_id,
+        user_timezone=get_user_timezone(_load_user_settings()),
+    )
 
 
 @group_bp.route("/memory/group/<group_id>")
@@ -569,6 +564,12 @@ def group_chat(group_id):
     if not user_msg: return jsonify({"error": "empty"}), 400
     # 获取 user_id 用于后续 relay
     user_id = get_current_user_id()
+    try:
+        validate_voice_message_for_scope(
+            user_id, user_msg, scope_type="group", scope_id=group_id
+        )
+    except VoiceMessageError as exc:
+        return jsonify({"error": "voice_message_invalid", "message": str(exc)}), 400
 
     # --- 群聊前自动同步：仅在切换上下文时总结群内各角色单聊 + 本群群聊短期记忆 ---
     memory_sync_warning = None
@@ -582,18 +583,26 @@ def group_chat(group_id):
             memory_sync_warning = f"记忆同步失败：{e}，本次对话可能缺少部分单聊上下文"
             print(f"   ⚠️ {memory_sync_warning}")
 
-    group_dir = get_group_dir(group_id)
-    db_path = os.path.join(group_dir, "chat.db")
+    # 群配置与磁盘可能因旧版本迁移不同步；进入聊天时自动补齐存储。
+    try:
+        group_dir, db_path = ensure_group_chat_storage(group_id, user_id=user_id)
+    except (OSError, sqlite3.Error) as e:
+        print(f"[GroupChat] 无法初始化群聊存储 {group_id}: {e}")
+        return jsonify({"error": "group_storage_unavailable", "message": str(e)}), 500
 
     # 2. 读取群成员 (使用 per-user 配置)
     groups_cfg = _get_groups_config_file()
     chars_cfg = _get_characters_config_file()
     all_members = []
+    group_conf = {}
+    current_group_cfg = {}
     if os.path.exists(groups_cfg):
         with open(groups_cfg, "r", encoding="utf-8") as f:
             group_conf = json.load(f)
             if group_id in group_conf:
-                all_members = group_conf[group_id].get("members", [])
+                current_group_cfg = group_conf[group_id]
+                all_members = current_group_cfg.get("members", [])
+    group_chat_mode = current_group_cfg.get("group_chat_mode", "online")
 
     # 排除用户
     ai_members_all = [m for m in all_members if m != "user"]
@@ -602,6 +611,7 @@ def group_chat(group_id):
     # --- 【关键修正 1】提前初始化变量 ---
     replies_for_frontend = []
     group_affinity_delta = 0.0
+    group_agent_events = []
 
     # --- 【关键步骤】获取在线成员 (过滤掉深睡眠的) ---
     # 需要读取 characters.json 查看 deep_sleep 状态 (使用 per-user 配置)
@@ -624,14 +634,10 @@ def group_chat(group_id):
                 if cinfo.get("remark"):
                     name_to_id[cinfo.get("remark")] = cid
 
-                # 2. 检查是否在线 (Deep Sleep False, 但线下模式无视深睡眠)
-                # 只有在群成员列表里 且 没有深睡眠 的才算在线
+                # 2. 群聊参与状态只看群自身模式：线上群过滤深睡，线下群允许参与。
+                # 角色个人 chat_mode 属于角色与用户的单聊状态，此处不参与判断。
                 if cid in ai_members_all:
-                    is_sleeping = cinfo.get("deep_sleep", False)
-                    member_chat_mode = cinfo.get("chat_mode", "online")
-                    if member_chat_mode == "offline":
-                        is_sleeping = False
-                    if not is_sleeping:
+                    if is_character_available_for_group_chat(cinfo, group_chat_mode):
                         online_ai_members.append(cid)
                     else:
                         print(f"   [GroupChat] 成员 {name}({cid}) 正在熟睡，跳过。")
@@ -649,12 +655,19 @@ def group_chat(group_id):
         # 依然要存用户消息
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-        now = datetime.now()
-        user_ts = now.strftime('%Y-%m-%d %H:%M:%S')
+        user_ts = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
         cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", ("user", user_msg, user_ts))
+        user_msg_id = cursor.lastrowid
         conn.commit()
         conn.close()
-        resp = {"replies": []}
+        attach_voice_message(
+            user_id,
+            user_msg,
+            scope_type="group",
+            scope_id=group_id,
+            message_id=user_msg_id,
+        )
+        resp = {"replies": [], "user_id": user_msg_id}
         if memory_sync_warning:
             resp["memory_sync_warning"] = memory_sync_warning
         return jsonify(resp)
@@ -662,14 +675,20 @@ def group_chat(group_id):
     # 3. 存入用户消息
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    now = datetime.now()
-    user_ts = now.strftime('%Y-%m-%d %H:%M:%S')
+    user_ts = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
 
     cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
                    ("user", user_msg, user_ts))
     user_msg_id = cursor.lastrowid # 【新增】获取刚存入的用户消息 ID
     conn.commit()
     conn.close()
+    attach_voice_message(
+        user_id,
+        user_msg,
+        scope_type="group",
+        scope_id=group_id,
+        message_id=user_msg_id,
+    )
 
     # 4. 决定回复顺序 (智能 @ 逻辑)
     responder_ids = []
@@ -734,8 +753,8 @@ def group_chat(group_id):
         history_rows = [dict(row) for row in cursor.fetchall()][::-1]
         conn.close()
 
-        recent_texts = [r["content"] for r in history_rows] if history_rows else []
-        user_latest = history_rows[-1]["content"] if history_rows and history_rows[-1]["role"] == "user" else None
+        recent_texts = [voice_message_for_ai(r["content"]) for r in history_rows] if history_rows else []
+        user_latest = voice_message_for_ai(history_rows[-1]["content"]) if history_rows and history_rows[-1]["role"] == "user" else None
 
         # 【全局采用 v2】直接使用v2系统提示
         sys_prompt = build_system_prompt_v2(speaker_id, include_global_format=True, recent_messages=recent_texts, user_latest_input=user_latest, group_id=group_id)
@@ -746,7 +765,6 @@ def group_chat(group_id):
         full_sys_prompt = sys_prompt + "\n\n" + rel_prompt + "\n【Current Situation】\n当前是在群聊中。"
 
         # 注入群聊线上线下模式上下文
-        current_group_cfg = (group_conf or {}).get(group_id, {})
         group_mode = current_group_cfg.get("group_chat_mode", "online")
         include_user = current_group_cfg.get("include_user", True)
         lang = get_ai_language(speaker_id, group_id=group_id)
@@ -788,10 +806,12 @@ def group_chat(group_id):
 
         # 1. 判断时间跨度 (是否跨天)
         show_full_date = False
-        now_dt = datetime.now() # 获取当前时间用于比较
+        now_dt = _character_now(speaker_id)
         if history_rows:
             try:
-                first_ts = datetime.strptime(history_rows[0]['timestamp'], '%Y-%m-%d %H:%M:%S')
+                first_ts = parse_beijing_timestamp(
+                    history_rows[0]['timestamp']
+                ).astimezone(now_dt.tzinfo)
                 if first_ts.date() != now_dt.date():
                     show_full_date = True
             except: pass
@@ -801,7 +821,9 @@ def group_chat(group_id):
             row = history_rows[-1]
             # a. 处理时间戳格式
             try:
-                dt_obj = datetime.strptime(row['timestamp'], '%Y-%m-%d %H:%M:%S')
+                dt_obj = parse_beijing_timestamp(
+                    row['timestamp']
+                ).astimezone(now_dt.tzinfo)
                 if show_full_date:
                     ts_str = dt_obj.strftime('[%m-%d %H:%M]')
                 else:
@@ -815,7 +837,7 @@ def group_chat(group_id):
 
             # c. 组合 Content
             msg_role = "user"
-            content_for_ai = _sticker_content_for_ai(row['content'])
+            content_for_ai = voice_message_for_ai(_sticker_content_for_ai(row['content']))
             content_with_tag = f"{ts_str} [{d_name}]: {content_for_ai}"
 
             messages.append({"role": msg_role, "content": content_with_tag})
@@ -843,9 +865,11 @@ def group_chat(group_id):
             cleaned_reply = re.sub(timestamp_pattern, '', reply_text).strip()
 
             # --- 【新增】拦截动作标签 (Emotion/Affinity等) ---
-            cleaned_reply, delta, dir_d = process_agent_actions(speaker_id, cleaned_reply, get_current_user_id())
+            cleaned_reply, delta, dir_d, agent_events = process_agent_actions(speaker_id, cleaned_reply, get_current_user_id(), return_events=True)
             if delta:
                 group_affinity_delta += delta
+            if agent_events:
+                group_agent_events.extend(agent_events)
             print(f"  [DEBUG] dir_d = {repr(dir_d)}, type={type(dir_d).__name__}", flush=True)
 
             # --- 【转向指令】处理 DIRECT_TO_GROUP / DIRECT_TO_USER ---
@@ -863,7 +887,8 @@ def group_chat(group_id):
                     print(f"{'='*50}", flush=True)
                     print(f"  🔄 [Directive] 群聊中 {speaker_name} 发出转向指令: {dir_d}", flush=True)
                     uid = get_current_user_id()
-                    _ddir, _sid, _ctxt = dir_d, speaker_id, cleaned_reply
+                    _ddir = dict(dir_d, source_scene="group_chat")
+                    _sid, _ctxt = speaker_id, cleaned_reply
                     def _bg_exec():
                         set_background_user(uid)
                         try:
@@ -889,7 +914,7 @@ def group_chat(group_id):
             if not cleaned_reply: continue
 
             # --- D. 存档 ---
-            ai_ts = (datetime.now()).strftime('%Y-%m-%d %H:%M:%S')
+            ai_ts = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
 
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
@@ -932,6 +957,11 @@ def group_chat(group_id):
         resp["affinity_delta"] = round(group_affinity_delta, 2)
     if memory_sync_warning:
         resp["memory_sync_warning"] = memory_sync_warning
+    if group_agent_events:
+        resp["agent_events"] = group_agent_events
+        safety_alerts = [ev.get("message") for ev in group_agent_events if ev.get("type") == "safety_alert" and ev.get("message")]
+        if safety_alerts:
+            resp["safety_alert"] = "\n".join(safety_alerts)
     cb_info = get_circuit_breaker_info()
     if cb_info:
         resp["circuit_breaker"] = cb_info
@@ -954,7 +984,8 @@ def delete_group_message(group_id, msg_id):
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-
+        cursor.execute("SELECT role, content FROM messages WHERE id = ?", (msg_id,))
+        deleted_row = cursor.fetchone()
         cursor.execute("DELETE FROM messages WHERE id = ?", (msg_id,))
         rows_affected = cursor.rowcount
 
@@ -962,6 +993,14 @@ def delete_group_message(group_id, msg_id):
         conn.close()
 
         if rows_affected > 0:
+            if deleted_row and deleted_row[0] == "user":
+                delete_voice_message_for_message(
+                    get_current_user_id(),
+                    deleted_row[1],
+                    scope_type="group",
+                    scope_id=group_id,
+                    message_id=msg_id,
+                )
             print(f"   ✅ 群消息删除成功")
             return jsonify({"status": "success"})
         else:
@@ -993,10 +1032,37 @@ def edit_group_message(group_id, msg_id):
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-
+        cursor.execute("SELECT role, content FROM messages WHERE id = ?", (msg_id,))
+        old_row = cursor.fetchone()
+        if not old_row:
+            conn.close()
+            return jsonify({"error": "Message ID not found"}), 404
+        if parse_voice_message_tag(new_content):
+            try:
+                validate_voice_message_for_scope(
+                    get_current_user_id(),
+                    new_content,
+                    scope_type="group",
+                    scope_id=group_id,
+                    message_id=msg_id,
+                )
+            except VoiceMessageError as exc:
+                conn.close()
+                return jsonify({"error": "voice_message_invalid", "message": str(exc)}), 400
         cursor.execute("UPDATE messages SET content = ? WHERE id = ?", (new_content, msg_id))
         conn.commit()
         conn.close()
+
+        old_voice = parse_voice_message_tag(old_row[1]) if old_row[0] == "user" else None
+        new_voice = parse_voice_message_tag(new_content)
+        if old_voice and (not new_voice or new_voice["filename"] != old_voice["filename"]):
+            delete_voice_message_for_message(
+                get_current_user_id(),
+                old_row[1],
+                scope_type="group",
+                scope_id=group_id,
+                message_id=msg_id,
+            )
 
         print(f"   ✅ 群消息编辑成功")
         return jsonify({"status": "success", "content": new_content})
@@ -1122,7 +1188,7 @@ def serve_group_background(group_id, filename):
 # --- 【修正】群聊快照接口 (真实实现) ---
 @group_bp.route("/api/group/<group_id>/memory/snapshot", methods=["POST"])
 def snapshot_group_memory(group_id):
-    now = datetime.now()
+    now = beijing_now()
     today_str = now.strftime('%Y-%m-%d')
 
     total_new = 0
@@ -1466,7 +1532,8 @@ def add_group():
             "avatar": "/static/default_group.png", # 记得在static放个图
             "pinned": False,
             "members": members,
-            "active_mode": False  # 【修改】新建群默认开启主动消息
+            "active_mode": False,  # 【修改】新建群默认开启主动消息
+            "group_chat_mode": "online",
         }
 
         with open(groups_cfg, "w", encoding="utf-8") as f:

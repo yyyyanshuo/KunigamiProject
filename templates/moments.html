@@ -9,6 +9,8 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="/static/logo.png">
     <title>朋友圈</title>
+    <script src="/static/image-tags.js"></script>
+    <script defer src="/static/voice-call-incoming.js"></script>
     <script>
         // 将后端语言设置传递给前端
         window.AI_LANG = "{{ ai_lang }}";
@@ -165,17 +167,19 @@
         /* --- 发布框图片预览 --- */
         .moment-upload-preview {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-            margin: 10px 0;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            align-items: start;
+            gap: 6px;
+            margin: 8px 0;
         }
         .preview-item {
-            aspect-ratio: 1/1;
             position: relative;
             background: #f0f2f5;
             border-radius: 8px;
             overflow: hidden;
+            padding-bottom: 6px;
         }
+        .preview-image-wrap { position: relative; aspect-ratio: 1/1; }
         .preview-item img { width: 100%; height: 100%; object-fit: cover; }
         .preview-delete {
             position: absolute; top: 2px; right: 2px;
@@ -195,6 +199,13 @@
             color: var(--text-muted);
             cursor: pointer;
         }
+        .preview-mode-row { display: flex; gap: 3px; padding: 5px 5px 0; }
+        .preview-mode-btn { flex: 1; min-width: 0; padding: 4px 1px; border: 1px solid var(--border-color); border-radius: 5px; background: #fff; color: var(--text-muted); font-size: 10px; white-space: nowrap; cursor: pointer; }
+        .preview-mode-btn.active { border-color: var(--primary-color); background: rgba(255, 182, 185, 0.14); color: var(--primary-dark); font-weight: 600; }
+        .preview-description { display: none; width: calc(100% - 10px); min-height: 42px; max-height: 90px; margin: 5px 5px 0; padding: 6px; box-sizing: border-box; border: 1px solid var(--border-color); border-radius: 5px; resize: vertical; font: inherit; font-size: 11px; }
+        .preview-description.show { display: block; }
+        .moment-image-bulk { display: none; align-items: center; gap: 6px; margin-bottom: 7px; font-size: 11px; color: var(--text-muted); }
+        .moment-image-bulk button { padding: 4px 8px; border: 1px solid var(--border-color); border-radius: 6px; background: #fff; color: var(--text-main); cursor: pointer; }
 
         /* @ 自动补全菜单 */
         .at-mention-menu {
@@ -660,12 +671,17 @@
         .moment-modal-mask {
             position: fixed; inset: 0; z-index: 20; display: none;
             align-items: center; justify-content: center;
+            padding: 12px; box-sizing: border-box; overflow: hidden;
             background: rgba(0, 0, 0, 0.4);
             backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px);
         }
         .moment-modal {
             background: #fff; border-radius: var(--radius-lg);
-            padding: 24px; width: 85%; max-width: 400px;
+            padding: 18px; width: 88%; max-width: 400px;
+            max-height: calc(100vh - 24px);
+            max-height: calc(100dvh - 24px);
+            overflow-y: auto; overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch; box-sizing: border-box;
             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
             transform: translateY(20px) scale(0.95); opacity: 0;
             animation: modal-fade-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
@@ -676,8 +692,10 @@
 
         .moment-modal-title {
             font-size: 18px; font-weight: 700; color: var(--text-main);
-            margin-bottom: 16px; text-align: center;
+            margin-bottom: 12px; text-align: center;
         }
+
+        #userPostSection .moment-compose-text { min-height: 88px; }
         .moment-compose-trans-row {
             margin-bottom: 10px;
             display: flex;
@@ -900,7 +918,12 @@
                         <div class="moment-upload-preview" id="momentUploadPreview">
                             <div class="upload-add-btn" id="triggerImageInput">＋</div>
                         </div>
-                        <div id="uploadTokenWarning" style="font-size: 11px; color: #e57373; margin-bottom: 8px; display: none;">注意：多图上传会消耗较多 tokens 用于识图。</div>
+                        <div id="momentImageBulk" class="moment-image-bulk">
+                            <span>全部设为：</span>
+                            <button type="button" data-mode="ai">AI 识图</button>
+                            <button type="button" data-mode="manual">手动描述</button>
+                        </div>
+                        <div id="uploadTokenWarning" style="font-size: 11px; color: #e57373; margin-bottom: 8px; display: none;">AI 识图会消耗较多 Token；描述仅供角色理解，不显示在正文中。</div>
                         
                         <div class="moment-char-count" id="momentCharCount">0/2000</div>
                         <div class="moment-modal-actions">
@@ -1041,19 +1064,40 @@
                     .replace(/</g, '&lt;')
                     .replace(/>/g, '&gt;');
             }
+            // 朋友圈记录统一按北京时间展示。
+            const RECORD_TIMEZONE = 'Asia/Shanghai';
+            function parseBeijingTime(ts) {
+                if (!ts) return new Date(NaN);
+                const normalized = String(ts).trim().replace(
+                    /^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2}(?:\.\d+)?)$/,
+                    '$1T$2+08:00'
+                );
+                return new Date(normalized);
+            }
+            function recordDateKey(d) {
+                return new Intl.DateTimeFormat('en-CA', {
+                    timeZone: RECORD_TIMEZONE,
+                    year: 'numeric', month: '2-digit', day: '2-digit'
+                }).format(d);
+            }
             function formatTime(ts) {
                 if (!ts) return '';
                 try {
-                    const d = new Date(ts.replace(/-/g, '/'));
+                    const d = parseBeijingTime(ts);
+                    if (Number.isNaN(d.getTime())) return ts;
                     const now = new Date();
-                    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-                    const yesterday = new Date(today.getTime() - 86400000);
-                    const dDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-                    const h = ('0' + d.getHours()).slice(-2);
-                    const min = ('0' + d.getMinutes()).slice(-2);
-                    if (dDay.getTime() === today.getTime()) return '今天 ' + h + ':' + min;
-                    if (dDay.getTime() === yesterday.getTime()) return '昨天 ' + h + ':' + min;
-                    return (d.getMonth() + 1) + '-' + d.getDate() + ' ' + h + ':' + min;
+                    const yesterday = new Date(now.getTime() - 86400000);
+                    const timeText = new Intl.DateTimeFormat('zh-CN', {
+                        timeZone: RECORD_TIMEZONE,
+                        hour: '2-digit', minute: '2-digit', hour12: false
+                    }).format(d);
+                    if (recordDateKey(d) === recordDateKey(now)) return '今天 ' + timeText;
+                    if (recordDateKey(d) === recordDateKey(yesterday)) return '昨天 ' + timeText;
+                    const dateText = new Intl.DateTimeFormat('zh-CN', {
+                        timeZone: RECORD_TIMEZONE,
+                        month: 'numeric', day: 'numeric'
+                    }).format(d);
+                    return dateText + ' ' + timeText;
                 } catch (e) { return ts; }
             }
 
@@ -1094,7 +1138,7 @@
             function renderGridImages(mObj) {
                 const content = mObj.content || '';
                 if (!content) return '';
-                const matches = Array.from(content.matchAll(/\[图片\]\(([\s\S]*?)\)\(([\s\S]*?)\)/g));
+                const matches = window.KunigamiImageTags.findAll(content);
                 if (matches.length === 0) return '';
                 
                 const count = matches.length;
@@ -1104,13 +1148,13 @@
                 
                 let html = '<div class="moment-photos ' + gridClass + '">';
                 matches.slice(0, 9).forEach((m, idx) => {
-                    let path = m[1];
+                    let path = m.path;
                     if (path && !path.startsWith('http')) {
                         if (!path.startsWith('users/')) {
                             if (!path.includes('/')) {
                                 try {
-                                    const d = new Date(mObj.timestamp.replace(/-/g, '/'));
-                                    const yyyymm = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0');
+                                    const d = parseBeijingTime(mObj.timestamp);
+                                    const yyyymm = recordDateKey(d).slice(0, 7).replace('-', '');
                                     path = yyyymm + '/' + path;
                                 } catch (e) {}
                             }
@@ -1118,7 +1162,7 @@
                         }
                     }
                     const url = window.getCosUrl ? window.getCosUrl(path) : path;
-                    const desc = m[2];
+                    const desc = m.description;
                     html += '<div class="photo-item" onclick="viewImage(\'' + escapeAttr(url) + '\')">';
                     html += '<img src="' + url + '" alt="' + escapeAttr(desc) + '" loading="lazy" onerror="console.log(\'Failed to load: \', \'' + url + '\'); this.style.display=\'none\'">';
                     if (idx === 8 && count > 9) {
@@ -1169,11 +1213,9 @@
                     
                     // 保护图片标签，防止被假名解析器破坏
                     let text = copy.content || '';
-                    let imgTags = [];
-                    text = text.replace(/\[图片\]\(([\s\S]*?)\)\(([\s\S]*?)\)/g, (match) => {
-                        imgTags.push(match);
-                        return `__IMG_${imgTags.length - 1}__`;
-                    });
+                    const protectedImages = window.KunigamiImageTags.protect(text);
+                    let imgTags = protectedImages.tags.map(tag => tag.raw);
+                    text = protectedImages.text;
                     
                     let furiText = await addFurigana(text);
                     
@@ -1302,7 +1344,7 @@
                         postActionsMenu +
                         '</div>' +
                         '</div>' +
-                        '<div class="moment-content">' + (m.display_content || escapeHtml(m.content || '')).replace(/\[图片\]\(([\s\S]*?)\)\(([\s\S]*?)\)/g, '').trim() + '</div>' +
+                        '<div class="moment-content">' + window.KunigamiImageTags.strip(m.display_content || escapeHtml(m.content || '')).trim() + '</div>' +
                         renderGridImages(m) +
                         postTransResult +
                         likersHtml +
@@ -1998,6 +2040,7 @@
                 const triggerBtn = document.getElementById('triggerImageInput');
                 const previewContainer = document.getElementById('momentUploadPreview');
                 const uploadWarn = document.getElementById('uploadTokenWarning');
+                const imageBulk = document.getElementById('momentImageBulk');
                 let selectedFiles = [];
 
                 if (triggerBtn && imageInput) {
@@ -2006,7 +2049,7 @@
                         const files = Array.from(e.target.files);
                         files.forEach(file => {
                             if (selectedFiles.length < 9) {
-                                selectedFiles.push(file);
+                                selectedFiles.push({ file: file, mode: 'ai', description: '' });
                             }
                         });
                         renderUploadPreview();
@@ -2017,17 +2060,27 @@
                 function renderUploadPreview() {
                     // 清空并保留添加按钮
                     previewContainer.innerHTML = '';
-                    selectedFiles.forEach((file, idx) => {
+                    selectedFiles.forEach((entry, idx) => {
                         const reader = new FileReader();
                         const div = document.createElement('div');
                         div.className = 'preview-item';
+                        div.dataset.idx = idx;
                         reader.onload = (e) => {
                             div.innerHTML = `
-                                <img src="${e.target.result}">
-                                <div class="preview-delete" data-idx="${idx}">×</div>
+                                <div class="preview-image-wrap">
+                                    <img src="${e.target.result}" alt="待上传图片">
+                                    <div class="preview-delete" data-idx="${idx}">×</div>
+                                </div>
+                                <div class="preview-mode-row">
+                                    <button type="button" class="preview-mode-btn ${entry.mode === 'ai' ? 'active' : ''}" data-idx="${idx}" data-mode="ai" title="AI 识图">AI</button>
+                                    <button type="button" class="preview-mode-btn ${entry.mode === 'manual' ? 'active' : ''}" data-idx="${idx}" data-mode="manual" title="手动描述">手动</button>
+                                </div>
+                                <textarea class="preview-description ${entry.mode === 'manual' ? 'show' : ''}" data-idx="${idx}" maxlength="500" placeholder="描述这张图片…"></textarea>
                             `;
+                            const textarea = div.querySelector('.preview-description');
+                            if (textarea) textarea.value = entry.description || '';
                         };
-                        reader.readAsDataURL(file);
+                        reader.readAsDataURL(entry.file);
                         previewContainer.appendChild(div);
                     });
                     if (selectedFiles.length < 9) {
@@ -2038,6 +2091,7 @@
                         previewContainer.appendChild(addBtn);
                     }
                     if (uploadWarn) uploadWarn.style.display = selectedFiles.length > 0 ? 'block' : 'none';
+                    if (imageBulk) imageBulk.style.display = selectedFiles.length > 0 ? 'flex' : 'none';
                 }
 
                 previewContainer.addEventListener('click', (e) => {
@@ -2045,8 +2099,27 @@
                         const idx = parseInt(e.target.dataset.idx);
                         selectedFiles.splice(idx, 1);
                         renderUploadPreview();
+                    } else if (e.target.classList.contains('preview-mode-btn')) {
+                        const idx = parseInt(e.target.dataset.idx);
+                        if (selectedFiles[idx]) {
+                            selectedFiles[idx].mode = e.target.dataset.mode === 'manual' ? 'manual' : 'ai';
+                            renderUploadPreview();
+                        }
                     }
                 });
+                previewContainer.addEventListener('input', (e) => {
+                    if (!e.target.classList.contains('preview-description')) return;
+                    const idx = parseInt(e.target.dataset.idx);
+                    if (selectedFiles[idx]) selectedFiles[idx].description = e.target.value;
+                });
+                if (imageBulk) {
+                    imageBulk.addEventListener('click', (e) => {
+                        const button = e.target.closest('button[data-mode]');
+                        if (!button) return;
+                        selectedFiles.forEach(entry => { entry.mode = button.dataset.mode === 'manual' ? 'manual' : 'ai'; });
+                        renderUploadPreview();
+                    });
+                }
 
                 // 新增元素
                 const showUserPostBtn = document.getElementById('showUserPostBtn');
@@ -2199,6 +2272,8 @@
                 openBtn.addEventListener('click', openModal);
                 cancelBtn.addEventListener('click', function() {
                     composeText.value = '';
+                    selectedFiles = [];
+                    renderUploadPreview();
                     if (composeTransText) composeTransText.value = '';
                     if (charCountEl) {
                         charCountEl.textContent = '0/2000';
@@ -2239,6 +2314,13 @@
                 composeBtn.addEventListener('click', function() {
                     const content = (composeText.value || '').trim();
                     if (!content && selectedFiles.length === 0) return;
+                    const missingDescription = selectedFiles.findIndex(entry => entry.mode === 'manual' && !entry.description.trim());
+                    if (missingDescription >= 0) {
+                        alert(`请填写第 ${missingDescription + 1} 张图片的描述`);
+                        const input = previewContainer.querySelector(`.preview-description[data-idx="${missingDescription}"]`);
+                        if (input) input.focus();
+                        return;
+                    }
                     
                     composeBtn.disabled = true;
                     composeBtn.classList.add('is-loading');
@@ -2246,15 +2328,28 @@
                     
                     const formData = new FormData();
                     formData.append('content', content);
-                    selectedFiles.forEach(file => {
-                        formData.append('images', file);
+                    selectedFiles.forEach(entry => {
+                        formData.append('images', entry.file);
                     });
+                    formData.append('image_metadata', JSON.stringify(selectedFiles.map(entry => ({
+                        mode: entry.mode,
+                        description: entry.mode === 'manual' ? entry.description.trim() : ''
+                    }))));
 
                     fetch('/api/moments/post', {
                         method: 'POST',
                         body: formData
                     })
-                        .then(r => r.json())
+                        .then(async r => {
+                            const data = await r.json();
+                            if (!r.ok || data.error) {
+                                const error = new Error(data.error || '发布失败');
+                                error.code = data.code;
+                                error.imageIndex = data.image_index;
+                                throw error;
+                            }
+                            return data;
+                        })
                         .then(() => {
                             composeText.value = '';
                             selectedFiles = [];
@@ -2268,7 +2363,11 @@
                             loadNextPage(true, { highlightFirst: true });
                         })
                         .catch((err) => {
-                            alert('发布失败: ' + err);
+                            if (err.code === 'vision_failed' && Number.isInteger(err.imageIndex) && selectedFiles[err.imageIndex]) {
+                                selectedFiles[err.imageIndex].mode = 'manual';
+                                renderUploadPreview();
+                            }
+                            alert('发布失败: ' + (err.message || err));
                         })
                         .finally(() => {
                             composeBtn.disabled = false;

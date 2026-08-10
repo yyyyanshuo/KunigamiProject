@@ -10,9 +10,119 @@ from PIL import Image
 from cos_utils import upload_to_cos
 from core.config import SQUARE_DB, SQUARE_AVATARS_DIR, USERS_DB, USERS_ROOT
 from core.context import get_current_user_id
-from core.utils import get_paths, safe_save_json, _get_characters_config_file
+from core.utils import safe_save_json, _get_characters_config_file
 
 square_bp = Blueprint('square', __name__)
+
+
+def _ensure_square_character_columns(conn):
+    """Backfill publish-source metadata on existing square databases."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(characters)").fetchall()}
+    additions = {
+        "author_user_id": "INTEGER",
+        "source_character_id": "TEXT",
+        "updated_at": "TEXT",
+    }
+    for name, sql_type in additions.items():
+        if name not in columns:
+            conn.execute(f"ALTER TABLE characters ADD COLUMN {name} {sql_type}")
+
+
+def _get_user_email(user_id):
+    if not user_id:
+        return ""
+    try:
+        with sqlite3.connect(USERS_DB) as conn:
+            row = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+        return (row[0] if row else "") or ""
+    except Exception:
+        return ""
+
+
+def _is_square_author(row, user_id, author_email):
+    """Prefer stable user id; retain email fallback for legacy publications."""
+    if not row:
+        return False
+    keys = row.keys() if isinstance(row, sqlite3.Row) else ()
+    owner_id = row["author_user_id"] if "author_user_id" in keys else None
+    owner_email = row["author_email"] if "author_email" in keys else ""
+    if owner_id is not None:
+        return str(owner_id) == str(user_id)
+    return bool(author_email and owner_email == author_email)
+
+
+def _read_base_persona(prompts_dir):
+    for filename in ("1_base_persona.json", "1_base_persona.md"):
+        path = os.path.join(prompts_dir, filename)
+        if not os.path.isfile(path):
+            continue
+        with open(path, "r", encoding="utf-8-sig") as f:
+            if filename.endswith(".json"):
+                value = json.load(f)
+                if isinstance(value, dict):
+                    return str(value.get("system_prompt") or "")
+                return str(value or "")
+            return f.read()
+    return ""
+
+
+def _load_local_publish_snapshot(user_id, local_character_id):
+    """Read only the fields that are allowed to leave a private character."""
+    local_character_id = str(local_character_id or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_]+", local_character_id):
+        raise ValueError("本地角色 ID 无效")
+
+    config_path = _get_characters_config_file(user_id=user_id)
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError("本地角色配置不存在")
+    with open(config_path, "r", encoding="utf-8-sig") as f:
+        characters = json.load(f) or {}
+    info = characters.get(local_character_id)
+    if not isinstance(info, dict):
+        raise FileNotFoundError("本地角色不存在")
+
+    prompts_dir = os.path.join(
+        USERS_ROOT, str(user_id), "characters", local_character_id, "prompts"
+    )
+    relationship = {}
+    relationship_path = os.path.join(prompts_dir, "2_relationship.json")
+    if os.path.isfile(relationship_path):
+        with open(relationship_path, "r", encoding="utf-8-sig") as f:
+            relationship = json.load(f) or {}
+    from blueprints.chat import normalize_relationship_graph
+    relationship = normalize_relationship_graph(relationship)
+
+    return {
+        "id": local_character_id,
+        "name": str(info.get("name") or info.get("remark") or local_character_id),
+        "avatar": str(info.get("avatar") or "/static/default_avatar.png"),
+        "age": info.get("age"),
+        "no_age_increase": bool(info.get("no_age_increase", False)),
+        "base_persona": _read_base_persona(prompts_dir),
+        "relationship_graph": relationship,
+        # IP/tags may be private-app metadata. The square form remains authoritative.
+        "ip": str(info.get("ip") or ""),
+        "tags": info.get("tags") or "",
+    }
+
+
+def _save_local_square_link(user_id, local_character_id, square_id):
+    if not local_character_id:
+        return
+    config_path = _get_characters_config_file(user_id=user_id)
+    if not os.path.isfile(config_path):
+        return
+    try:
+        with open(config_path, "r", encoding="utf-8-sig") as f:
+            characters = json.load(f) or {}
+        info = characters.get(local_character_id)
+        if not isinstance(info, dict):
+            return
+        info["square_published_id"] = square_id
+        info["square_last_synced_at"] = datetime.now().isoformat()
+        safe_save_json(config_path, characters)
+    except Exception as e:
+        print(f"Square local link save error: {e}")
 
 
 def _find_private_avatar_file(user_id, avatar_url):
@@ -31,6 +141,10 @@ def _find_private_avatar_file(user_id, avatar_url):
         return None
 
     private_char_id, filename = parts
+    if not re.fullmatch(r"[A-Za-z0-9_]+", private_char_id):
+        return None
+    if filename != os.path.basename(filename):
+        return None
     char_dir = os.path.join(USERS_ROOT, str(user_id), "characters", private_char_id)
     exact_path = os.path.join(char_dir, filename)
     if os.path.isfile(exact_path):
@@ -116,12 +230,16 @@ def init_square_db():
             tags TEXT,
             ip TEXT,
             author_email TEXT,
+            author_user_id INTEGER,
+            source_character_id TEXT,
             likes_count INTEGER DEFAULT 0,
             favorites_count INTEGER DEFAULT 0,
             comment_count INTEGER DEFAULT 0,
-            created_at TEXT
+            created_at TEXT,
+            updated_at TEXT
         )
     """)
+    _ensure_square_character_columns(conn)
     # IP表
     cur.execute("""
         CREATE TABLE IF NOT EXISTS ips (
@@ -177,8 +295,12 @@ def square_character_page(char_id):
 def api_square_ips():
     try:
         conn = sqlite3.connect(SQUARE_DB)
+        _ensure_square_character_columns(conn)
         cur = conn.cursor()
-        cur.execute("SELECT name, heat, character_count FROM ips ORDER BY heat DESC")
+        cur.execute(
+            "SELECT name, heat, character_count FROM ips "
+            "WHERE character_count > 0 ORDER BY heat DESC"
+        )
         rows = cur.fetchall()
         conn.close()
         return jsonify([{"name": r[0], "heat": r[1], "count": r[2]} for r in rows])
@@ -229,6 +351,75 @@ def api_square_list():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+def _linked_square_id(conn, user_id, author_email, local_character_id, exclude_id=None):
+    query = """
+        SELECT id FROM characters
+        WHERE (author_user_id = ? OR (author_user_id IS NULL AND author_email = ?))
+          AND (source_character_id = ? OR (source_character_id IS NULL AND id = ?))
+    """
+    params = [user_id, author_email, local_character_id, local_character_id]
+    if exclude_id:
+        query += " AND id != ?"
+        params.append(exclude_id)
+    query += " ORDER BY CASE WHEN source_character_id = ? THEN 0 ELSE 1 END LIMIT 1"
+    params.append(local_character_id)
+    row = conn.execute(query, params).fetchone()
+    return row[0] if row else None
+
+
+@square_bp.route("/api/square/local_characters")
+def api_square_local_characters():
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"error": "请先登录"}), 401
+    config_path = _get_characters_config_file(user_id=user_id)
+    try:
+        with open(config_path, "r", encoding="utf-8-sig") as f:
+            characters = json.load(f) or {}
+    except FileNotFoundError:
+        characters = {}
+    except Exception as e:
+        return jsonify({"error": f"读取本地角色失败: {e}"}), 500
+
+    author_email = _get_user_email(user_id)
+    with sqlite3.connect(SQUARE_DB) as conn:
+        _ensure_square_character_columns(conn)
+        result = []
+        for char_id, info in characters.items():
+            if not isinstance(info, dict):
+                continue
+            result.append({
+                "id": char_id,
+                "name": info.get("name") or info.get("remark") or char_id,
+                "avatar": info.get("avatar") or "/static/default_avatar.png",
+                "linked_square_id": _linked_square_id(conn, user_id, author_email, char_id),
+            })
+    result.sort(key=lambda item: str(item["name"]).casefold())
+    return jsonify(result)
+
+
+@square_bp.route("/api/square/local_character/<local_character_id>/preview")
+def api_square_local_character_preview(local_character_id):
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"error": "请先登录"}), 401
+    try:
+        snapshot = _load_local_publish_snapshot(user_id, local_character_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        return jsonify({"error": f"读取本地角色失败: {e}"}), 500
+
+    author_email = _get_user_email(user_id)
+    with sqlite3.connect(SQUARE_DB) as conn:
+        _ensure_square_character_columns(conn)
+        linked_id = _linked_square_id(conn, user_id, author_email, local_character_id)
+    snapshot["linked_square_id"] = linked_id
+    return jsonify({"status": "success", "character": snapshot})
+
 @square_bp.route("/api/square/upload", methods=["POST"])
 def api_square_upload():
     user_id = get_current_user_id()
@@ -236,17 +427,7 @@ def api_square_upload():
         return jsonify({"error": "请先登录"}), 401
 
     # 获取作者邮箱
-    author_email = ""
-    try:
-        conn_u = sqlite3.connect(USERS_DB)
-        cur_u = conn_u.cursor()
-        cur_u.execute("SELECT email FROM users WHERE id = ?", (user_id,))
-        row = cur_u.fetchone()
-        if row:
-            author_email = row[0]
-        conn_u.close()
-    except:
-        pass
+    author_email = _get_user_email(user_id)
 
     # 处理表单数据
     # 因为涉及头像上传，可能需要 multipart/form-data
@@ -263,10 +444,38 @@ def api_square_upload():
     tags = ",".join(tags_list)
 
     relationship_graph = data.get("relationship_graph", "{}").strip()
+    try:
+        from blueprints.chat import normalize_relationship_graph
+        relationship_graph = json.dumps(
+            normalize_relationship_graph(relationship_graph),
+            ensure_ascii=False,
+            indent=2,
+        )
+    except (ValueError, json.JSONDecodeError) as e:
+        return jsonify({"error": f"关系图谱 JSON 无效: {e}"}), 400
     base_persona = data.get("base_persona", "").strip()
+    source_character_id = data.get("source_character_id", "").strip() or None
 
     if not char_id_base or not name:
         return jsonify({"error": "ID和名称不能为空"}), 400
+
+    if source_character_id:
+        try:
+            _load_local_publish_snapshot(user_id, source_character_id)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        except FileNotFoundError as e:
+            return jsonify({"error": str(e)}), 404
+
+        with sqlite3.connect(SQUARE_DB) as conn:
+            _ensure_square_character_columns(conn)
+            existing_id = _linked_square_id(conn, user_id, author_email, source_character_id)
+        if existing_id:
+            return jsonify({
+                "status": "already_published",
+                "square_id": existing_id,
+                "message": "该本地角色已经发布，可更新原作品",
+            }), 409
 
     # 生成唯一 ID
     final_id = generate_unique_square_id(char_id_base)
@@ -283,11 +492,19 @@ def api_square_upload():
     # 写入数据库
     try:
         conn = sqlite3.connect(SQUARE_DB)
+        _ensure_square_character_columns(conn)
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO characters (id, name, avatar, age, no_age_increase, base_persona, relationship_graph, tags, ip, author_email, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (final_id, name, avatar_url, age, no_age_increase, base_persona, relationship_graph, tags, ip, author_email, datetime.now().isoformat()))
+            INSERT INTO characters (
+                id, name, avatar, age, no_age_increase, base_persona,
+                relationship_graph, tags, ip, author_email, author_user_id,
+                source_character_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            final_id, name, avatar_url, age, no_age_increase, base_persona,
+            relationship_graph, tags, ip, author_email, user_id,
+            source_character_id, datetime.now().isoformat(), datetime.now().isoformat(),
+        ))
 
         # 更新 IP 表
         if ip:
@@ -299,6 +516,7 @@ def api_square_upload():
 
         conn.commit()
         conn.close()
+        _save_local_square_link(user_id, source_character_id, final_id)
         return jsonify({"status": "success", "id": final_id})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -308,6 +526,7 @@ def api_square_character_detail(char_id):
     try:
         conn = sqlite3.connect(SQUARE_DB)
         conn.row_factory = sqlite3.Row  # 使用 Row 模式，通过列名访问
+        _ensure_square_character_columns(conn)
         cur = conn.cursor()
 
         cur.execute("SELECT * FROM characters WHERE id = ?", (char_id,))
@@ -329,7 +548,11 @@ def api_square_character_detail(char_id):
         comments = [{"content": r["content"], "created_at": r["created_at"]} for r in cur.fetchall()]
 
         # 获取该作者其他角色
-        cur.execute("SELECT id, name, avatar FROM characters WHERE author_email = ? AND id != ?", (char_data["author_email"], char_id))
+        cur.execute("""
+            SELECT id, name, avatar FROM characters
+            WHERE (author_user_id = ? OR (author_user_id IS NULL AND author_email = ?))
+              AND id != ?
+        """, (char_data.get("author_user_id"), char_data.get("author_email"), char_id))
         other_chars = [{"id": r["id"], "name": r["name"], "avatar": r["avatar"]} for r in cur.fetchall()]
 
         # 检查点赞/收藏状态
@@ -347,14 +570,7 @@ def api_square_character_detail(char_id):
             cur.execute("SELECT 1 FROM likes WHERE user_id = ? AND character_id = ?", (user_id, char_id))
             if cur.fetchone(): is_liked = True
 
-            # 检查作者
-            conn_u = sqlite3.connect(USERS_DB)
-            cur_u = conn_u.cursor()
-            cur_u.execute("SELECT email FROM users WHERE id = ?", (user_id,))
-            u_row = cur_u.fetchone()
-            if u_row and u_row[0] == char_data["author_email"]:
-                is_author = True
-            conn_u.close()
+            is_author = _is_square_author(row, user_id, _get_user_email(user_id))
 
         conn.close()
         return jsonify({
@@ -480,12 +696,15 @@ def api_square_my_posts():
         if row: author_email = row[0]
         conn_u.close()
 
-        if not author_email: return jsonify([])
-
         conn = sqlite3.connect(SQUARE_DB)
         cur = conn.cursor()
-        query = "SELECT id, name, avatar, ip, likes_count, tags FROM characters WHERE author_email = ? ORDER BY created_at DESC"
-        cur.execute(query, (author_email,))
+        _ensure_square_character_columns(conn)
+        query = """
+            SELECT id, name, avatar, ip, likes_count, tags FROM characters
+            WHERE author_user_id = ? OR (author_user_id IS NULL AND author_email = ?)
+            ORDER BY created_at DESC
+        """
+        cur.execute(query, (user_id, author_email))
         rows = cur.fetchall()
         conn.close()
         return jsonify([{
@@ -512,18 +731,21 @@ def api_square_delete():
 
         conn = sqlite3.connect(SQUARE_DB)
         cur = conn.cursor()
-        cur.execute("SELECT ip, author_email FROM characters WHERE id = ?", (char_id,))
+        conn.row_factory = sqlite3.Row
+        _ensure_square_character_columns(conn)
+        cur = conn.cursor()
+        cur.execute("SELECT ip, author_email, author_user_id FROM characters WHERE id = ?", (char_id,))
         c_row = cur.fetchone()
 
         if not c_row:
             conn.close()
             return jsonify({"error": "角色不存在"}), 404
 
-        if c_row[1] != author_email:
+        if not _is_square_author(c_row, user_id, author_email):
             conn.close()
             return jsonify({"error": "无权删除他人作品"}), 403
 
-        ip = c_row[0]
+        ip = c_row["ip"]
         # 执行删除
         cur.execute("DELETE FROM characters WHERE id = ?", (char_id,))
         cur.execute("DELETE FROM likes WHERE character_id = ?", (char_id,))
@@ -575,19 +797,24 @@ def api_square_update():
         conn_u.close()
 
         conn = sqlite3.connect(SQUARE_DB)
+        conn.row_factory = sqlite3.Row
+        _ensure_square_character_columns(conn)
         cur = conn.cursor()
-        cur.execute("SELECT avatar, ip, author_email FROM characters WHERE id = ?", (char_id,))
+        cur.execute("""
+            SELECT avatar, ip, author_email, author_user_id, source_character_id
+            FROM characters WHERE id = ?
+        """, (char_id,))
         c_row = cur.fetchone()
 
         if not c_row:
             conn.close()
             return jsonify({"error": "角色不存在"}), 404
-        if c_row[2] != author_email:
+        if not _is_square_author(c_row, user_id, author_email):
             conn.close()
             return jsonify({"error": "无权修改他人作品"}), 403
 
-        old_avatar = c_row[0]
-        old_ip = c_row[1]
+        old_avatar = c_row["avatar"]
+        old_ip = c_row["ip"]
 
         # 准备更新的数据
         name = data.get("name")
@@ -598,7 +825,39 @@ def api_square_update():
         import re
         tags = ",".join([t.strip() for t in re.split(r'[,，\s]+', tags_raw) if t.strip()])
         relationship_graph = data.get("relationship_graph", "{}")
+        try:
+            from blueprints.chat import normalize_relationship_graph
+            relationship_graph = json.dumps(
+                normalize_relationship_graph(relationship_graph),
+                ensure_ascii=False,
+                indent=2,
+            )
+        except (ValueError, json.JSONDecodeError) as e:
+            conn.close()
+            return jsonify({"error": f"关系图谱 JSON 无效: {e}"}), 400
         base_persona = data.get("base_persona", "")
+        requested_source_character_id = data.get("source_character_id", "").strip()
+        source_character_id = (
+            requested_source_character_id or c_row["source_character_id"] or None
+        )
+        if requested_source_character_id:
+            try:
+                _load_local_publish_snapshot(user_id, requested_source_character_id)
+            except ValueError as e:
+                conn.close()
+                return jsonify({"error": str(e)}), 400
+            except FileNotFoundError as e:
+                conn.close()
+                return jsonify({"error": str(e)}), 404
+            linked_id = _linked_square_id(
+                conn, user_id, author_email, requested_source_character_id, exclude_id=char_id
+            )
+            if linked_id:
+                conn.close()
+                return jsonify({
+                    "error": f"该本地角色已经关联广场作品 {linked_id}",
+                    "square_id": linked_id,
+                }), 409
 
         uploaded_avatar = request.files.get('avatar')
         avatar_url = _materialize_square_avatar(
@@ -613,9 +872,14 @@ def api_square_update():
         cur.execute("""
             UPDATE characters SET
             name=?, avatar=?, age=?, no_age_increase=?, base_persona=?,
-            relationship_graph=?, tags=?, ip=?
+            relationship_graph=?, tags=?, ip=?, author_user_id=?,
+            source_character_id=?, updated_at=?
             WHERE id=?
-        """, (name, avatar_url, age, no_age_increase, base_persona, relationship_graph, tags, new_ip, char_id))
+        """, (
+            name, avatar_url, age, no_age_increase, base_persona,
+            relationship_graph, tags, new_ip, user_id,
+            source_character_id, datetime.now().isoformat(), char_id,
+        ))
 
         # 更新 IP 表（如果 IP 变了）
         if old_ip != new_ip:
@@ -627,6 +891,7 @@ def api_square_update():
 
         conn.commit()
         conn.close()
+        _save_local_square_link(user_id, source_character_id, char_id)
         return jsonify({"status": "success"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -686,6 +951,10 @@ def api_square_add_to_local():
             "name": s["name"], "remark": s["name"], "avatar": s["avatar"], "pinned": False,
             "emotion": 1, "light_sleep": True, "deep_sleep": False,
             "ds_start": "23:00", "ds_end": "07:00", "square_origin_id": s["id"],
+            "timezone": "Asia/Shanghai", "timezone_source": "system_default",
+            "ds_time_basis": "character", "ds_set_by": "default",
+            "ds_timezone_at_set": "Asia/Shanghai",
+            "deep_sleep_source": "schedule", "sleep_manual_override": False,
             "age": s["age"], "no_age_increase": bool(s["no_age_increase"])
         }
         safe_save_json(cfg_file, all_config)

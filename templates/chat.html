@@ -8,6 +8,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="apple-touch-icon" href="/static/logo.png">
+  <script src="/static/auth-guard.js"></script>
+  <script src="/static/image-tags.js"></script>
+  <script defer src="/static/voice-call-incoming.js"></script>
 
   <script>
     window.__chatDiagnosticEarly = window.__chatDiagnosticEarly || [];
@@ -129,8 +132,101 @@
       background-color: #fff;
       border-top: 1px solid var(--primary-lighter);
       z-index: 10;
+      transition: background-color .22s ease, border-color .22s ease;
       /* 适配底部小黑条 */
       padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
+    }
+
+    .voice-live-panel {
+      position: relative;
+      height: 0;
+      flex: 0 0 0;
+      z-index: 9;
+      pointer-events: none;
+    }
+    .voice-live-panel-inner {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      min-height: 112px;
+      box-sizing: border-box;
+      padding: 34px 22px 15px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+      color: #fff;
+      text-align: center;
+      background: linear-gradient(
+        to bottom,
+        rgba(16, 18, 22, 0),
+        rgba(16, 18, 22, .48) 38%,
+        rgba(16, 18, 22, .92) 100%
+      );
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity .2s ease, transform .2s ease;
+    }
+    .voice-live-panel.active .voice-live-panel-inner {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .voice-live-status {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 7px;
+      color: rgba(255,255,255,.68);
+      font-size: 11px;
+      letter-spacing: .08em;
+    }
+    .voice-live-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #ff5a66;
+      box-shadow: 0 0 0 0 rgba(255,90,102,.55);
+      animation: voiceLivePulse 1.4s ease-out infinite;
+    }
+    .voice-live-text {
+      width: min(680px, calc(100vw - 44px));
+      min-height: 25px;
+      max-height: 52px;
+      overflow: hidden;
+      color: #fff;
+      font-size: 17px;
+      font-weight: 600;
+      line-height: 1.5;
+      text-shadow: 0 1px 8px rgba(0,0,0,.5);
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+    .voice-live-panel.canceling .voice-live-dot { background: #b9bec7; animation: none; }
+    .voice-live-panel.canceling .voice-live-text { color: rgba(255,255,255,.78); }
+    body.voice-recording-ui .input-container {
+      background-color: rgba(16,18,22,.96);
+      border-top-color: rgba(255,255,255,.08);
+    }
+    body.voice-recording-ui #translation-input-container { display: none !important; }
+    body.voice-recording-ui #voiceModeBtn {
+      color: #fff;
+      background: rgba(255,255,255,.1);
+      border-color: rgba(255,255,255,.14);
+    }
+    body.voice-recording-ui #voiceHoldBtn.recording {
+      color: #fff;
+      background: rgba(255,255,255,.1);
+      border-color: rgba(255,255,255,.16);
+      box-shadow: none;
+    }
+    body.voice-recording-ui #voiceHoldBtn.canceling {
+      background: rgba(239,68,68,.3);
+      border-color: rgba(255,120,128,.5);
+    }
+    body.voice-recording-ui #plusBtn { color: #fff; }
+    @keyframes voiceLivePulse {
+      0% { box-shadow: 0 0 0 0 rgba(255,90,102,.55); }
+      70% { box-shadow: 0 0 0 8px rgba(255,90,102,0); }
+      100% { box-shadow: 0 0 0 0 rgba(255,90,102,0); }
     }
 
     /* --- Header 布局修改 --- */
@@ -362,13 +458,21 @@
     }
 
     /* 撤回占位行：整页居中，不占气泡 */
-    .recall-placeholder-row {
+    .recall-placeholder-row,
+    .safety-alert-row {
       width: 100%;
       text-align: center;
       font-size: 12px;
       color: #999;
       margin: 4px 0;
       padding: 2px 0;
+      line-height: 1.5;
+      box-sizing: border-box;
+    }
+    .safety-alert-row {
+      padding-left: 16px;
+      padding-right: 16px;
+      white-space: normal;
     }
     .message-group.has-recall {
       width: 100%;
@@ -501,6 +605,28 @@
     #messageInput:focus { border-color: var(--primary-color); }
     #sendBtn { margin-left: 8px; background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color: white; border: none; border-radius: 20px; padding: 10px 18px; cursor: pointer; font-weight: bold; box-shadow: 0 3px 6px var(--primary-rgba-strong); transition: all 0.2s; }
     #sendBtn:hover { transform: translateY(-2px); box-shadow: 0 4px 10px var(--primary-rgba-strong); }
+    #voiceModeBtn {
+      flex: 0 0 38px; width: 38px; height: 38px; margin-right: 8px;
+      border: 1px solid var(--primary-lighter); border-radius: 50%;
+      background: #fff; color: var(--primary-color); cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.2s;
+    }
+    #voiceModeBtn.active { background: var(--primary-color); color: #fff; }
+    #voiceModeBtn svg { width: 20px; height: 20px; fill: currentColor; }
+    #voiceHoldBtn {
+      display: none; flex: 1; min-height: 40px; padding: 9px 14px;
+      border: 1px solid var(--primary-lighter); border-radius: 20px;
+      background: #fff; color: #444; font-size: 15px; font-weight: 600;
+      cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #voiceHoldBtn.recording {
+      color: #fff; border-color: #ef4444; background: #ef4444;
+      box-shadow: 0 0 0 4px rgba(239,68,68,.14);
+    }
+    #voiceHoldBtn.canceling { background: #6b7280; border-color: #6b7280; }
+    #voiceHoldBtn.processing { color: var(--primary-color); background: var(--primary-rgba-light); }
     /* Agent UI 样式 */
     i.agent-ask { color: #e67e22; font-style: normal; display: block; margin-top: 4px; }
     i.agent-wait { color: #3498db; font-style: normal; display: block; margin-top: 4px; }
@@ -615,7 +741,7 @@
       display: flex;
       justify-content: flex-start;
       align-items: center;
-      gap: 24px;
+      gap: 18px;
       padding: 16px 15px;
     }
     .more-item {
@@ -811,6 +937,115 @@
     .bubble-voice { padding: 10px 14px; min-width: 180px; }
     .bubble-voice .voice-play-btn:hover { background: var(--primary-color) !important; }
     .bubble-voice .voice-play-btn:hover svg { fill: #fff !important; }
+    .bubble-call { padding: 0 !important; min-width: 220px; overflow: hidden; background: transparent !important; }
+    .voice-call-card { padding: 14px 16px 11px; cursor: pointer; color: #fff; background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); border-radius: inherit; box-shadow: 0 5px 16px rgba(0,0,0,.12); }
+    .voice-call-card:active { filter: brightness(.96); }
+    .voice-call-main { display:flex; align-items:center; gap:11px; }
+    .voice-call-icon { width:40px; height:40px; flex-shrink:0; display:flex; align-items:center; justify-content:center; border-radius:50%; background:rgba(255,255,255,.2); font-size:21px; }
+    .voice-call-title { font-size:15px; font-weight:650; }
+    .voice-call-state { margin-top:3px; color:rgba(255,255,255,.78); font-size:12px; }
+    .voice-call-footer { margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,.2); color:rgba(255,255,255,.72); font-size:11px; }
+
+    /* 转账卡片 */
+    .bubble.bubble-transfer {
+      padding: 0;
+      border: 0 !important;
+      background: transparent !important;
+      box-shadow: 0 2px 8px rgba(148, 82, 14, 0.18) !important;
+      overflow: hidden;
+    }
+    .transfer-card {
+      width: min(248px, 68vw);
+      color: #fff;
+      background: linear-gradient(145deg, #f6ad45, #ee922d);
+      cursor: default;
+      user-select: none;
+    }
+    .transfer-card.pending.clickable { cursor: pointer; }
+    .transfer-card.pending.clickable:active { filter: brightness(0.96); }
+    .transfer-card.processing { opacity: 0.72; pointer-events: none; }
+    .transfer-card-main {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 16px 14px;
+    }
+    .transfer-card-icon {
+      width: 42px;
+      height: 42px;
+      border: 2px solid rgba(255,255,255,0.92);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      font-size: 23px;
+      font-weight: 500;
+    }
+    .transfer-card-copy { min-width: 0; text-align: left; }
+    .transfer-card-amount { font-size: 21px; font-weight: 650; line-height: 1.25; word-break: break-all; }
+    .transfer-card-note { margin-top: 3px; font-size: 12px; color: rgba(255,255,255,0.9); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .transfer-card-footer {
+      padding: 7px 12px;
+      background: #fff8eb;
+      color: #a77942;
+      font-size: 11px;
+      text-align: left;
+    }
+    .transfer-card.resolved { background: linear-gradient(145deg, #efb866, #dda04c); }
+
+    .transfer-action-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 6200;
+      padding: 20px;
+      box-sizing: border-box;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.42);
+    }
+    .transfer-action-overlay.show { display: flex; }
+    .transfer-action-dialog {
+      width: min(340px, 92vw);
+      padding: 22px 20px 18px;
+      border-radius: 16px;
+      background: #fff;
+      box-shadow: 0 14px 44px rgba(0,0,0,0.22);
+      text-align: center;
+    }
+    .transfer-action-title { color: #333; font-size: 16px; font-weight: 650; }
+    .transfer-action-amount { margin-top: 8px; color: #d9801f; font-size: 28px; font-weight: 700; }
+    .transfer-action-note { min-height: 18px; margin-top: 5px; color: #888; font-size: 13px; }
+    .transfer-action-buttons { display: flex; gap: 10px; margin-top: 20px; }
+    .transfer-action-buttons button { flex: 1; padding: 10px 8px; border-radius: 10px; cursor: pointer; font-size: 14px; }
+    .transfer-return-btn { border: 1px solid #ddd; background: #fff; color: #666; }
+    .transfer-accept-btn { border: 0; background: #f2a23a; color: #fff; font-weight: 650; }
+
+    .image-description-overlay {
+      display: none; position: fixed; inset: 0; z-index: 6300; padding: 20px;
+      box-sizing: border-box; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.46);
+    }
+    .image-description-overlay.show { display: flex; }
+    .image-description-dialog {
+      width: min(380px, 94vw); padding: 18px; border-radius: 16px; background: #fff;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.22); box-sizing: border-box;
+    }
+    .image-description-preview { width: 100%; max-height: 260px; object-fit: contain; border-radius: 10px; background: #f4f4f4; }
+    .image-description-title { margin: 13px 0 9px; color: #333; font-size: 16px; font-weight: 650; }
+    .image-description-modes { display: flex; gap: 8px; }
+    .image-description-mode {
+      flex: 1; padding: 9px; border: 1px solid #ddd; border-radius: 9px; background: #fff; color: #555; cursor: pointer;
+    }
+    .image-description-mode.active { border-color: var(--primary-color); background: var(--primary-light); color: var(--primary-dark); font-weight: 650; }
+    .image-description-help { margin-top: 7px; color: #999; font-size: 12px; line-height: 1.45; }
+    .image-description-input { display: none; width: 100%; min-height: 82px; margin-top: 10px; padding: 10px; resize: vertical; box-sizing: border-box; border: 1px solid #ddd; border-radius: 9px; font: inherit; }
+    .image-description-input.show { display: block; }
+    .image-description-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 15px; }
+    .image-description-actions button { padding: 9px 18px; border: 0; border-radius: 9px; cursor: pointer; }
+    .image-description-cancel { background: #f0f0f0; color: #666; }
+    .image-description-confirm { background: var(--primary-color); color: #fff; }
 
     /* 其它内部样式保持不变 */
     .qp-header {
@@ -1677,8 +1912,22 @@
   <button id="transBtn" style="background: #ffca28; color: #fff; border: none; border-radius: 16px; padding: 6px 12px; font-size: 13px; font-weight: bold; cursor: pointer; flex-shrink: 0;">翻译</button>
 </div>
 
+<div id="voiceLivePanel" class="voice-live-panel" aria-live="polite" aria-hidden="true">
+  <div class="voice-live-panel-inner">
+    <div class="voice-live-status">
+      <span class="voice-live-dot" aria-hidden="true"></span>
+      <span id="voiceLiveStatus">实时识别</span>
+    </div>
+    <div id="voiceLiveTranscript" class="voice-live-text">正在聆听…</div>
+  </div>
+</div>
+
 <div class="input-container">
+  <button id="voiceModeBtn" type="button" title="切换语音输入" aria-label="切换语音输入">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5.3-3a5.3 5.3 0 0 1-10.6 0H5a7 7 0 0 0 6 6.92V21H8v2h8v-2h-3v-3.08A7 7 0 0 0 19 11h-1.7z"/></svg>
+  </button>
   <textarea id="messageInput" placeholder="输入消息…" rows="1"></textarea>
+  <button id="voiceHoldBtn" type="button">按住说话</button>
   <button id="sendBtn">发送</button><!-- 【新增】+号按钮 -->
   <button id="plusBtn" onclick="toggleQuickPanel()">+</button>
   <button id="stopAgentBtn" onclick="stopAgent()" style="display:none; background:linear-gradient(135deg, #ff4444, #cc0000); color:white; border:none; border-radius:20px; padding:10px 14px; cursor:pointer; font-weight:bold; margin-left:4px;" title="停止正在运行的 Agent">🛑 停止 Agent</button>
@@ -1698,6 +1947,10 @@
     <div class="more-item" data-action="phrases" onclick="morePanelAction('phrases')">
       <div class="more-btn"><span>💬</span></div>
       <span class="more-label">常用语</span>
+    </div>
+    <div class="more-item" data-action="call" onclick="morePanelAction('call')">
+      <div class="more-btn"><span>☎</span></div>
+      <span class="more-label">语音通话</span>
     </div>
     <div class="more-item" data-action="cruise" onclick="morePanelAction('cruise')">
       <div class="more-btn"><span>🌐</span></div>
@@ -1773,6 +2026,35 @@
     <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:10px;">
       <button onclick="closeEditModal()" style="padding:6px 12px; border:none; background:#f0f0f0; border-radius:6px; cursor:pointer;">取消</button>
       <button id="saveEditBtn" style="padding:6px 12px; border:none; background:var(--primary-color); color:#fff; border-radius:6px; cursor:pointer;">保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="transferActionModal" class="transfer-action-overlay" onclick="if(event.target===this)closeTransferActionModal()">
+  <div class="transfer-action-dialog">
+    <div class="transfer-action-title">收到一笔转账</div>
+    <div class="transfer-action-amount" id="transferActionAmount"></div>
+    <div class="transfer-action-note" id="transferActionNote"></div>
+    <div class="transfer-action-buttons">
+      <button type="button" class="transfer-return-btn" onclick="submitTransferAction('return')">退回</button>
+      <button type="button" class="transfer-accept-btn" onclick="submitTransferAction('accept')">领取</button>
+    </div>
+  </div>
+</div>
+
+<div id="imageDescriptionModal" class="image-description-overlay">
+  <div class="image-description-dialog">
+    <img id="imageDescriptionPreview" class="image-description-preview" alt="待发送图片预览">
+    <div class="image-description-title">告诉角色图片里有什么</div>
+    <div class="image-description-modes">
+      <button type="button" class="image-description-mode active" data-mode="ai">AI 识图</button>
+      <button type="button" class="image-description-mode" data-mode="manual">手动描述</button>
+    </div>
+    <div id="imageDescriptionHelp" class="image-description-help">AI 会自动理解图片内容，此操作会消耗较多 Token。</div>
+    <textarea id="imageDescriptionInput" class="image-description-input" maxlength="500" placeholder="简要描述图片中的人物、场景或文字…"></textarea>
+    <div class="image-description-actions">
+      <button type="button" id="imageDescriptionCancel" class="image-description-cancel">取消</button>
+      <button type="button" id="imageDescriptionConfirm" class="image-description-confirm">发送</button>
     </div>
   </div>
 </div>
@@ -2034,6 +2316,7 @@
   // 翻译输入框：记录上次中译X的源文，用于发送后自动显示原文翻译
   let pendingUserTransSource = null;
   let pendingSentTranslation = null;
+  let activeTransferAction = null;
 
   // API 路径前缀生成器
   function getApiPrefix() {
@@ -2047,6 +2330,15 @@
     el.textContent = '⚠️ ' + msg;
     document.body.appendChild(el);
     setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 4000);
+  }
+
+  function showSafetyAlert(msg) {
+    const fallback = '如果你现在可能伤害自己，或已经处在危险中，请立刻联系身边可信任的人、当地紧急服务，或拨打全国统一心理援助热线 12356。';
+    const el = document.createElement('div');
+    el.style.cssText = 'position:fixed;top:64px;left:50%;transform:translateX(-50%);max-width:92%;padding:12px 16px;background:#fff1f2;color:#9f1239;border:1px solid #fb7185;border-radius:10px;font-size:13px;line-height:1.5;z-index:10000;box-shadow:0 4px 14px rgba(159,18,57,0.18);transition:opacity .3s;';
+    el.textContent = msg || fallback;
+    document.body.appendChild(el);
+    setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 7000);
   }
 
   function showAffinityToast(delta) {
@@ -2063,10 +2355,12 @@
     const overlay = document.getElementById('cbModal');
     document.getElementById('cbModalTitle').textContent =
       info.type === 'frozen' ? '账号已冻结' :
-      info.type === 'cooldown' ? '熔断冷却中' : '⚠️ 警告';
+      info.type === 'cooldown' ? '熔断冷却中' :
+      info.type === 'usage' ? '使用提醒' : '⚠️ 警告';
     document.getElementById('cbModalIcon').textContent =
       info.type === 'frozen' ? '🚫' :
-      info.type === 'cooldown' ? '⏳' : '⚠️';
+      info.type === 'cooldown' ? '⏳' :
+      info.type === 'usage' ? '⏰' : '⚠️';
     document.getElementById('cbModalMessage').textContent = info.message || '';
     if (info.type === 'cooldown' && info.remaining_seconds) {
       updateCbCountdown(info.remaining_seconds);
@@ -2117,6 +2411,11 @@
     const chatContainer = document.getElementById('chatContainer');
     const input = document.getElementById('messageInput');
     const btn = document.getElementById('sendBtn');
+    const voiceModeBtn = document.getElementById('voiceModeBtn');
+    const voiceHoldBtn = document.getElementById('voiceHoldBtn');
+    const voiceLivePanel = document.getElementById('voiceLivePanel');
+    const voiceLiveStatus = document.getElementById('voiceLiveStatus');
+    const voiceLiveTranscriptEl = document.getElementById('voiceLiveTranscript');
     const loadMoreContainer = document.getElementById('load-more-container');
     const loadMoreBtn = document.getElementById('loadMoreBtn');
     const copyIconPath = '/static/copy-icon.svg';
@@ -2125,6 +2424,70 @@
     let totalMessages = 0;
     let isLoading = false;
     const messagesPerPage = 20;
+
+    const USAGE_REMINDER_THRESHOLD_MS = 2 * 60 * 60 * 1000;
+    const USAGE_IDLE_RESET_MS = 15 * 60 * 1000;
+    const usageReminderStorageKey = `kunigami_usage_session_${currentUserId}`;
+
+    function readUsageSessionState(now, resetIfIdle) {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(usageReminderStorageKey) || '{}');
+        const startedAt = Number(parsed.startedAt) || now;
+        const lastActiveAt = Number(parsed.lastActiveAt) || now;
+        const lastReminderAt = Number(parsed.lastReminderAt) || 0;
+        if (resetIfIdle && now - lastActiveAt > USAGE_IDLE_RESET_MS) {
+          return { startedAt: now, lastActiveAt: now, lastReminderAt: 0 };
+        }
+        return { startedAt, lastActiveAt, lastReminderAt };
+      } catch (e) {
+        return { startedAt: now, lastActiveAt: now, lastReminderAt: 0 };
+      }
+    }
+
+    function writeUsageSessionState(state) {
+      try {
+        localStorage.setItem(usageReminderStorageKey, JSON.stringify(state));
+      } catch (e) {}
+    }
+
+    function maybeShowUsageReminder(state, now) {
+      if (!state || now - state.startedAt < USAGE_REMINDER_THRESHOLD_MS) return;
+      if (state.lastReminderAt && now - state.lastReminderAt < USAGE_REMINDER_THRESHOLD_MS) return;
+      state.lastReminderAt = now;
+      writeUsageSessionState(state);
+      showCbModal({
+        type: 'usage',
+        message: '你已经连续使用超过 2 小时，建议适当休息，注意用眼和身体状态。'
+      });
+    }
+
+    function markUsageActive() {
+      const now = Date.now();
+      const state = readUsageSessionState(now, true);
+      state.lastActiveAt = now;
+      writeUsageSessionState(state);
+      maybeShowUsageReminder(state, now);
+    }
+
+    function checkUsageReminderTimer() {
+      const now = Date.now();
+      const state = readUsageSessionState(now, false);
+      if (now - state.lastActiveAt > USAGE_IDLE_RESET_MS) return;
+      maybeShowUsageReminder(state, now);
+    }
+
+    function initUsageReminder() {
+      markUsageActive();
+      ['click', 'keydown', 'touchstart', 'scroll'].forEach((eventName) => {
+        window.addEventListener(eventName, markUsageActive, { passive: true });
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) markUsageActive();
+      });
+      setInterval(checkUsageReminderTimer, 60 * 1000);
+    }
+
+    initUsageReminder();
 
     // Agent 相关状态
     let agentIsRunning = false;
@@ -2251,7 +2614,9 @@
       // 根据模式请求不同接口
       const url = isGroupMode ? `/api/group/${currentId}/config` : `/api/${currentId}/config`;
       // 加个时间戳防止缓存，确保读取到最新的睡眠状态
-      const res = await fetch(`${url}?t=${new Date().getTime()}`);
+      const res = await fetchWithAuthGuard(`${url}?t=${new Date().getTime()}`, {cache: 'no-store'});
+      if (handleApiUnauthorized(res)) return false;
+      if (!res.ok) throw new Error(`配置接口请求失败：HTTP ${res.status}`);
       const data = await res.json();
 
       // --- 每次初始化先清空/隐藏 @栏 ---
@@ -2261,10 +2626,14 @@
 
       if (isGroupMode) {
         // --- 群聊模式 ---
-        currentConfig = data.group_info;
-        groupMembers = data.members; // 缓存成员信息
+        currentConfig = (data && data.group_info && typeof data.group_info === 'object')
+          ? data.group_info
+          : {name: currentId};
+        groupMembers = (data && data.members && typeof data.members === 'object')
+          ? data.members
+          : {}; // 缓存成员信息
 
-        document.querySelector('.header-name').textContent = currentConfig.name + ` (${Object.keys(groupMembers).length + 1}人)`;
+        document.querySelector('.header-name').textContent = (currentConfig.name || currentId) + ` (${Object.keys(groupMembers).length + 1}人)`;
         // 可以在 header 显示群头像，或者暂时不显示状态
         document.querySelector('.header-status').style.display = 'none'; // 群聊不显示“手机在线”
 
@@ -2289,8 +2658,8 @@
           // 跳过用户自己 (虽然用户ID是'user'不在members字典里，但为了保险)
           if (memberId === 'user') return;
 
-          const info = groupMembers[memberId];
-          const name = info.remark || info.name; // 优先用备注
+          const info = groupMembers[memberId] || {};
+          const name = info.remark || info.name || memberId; // 优先用备注
 
           const btn = document.createElement('span');
           btn.className = 'mention-tag';
@@ -2312,8 +2681,9 @@
         // ==========================
       } else {
         // --- 单人模式 ---
+        if (!data || typeof data !== 'object') throw new Error('角色配置格式不正确');
         currentConfig = data;
-        const displayName = data.remark || data.name;
+        const displayName = data.remark || data.name || currentId;
         document.querySelector('.header-name').textContent = displayName;
         // 【新增】状态指示灯逻辑
         const statusDot = document.querySelector('.status-dot');
@@ -2336,7 +2706,9 @@
         }
         // 加载用户拍一拍配置、AI 语言及用户姓名
         try {
-          const ur = await fetch('/api/user/profile_settings');
+          const ur = await fetchWithAuthGuard('/api/user/profile_settings', {cache: 'no-store'});
+          if (handleApiUnauthorized(ur)) return false;
+          if (!ur.ok) throw new Error(`个人配置接口请求失败：HTTP ${ur.status}`);
           const ud = await ur.json();
           if (ud.tickle_suffix) userTickleSuffix = ud.tickle_suffix;
           if (ud.ai_language) aiLanguage = ud.ai_language;
@@ -2351,7 +2723,9 @@
       // 群聊也加载用户拍一拍配置、AI 语言及用户姓名
       if (isGroupMode) {
         try {
-          const ur = await fetch('/api/user/profile_settings');
+          const ur = await fetchWithAuthGuard('/api/user/profile_settings', {cache: 'no-store'});
+          if (handleApiUnauthorized(ur)) return false;
+          if (!ur.ok) throw new Error(`个人配置接口请求失败：HTTP ${ur.status}`);
           const ud = await ur.json();
           if (ud.tickle_suffix) userTickleSuffix = ud.tickle_suffix;
           if (ud.ai_language) aiLanguage = ud.ai_language;
@@ -2364,7 +2738,7 @@
         } catch(e) {}
       }
       // 进入页面时，标记为已读
-      fetch(`/api/${currentId}/mark_read`, { method: 'POST' });
+      fetchWithAuthGuard(`/api/${currentId}/mark_read`, { method: 'POST' });
 
       // 根据语言模式显示翻译框
       if (aiLanguage && aiLanguage !== 'zh') {
@@ -2391,6 +2765,7 @@
 
       // 预加载联系人缓存（用于转发/聊天记录卡片解析）
       await ensureContactsCache();
+      return true;
 
     } catch (e) {
       console.error("UI加载失败", e);
@@ -2398,6 +2773,7 @@
         phase: 'ui_init',
         error: formatDiagnosticError(e)
       });
+      return false;
     }
   }
 
@@ -2713,6 +3089,87 @@
     return (currentUserName || 'User') + '和' + otherName + '的聊天记录';
   }
 
+  // 只把 HTML 标签和 URL 之外的斜线视为消息分段符。
+  // 避免 </rt></ruby> 的闭合斜线被拆成换行。
+  function splitForwardedChatlogSegments(text) {
+    const source = String(text == null ? '' : text);
+    const urlRanges = [];
+    const urlRegex = /https?:\/\/[^\s<]+/g;
+    let urlMatch;
+    while ((urlMatch = urlRegex.exec(source)) !== null) {
+      urlRanges.push({ start: urlMatch.index, end: urlMatch.index + urlMatch[0].length });
+    }
+
+    const parts = [];
+    let current = '';
+    let inHtmlTag = false;
+    for (let i = 0; i < source.length; i++) {
+      const char = source[i];
+      if (char === '<') inHtmlTag = true;
+      const insideUrl = urlRanges.some(range => i >= range.start && i < range.end);
+
+      if (char === '/' && !inHtmlTag && !insideUrl) {
+        const clean = current.trim();
+        if (clean) parts.push(clean);
+        current = '';
+      } else {
+        current += char;
+      }
+
+      if (char === '>') inHtmlTag = false;
+    }
+    const tail = current.trim();
+    if (tail) parts.push(tail);
+    return parts;
+  }
+
+  // 不使用任意 innerHTML；只把无属性的 ruby/rt 标签转成 DOM，其他内容均为文本。
+  function appendSafeRubyContent(container, text) {
+    const source = String(text == null ? '' : text);
+    const tokenRegex = /<\/?(?:ruby|rt)>/g;
+    const stack = [container];
+    let cursor = 0;
+    let token;
+
+    while ((token = tokenRegex.exec(source)) !== null) {
+      if (token.index > cursor) {
+        stack[stack.length - 1].appendChild(
+          document.createTextNode(source.slice(cursor, token.index))
+        );
+      }
+
+      const rawTag = token[0];
+      const isClosing = rawTag.startsWith('</');
+      const tagName = rawTag.includes('ruby') ? 'ruby' : 'rt';
+      if (!isClosing) {
+        const element = document.createElement(tagName);
+        stack[stack.length - 1].appendChild(element);
+        stack.push(element);
+      } else if (
+        stack.length > 1 &&
+        stack[stack.length - 1].tagName.toLowerCase() === tagName
+      ) {
+        stack.pop();
+      } else {
+        stack[stack.length - 1].appendChild(document.createTextNode(rawTag));
+      }
+      cursor = tokenRegex.lastIndex;
+    }
+
+    if (cursor < source.length) {
+      stack[stack.length - 1].appendChild(document.createTextNode(source.slice(cursor)));
+    }
+  }
+
+  function renderForwardedChatlogContent(container, text) {
+    container.textContent = '';
+    const segments = splitForwardedChatlogSegments(text);
+    segments.forEach(function(segment, index) {
+      if (index > 0) container.appendChild(document.createElement('br'));
+      appendSafeRubyContent(container, segment);
+    });
+  }
+
   // --- 【聊天记录】打开展开弹窗 ---
   function openChatlogModal(groupEl, blockIdx) {
     let blocks = [];
@@ -2760,8 +3217,7 @@
 
         const contentEl = document.createElement('div');
         contentEl.className = 'chatlog-log-content';
-        const lines = String(log.content).split('/').map(s => s.trim()).filter(s => s !== '');
-        contentEl.textContent = lines.join('\n');
+        renderForwardedChatlogContent(contentEl, log.content);
         contentEl.style.whiteSpace = 'pre-wrap';
         bodyEl.appendChild(contentEl);
 
@@ -2869,14 +3325,40 @@
     document.getElementById('forumModalOverlay').classList.remove('show');
   }
 
-  // 将 SQLite 的 YYYY-MM-DD HH:mm:ss 转为各浏览器都能解析的本地 ISO 时间。
+  // 聊天记录统一按北京时间展示；用户/角色时区只影响 Prompt 与作息。
+  const RECORD_TIMEZONE = 'Asia/Shanghai';
+
+  function recordDateKey(date) {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: RECORD_TIMEZONE,
+      year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(date);
+  }
+
+  function recordTimeKey(date, includeSeconds = false) {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: RECORD_TIMEZONE,
+      hour: '2-digit', minute: '2-digit',
+      ...(includeSeconds ? { second: '2-digit' } : {}),
+      hourCycle: 'h23'
+    }).format(date);
+  }
+
+  function recordWeekday(date) {
+    return new Intl.DateTimeFormat('zh-CN', {
+      timeZone: RECORD_TIMEZONE,
+      weekday: 'narrow'
+    }).format(date);
+  }
+
+  // SQLite 中的无时区字符串是北京时间；补上 +08:00 还原为绝对时刻。
   function parseChatTimestamp(value) {
     if (value instanceof Date) return value;
     let normalized = value;
     if (typeof normalized === 'string') {
       normalized = normalized.trim().replace(
         /^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2}(?:\.\d+)?)$/,
-        '$1T$2'
+        '$1T$2+08:00'
       );
     }
     const parsed = new Date(normalized);
@@ -2897,14 +3379,13 @@
       const prevDate = new Date(lastGroup.dataset.timestamp);
 
       // 2. 比较年月日
-      if (prevDate.getFullYear() !== newDate.getFullYear() ||
-              prevDate.getMonth() !== newDate.getMonth() ||
-              prevDate.getDate() !== newDate.getDate()) {
+      if (recordDateKey(prevDate) !== recordDateKey(newDate)) {
 
         // 3. 跨天了，插入分隔符
         const separator = document.createElement('div');
         separator.classList.add('date-separator');
         separator.textContent = newDate.toLocaleDateString([], {
+          timeZone: RECORD_TIMEZONE,
           year: 'numeric', month: 'long', day: 'numeric', weekday: 'long'
         });
         chatContainer.appendChild(separator);
@@ -2914,16 +3395,159 @@
       const separator = document.createElement('div');
       separator.classList.add('date-separator');
       separator.textContent = newDate.toLocaleDateString([], {
+        timeZone: RECORD_TIMEZONE,
         year: 'numeric', month: 'long', day: 'numeric', weekday: 'long'
       });
       chatContainer.appendChild(separator);
     }
   }
 
+  function extractSafetyAlertFromContent(text) {
+    const source = text != null ? String(text) : '';
+    const safetyPattern = /\s*[\[【]\s*SAFETY_ALERT\s*(?::|：)?\s*([^\]】]*)[\]】]\s*$/i;
+    const match = source.match(safetyPattern);
+    return {
+      hasSafetyAlert: !!match,
+      message: match && match[1] ? match[1].trim() : '',
+      cleanText: source.replace(safetyPattern, '').trim()
+    };
+  }
+
+  function appendSafetyAlertRow(group, message) {
+    if (!group) return;
+    const alertRow = document.createElement('div');
+    alertRow.className = 'safety-alert-row';
+    alertRow.textContent = message || '如果你现在可能伤害自己，或已经处在危险中，请立刻联系身边可信任的人、当地紧急服务，或拨打全国统一心理援助热线 12356。';
+    group.appendChild(alertRow);
+  }
+
+  function parseTransferMessageSegment(text) {
+    const plain = stripRubyTags(String(text || '')).trim();
+    const match = plain.match(/^\[(转账|领取转账|退回转账|已领取转账|已退回转账):([^\]|]+)(?:\|([^\]]*))?\]$/);
+    if (!match) return null;
+    const amount = match[2].replace(/\s+/g, '');
+    const validAmount = /^(?:(?:[$€£₩₹₽฿₫₺₴₪₱])(?:0|[1-9]\d{0,8})(?:\.\d{1,2})?|(?:0|[1-9]\d{0,8})(?:\.\d{1,2})?(?:元|円))$/.test(amount);
+    if (!validAmount) return null;
+    return { kind: match[1], amount, note: (match[3] || '').trim() };
+  }
+
+  function transferCurrencyGlyph(amount) {
+    if (!amount) return '¥';
+    if (amount.endsWith('元') || amount.endsWith('円')) return '¥';
+    return amount.charAt(0);
+  }
+
+  function replaceRenderedMessageGroup(message) {
+    if (!message || message.id == null) return null;
+    const oldGroup = chatContainer.querySelector(`.message-group[data-id="${message.id}"]`);
+    if (!oldGroup) return null;
+    const oldTop = oldGroup.getBoundingClientRect().top;
+    const replacement = renderMessageGroup({
+      id: message.id,
+      content: message.content,
+      rawContent: message.rawContent != null ? message.rawContent : message.content,
+      role: message.role || oldGroup.dataset.sender || 'assistant',
+      timestamp: message.timestamp || oldGroup.dataset.timestamp
+    }, 'append');
+    oldGroup.replaceWith(replacement);
+    refreshDateSeparators();
+    const topDelta = replacement.getBoundingClientRect().top - oldTop;
+    if (Math.abs(topDelta) > 1) chatContainer.scrollTop += topDelta;
+    return replacement;
+  }
+
+  async function refreshRenderedMessageById(messageId) {
+    try {
+      const res = await fetchWithAuthGuard(`${getApiPrefix()}/history?target_id=${encodeURIComponent(messageId)}`, {cache: 'no-store'});
+      if (!res.ok) return null;
+      const data = await res.json();
+      const message = (data.messages || []).find(item => Number(item.id) === Number(messageId));
+      return message ? replaceRenderedMessageGroup(message) : null;
+    } catch (error) {
+      console.warn('[Transfer] 刷新原消息失败:', error);
+      return null;
+    }
+  }
+
+  function openTransferActionModal(sourceId, amount, note, card) {
+    if (isGroupMode || !sourceId || !card || card.classList.contains('processing')) return;
+    activeTransferAction = { sourceId: Number(sourceId), amount, note: note || '', card };
+    document.getElementById('transferActionAmount').textContent = amount;
+    document.getElementById('transferActionNote').textContent = note || '确认如何处理这笔转账';
+    document.getElementById('transferActionModal').classList.add('show');
+  }
+
+  function closeTransferActionModal() {
+    document.getElementById('transferActionModal').classList.remove('show');
+    activeTransferAction = null;
+  }
+
+  function setTransferCardLocalState(card, action, processing) {
+    if (!card) return;
+    card.classList.toggle('processing', !!processing);
+    card.classList.remove('pending', 'clickable');
+    card.classList.add('resolved');
+    card.onclick = null;
+    const footer = card.querySelector('.transfer-card-footer');
+    if (footer) footer.textContent = processing
+      ? (action === 'accept' ? '正在领取…' : '正在退回…')
+      : (action === 'accept' ? '已被领取' : '已退回');
+  }
+
+  async function submitTransferAction(action) {
+    const pending = activeTransferAction;
+    if (!pending || !['accept', 'return'].includes(action)) return;
+    activeTransferAction = null;
+    closeTransferActionModal();
+    setTransferCardLocalState(pending.card, action, true);
+
+    const decision = action === 'accept' ? '领取转账' : '退回转账';
+    const message = `[${decision}:${pending.amount}]`;
+    try {
+      const res = await fetchWithTimeout(`/api/${encodeURIComponent(charId)}/chat_v2`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          message,
+          transfer_source_id: pending.sourceId,
+          transfer_action: action
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.message || data.error || '转账操作失败');
+
+      if (data.transfer_update && data.transfer_update.content) {
+        replaceRenderedMessageGroup({
+          id: data.transfer_update.source_id,
+          content: data.transfer_update.content,
+          role: 'assistant'
+        });
+      } else {
+        setTransferCardLocalState(pending.card, action, false);
+      }
+      if (data.affinity_delta) showAffinityToast(data.affinity_delta);
+      if (data.safety_alert) showSafetyAlert(data.safety_alert);
+      if (data.memory_sync_warning) showMemorySyncWarning(data.memory_sync_warning);
+      if (data.circuit_breaker) showCbModal(data.circuit_breaker);
+      if (data.reply_error) alert(data.reply_error);
+      await pollNewMessages();
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    } catch (error) {
+      await refreshRenderedMessageById(pending.sourceId);
+      alert(error.message || '转账操作失败，请稍后重试');
+    }
+  }
+
+  function stripImageTagsFromText(text) {
+    return window.KunigamiImageTags ? window.KunigamiImageTags.strip(text || '') : (text || '');
+  }
+
   function renderMessageGroup({ id, content, role, timestamp, rawContent }, mode = 'append') {
     const isAssistant = role !== 'user';
     // 优先使用 rawContent，因为 content 可能已经由于 history/v2 接口转换失去了原始标签
-    const textToProcess = rawContent != null ? String(rawContent) : (content != null ? String(content) : '');
+    const sourceText = rawContent != null ? String(rawContent) : (content != null ? String(content) : '');
+    const safetyAlert = isAssistant ? extractSafetyAlertFromContent(sourceText) : { hasSafetyAlert: false, cleanText: sourceText };
+    const textToProcess = safetyAlert.cleanText;
 
     // 【新增】提取 AI 巡航信息与拍一拍
     const { cleanText: textAfterCruise, cruises } = extractCruiseFromContent(textToProcess);
@@ -2962,6 +3586,12 @@
     }
 
     for (let i = 0; i < rest.length; i++) {
+      const imageTag = window.KunigamiImageTags && window.KunigamiImageTags.parseAt(rest, i);
+      if (imageTag) {
+        current += imageTag.raw;
+        i = imageTag.end - 1;
+        continue;
+      }
       if (rest[i] === '<') inTag = true;
       else if (rest[i] === '>') inTag = false;
 
@@ -2980,16 +3610,7 @@
     // 清理首尾空格并过滤空段
     const cleanedParts = rawParts.map(p => p.trim()).filter(s => s !== '');
 
-    const segments = [];
-    for (let i = 0; i < cleanedParts.length; i++) {
-      let seg = cleanedParts[i];
-      // 若以 [图片]( 开头且尚未成对闭合，与后续段合并直到匹配 [图片](path)(desc)
-      while (seg.startsWith('[图片](') && !/^\[图片\]\([^)]+\)\([\s\S]*$/.test(seg) && i + 1 < cleanedParts.length) {
-        i++;
-        seg = seg + ' / ' + cleanedParts[i];
-      }
-      segments.push(seg);
-    }
+    const segments = cleanedParts;
     const displayItems = []; // { type: 'bubble', text } | { type: 'recall' }
     for (let i = 0; i < segments.length; i++) {
       const seg = segments[i];
@@ -3195,12 +3816,16 @@
       const bubble = document.createElement('div');
       bubble.classList.add('bubble');
       const stickerMatch = text && text.match(/^\[表情\](.+)$/);
-      const imageMatchNew = text && text.match(/^\[图片\]\(([^)]+)\)\(([\s\S]*)$/);
+      const parsedImageTag = text && window.KunigamiImageTags ? window.KunigamiImageTags.parseAt(text, 0) : null;
+      const imageMatchNew = parsedImageTag && parsedImageTag.end === text.length ? parsedImageTag : null;
       const imageMatchOld = text && !imageMatchNew && text.match(/^\[图片\](.+)$/);
       const isImage = !!(imageMatchNew || imageMatchOld);
-      const imagePath = imageMatchNew ? imageMatchNew[1].trim() : (imageMatchOld ? imageMatchOld[1].trim() : '');
+      const imagePath = imageMatchNew ? imageMatchNew.path.trim() : (imageMatchOld ? imageMatchOld[1].trim() : '');
       const voiceMatch = text && text.match(/^\[voice\]\(([^)]+)\)\(([\s\S]*)\)$/);
       const isVoice = !!voiceMatch;
+      const voiceMessageMatch = text && text.match(/^\[voice_message\]\(([A-Za-z0-9_-]+\.(?:webm|m4a|mp4|ogg|wav))\)\(([\s\S]*)\)$/i);
+      const voiceCallMatch = text && text.match(/^\[voice_call\]\((call_[a-f0-9]{32})\)$/i);
+      const transferInfo = parseTransferMessageSegment(text);
 
       // 【论坛体】检测纯占位令牌
       const forumPlaceholderMatch = text && text.match(/^\[__FORUM_BLOCK_(\d+)__\]$/);
@@ -3237,14 +3862,13 @@
           if (isAssistant) {
             (function() {
               var rawText = group.dataset.originalContent || group.dataset.resolvedFulltext || fullText || wrapper.dataset.fulltext || '';
-              var ttsText = rawText
+              var ttsText = stripImageTagsFromText(rawText)
                 .replace(/<ruby>([^<]*)<rt>[^<]*<\/rt><\/ruby>/g, '$1')
                 .replace(/<[^>]+>/g, '')
                 .replace(/\[表情\][\s\S]*?(?=\s*\/\s*|$)/g, '')
-                .replace(/\[图片\]\([^\)]+\)(\([^\)]*\))?/g, '')
                 .replace(/\[图片\]/g, '')
                 .replace(/\[表情\]/g, '')
-                .replace(/\[CLICK:.*?\]/g, '')
+                .replace(/\[CLICK(?:_REF)?:.*?\]/g, '')
                 .replace(/\[TYPE:.*?\]/g, '')
                 .replace(/\[GOTO:.*?\]/g, '')
                 .replace(/\[BACK\]/g, '')
@@ -3308,7 +3932,7 @@
           }
           var translateBtn = null;
           var fullMessageText = (group.dataset.originalContent || group.dataset.resolvedFulltext || fullText || wrapper.dataset.fulltext || '').trim();
-          var contentWithoutMedia = fullMessageText.replace(/\[表情\][\s\S]*?(?=\s*\/\s*|$)/g, '').replace(/\[图片\]\([^\)]+\)(\([^\)]*\))?/g, '').replace(/\[图片\]/g, '').replace(/\[表情\]/g, '').trim();
+          var contentWithoutMedia = stripImageTagsFromText(fullMessageText).replace(/\[表情\][\s\S]*?(?=\s*\/\s*|$)/g, '').replace(/\[图片\]/g, '').replace(/\[表情\]/g, '').trim();
           var hasTextContent = contentWithoutMedia.replace(/[\s\/]+/g, '') !== '';
           if (aiLanguage && aiLanguage !== 'zh' && hasTextContent) {
             translateBtn = document.createElement('button');
@@ -3322,7 +3946,7 @@
           }
           var timestampEl = document.createElement('div');
           timestampEl.classList.add('timestamp');
-          timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          timestampEl.textContent = date.toLocaleTimeString([], { timeZone: RECORD_TIMEZONE, hour: '2-digit', minute: '2-digit' });
           var editBtn = document.createElement('button');
           editBtn.className = 'action-btn';
           editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
@@ -3483,14 +4107,13 @@
           if (isAssistant) {
             (function() {
               const rawText = group.dataset.originalContent || group.dataset.resolvedFulltext || fullText || wrapper.dataset.fulltext || '';
-              const ttsText = rawText
+              const ttsText = stripImageTagsFromText(rawText)
                 .replace(/<ruby>([^<]*)<rt>[^<]*<\/rt><\/ruby>/g, '$1')
                 .replace(/<[^>]+>/g, '')
                 .replace(/\[表情\][\s\S]*?(?=\s*\/\s*|$)/g, '')
-                .replace(/\[图片\]\([^\)]+\)(\([^\)]*\))?/g, '')
                 .replace(/\[图片\]/g, '')
                 .replace(/\[表情\]/g, '')
-                .replace(/\[CLICK:.*?\]/g, '')
+                .replace(/\[CLICK(?:_REF)?:.*?\]/g, '')
                 .replace(/\[TYPE:.*?\]/g, '')
                 .replace(/\[GOTO:.*?\]/g, '')
                 .replace(/\[BACK\]/g, '')
@@ -3575,9 +4198,8 @@
           // 翻译按钮
           let translateBtn = null;
           const fullMessageText = (group.dataset.originalContent || group.dataset.resolvedFulltext || fullText || wrapper.dataset.fulltext || '').trim();
-          const contentWithoutMedia = fullMessageText
+          const contentWithoutMedia = stripImageTagsFromText(fullMessageText)
             .replace(/\[表情\][\s\S]*?(?=\s*\/\s*|$)/g, '')
-            .replace(/\[图片\]\([^\)]+\)(\([^\)]*\))?/g, '')
             .replace(/\[图片\]/g, '')
             .replace(/\[表情\]/g, '')
             .trim();
@@ -3594,7 +4216,7 @@
           }
           const timestampEl = document.createElement('div');
           timestampEl.classList.add('timestamp');
-          timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          timestampEl.textContent = date.toLocaleTimeString([], { timeZone: RECORD_TIMEZONE, hour: '2-digit', minute: '2-digit' });
           const editBtn = document.createElement('button');
           editBtn.className = 'action-btn';
           editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
@@ -3718,14 +4340,13 @@
           if (isAssistant) {
             (function() {
               const rawText = group.dataset.originalContent || group.dataset.resolvedFulltext || fullText || wrapper.dataset.fulltext || '';
-              const ttsText = rawText
+              const ttsText = stripImageTagsFromText(rawText)
                 .replace(/<ruby>([^<]*)<rt>[^<]*<\/rt><\/ruby>/g, '$1')
                 .replace(/<[^>]+>/g, '')
                 .replace(/\[表情\][\s\S]*?(?=\s*\/\s*|$)/g, '')
-                .replace(/\[图片\]\([^\)]+\)(\([^\)]*\))?/g, '')
                 .replace(/\[图片\]/g, '')
                 .replace(/\[表情\]/g, '')
-                .replace(/\[CLICK:.*?\]/g, '')
+                .replace(/\[CLICK(?:_REF)?:.*?\]/g, '')
                 .replace(/\[TYPE:.*?\]/g, '')
                 .replace(/\[GOTO:.*?\]/g, '')
                 .replace(/\[BACK\]/g, '')
@@ -3809,7 +4430,7 @@
           }
           const timestampEl = document.createElement('div');
           timestampEl.classList.add('timestamp');
-          timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          timestampEl.textContent = date.toLocaleTimeString([], { timeZone: RECORD_TIMEZONE, hour: '2-digit', minute: '2-digit' });
           const likeBtn = document.createElement('button');
           if (isSticker) {
               likeBtn.className = 'action-btn';
@@ -3842,9 +4463,8 @@
           // 翻译按钮（表情/图片分支也可支持，当整条组消息里有文字时）
           let translateBtn = null;
           const fullMessageText = (group.dataset.originalContent || group.dataset.resolvedFulltext || fullText || wrapper.dataset.fulltext || '').trim();
-          const contentWithoutMedia = fullMessageText
+          const contentWithoutMedia = stripImageTagsFromText(fullMessageText)
             .replace(/\[表情\][\s\S]*?(?=\s*\/\s*|$)/g, '')
-            .replace(/\[图片\]\([^\)]+\)(\([^\)]*\))?/g, '')
             .replace(/\[图片\]/g, '')
             .replace(/\[表情\]/g, '')
             .trim();
@@ -3932,7 +4552,7 @@
           }
           const timestampEl = document.createElement('div');
           timestampEl.classList.add('timestamp');
-          timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          timestampEl.textContent = date.toLocaleTimeString([], { timeZone: RECORD_TIMEZONE, hour: '2-digit', minute: '2-digit' });
           const copyBtn = document.createElement('button');
           copyBtn.className = 'action-btn';
           copyBtn.innerHTML = '<img src="' + copyIconPath + '" style="width:14px;height:14px;opacity:0.6;">';
@@ -3991,7 +4611,9 @@
             const log = blockInfo.logs[i];
             const resolved = (log.sender === 'assistant') ? blockInfo.sourceId : log.sender;
             const name = resolveDisplayName(resolved);
-            const line = (log.content || '').replace(/\//g, ' ');
+            const line = splitForwardedChatlogSegments(
+              stripRubyTags(log.content || '')
+            ).join(' ');
             previewLines.push(name + '：' + line);
           }
           previewEl.textContent = previewLines.join('\n');
@@ -4015,7 +4637,7 @@
           controls.classList.add('controls-container');
           const timestampEl = document.createElement('div');
           timestampEl.classList.add('timestamp');
-          timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          timestampEl.textContent = date.toLocaleTimeString([], { timeZone: RECORD_TIMEZONE, hour: '2-digit', minute: '2-digit' });
           const copyBtn = document.createElement('button');
           copyBtn.className = 'action-btn';
           copyBtn.innerHTML = '<img src="' + copyIconPath + '" style="width:14px;height:14px;opacity:0.6;">';
@@ -4048,7 +4670,150 @@
         return;
       }
 
-      if (!text || text.trim() === '') {
+      if (voiceCallMatch) {
+        const voiceCallId = voiceCallMatch[1];
+        bubble.classList.add('bubble-call');
+        const card = document.createElement('div');
+        card.className = 'voice-call-card';
+        card.innerHTML = '<div class="voice-call-main"><div class="voice-call-icon">☎</div><div><div class="voice-call-title">语音通话</div><div class="voice-call-state">正在读取通话状态…</div></div></div><div class="voice-call-footer">点击查看通话记录</div>';
+        card.onclick = function(event) {
+          event.stopPropagation();
+          window.location.href = '/call/' + encodeURIComponent(voiceCallId);
+        };
+        bubble.appendChild(card);
+        fetch('/api/calls/' + encodeURIComponent(voiceCallId), {cache:'no-store'})
+          .then(function(response) { return response.ok ? response.json() : Promise.reject(); })
+          .then(function(payload) {
+            const info = payload.call || {};
+            const title = card.querySelector('.voice-call-title');
+            const state = card.querySelector('.voice-call-state');
+            if (info.status === 'ringing') {
+              title.textContent = info.initiator === 'assistant' ? '角色来电' : '正在呼叫';
+              state.textContent = '等待接听';
+            } else if (info.status === 'active') {
+              title.textContent = '正在语音通话';
+              state.textContent = '点击返回通话';
+            } else {
+              const labels = {rejected:'已拒绝',missed:'未接听',canceled:'已取消',hangup:'已挂断',character_hangup:'对方已挂断',disconnected:'连接中断',failed:'通话失败'};
+              title.textContent = '语音通话';
+              let duration = '';
+              if (info.answered_at && info.ended_at) {
+                const seconds = Math.max(0, Math.floor((Date.parse(info.ended_at)-Date.parse(info.answered_at))/1000));
+                duration = seconds >= 60 ? Math.floor(seconds/60) + '分' + (seconds%60) + '秒' : seconds + '秒';
+              }
+              state.textContent = duration ? '通话时长 ' + duration : (labels[info.end_reason] || '已结束');
+            }
+          })
+          .catch(function() { card.querySelector('.voice-call-state').textContent = '通话记录暂时不可用'; });
+      } else if (voiceMessageMatch) {
+        const voiceFilename = voiceMessageMatch[1];
+        const voiceTranscript = voiceMessageMatch[2].trim()
+          .replace(/<ruby>([^<]*)<rt>[^<]*<\/rt><\/ruby>/g, '$1');
+        bubble.classList.add('bubble-voice', 'bubble-user-voice');
+
+        const voiceContent = document.createElement('div');
+        voiceContent.style.cssText = 'display:flex;align-items:center;gap:8px;';
+        const playBtn = document.createElement('button');
+        playBtn.className = 'voice-play-btn';
+        playBtn.type = 'button';
+        playBtn.title = '播放原始录音';
+        playBtn.style.cssText = 'width:36px;height:36px;border-radius:50%;border:2px solid var(--primary-color);background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.2s;';
+        const playIcon = '<svg viewBox="0 0 24 24" width="16" height="16" style="fill:var(--primary-color);margin-left:2px;"><path d="M8 5v14l11-7z"/></svg>';
+        const pauseIcon = '<svg viewBox="0 0 24 24" width="16" height="16" style="fill:#fff;"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
+        playBtn.innerHTML = playIcon;
+
+        const voiceInfo = document.createElement('div');
+        voiceInfo.style.cssText = 'flex:1;min-width:0;';
+        const transcriptEl = document.createElement('div');
+        transcriptEl.style.cssText = 'font-size:14px;color:#333;line-height:1.4;word-break:break-word;';
+        transcriptEl.textContent = voiceTranscript;
+        const durationEl = document.createElement('div');
+        durationEl.style.cssText = 'font-size:11px;color:#999;margin-top:2px;';
+        durationEl.textContent = '语音消息';
+        voiceInfo.appendChild(transcriptEl);
+        voiceInfo.appendChild(durationEl);
+        voiceContent.appendChild(playBtn);
+        voiceContent.appendChild(voiceInfo);
+        bubble.appendChild(voiceContent);
+
+        const audio = new Audio(`/api/voice-media/${encodeURIComponent(voiceFilename)}`);
+        audio.preload = 'metadata';
+        audio.addEventListener('loadedmetadata', () => {
+          if (Number.isFinite(audio.duration)) {
+            durationEl.textContent = `${Math.max(1, Math.round(audio.duration))}秒 · 原始录音`;
+          }
+        });
+        audio.addEventListener('play', () => {
+          playBtn.innerHTML = pauseIcon;
+          playBtn.style.background = 'var(--primary-color)';
+        });
+        const resetVoicePlayButton = () => {
+          playBtn.innerHTML = playIcon;
+          playBtn.style.background = '#fff';
+        };
+        audio.addEventListener('pause', resetVoicePlayButton);
+        audio.addEventListener('ended', resetVoicePlayButton);
+        audio.addEventListener('error', () => {
+          resetVoicePlayButton();
+          durationEl.textContent = '录音加载失败';
+        });
+        playBtn.addEventListener('click', async (event) => {
+          event.stopPropagation();
+          try {
+            if (audio.paused) await audio.play();
+            else audio.pause();
+          } catch (error) {
+            durationEl.textContent = '无法播放录音';
+          }
+        });
+      } else if (transferInfo) {
+        bubble.classList.add('bubble-transfer');
+        const card = document.createElement('div');
+        const isPendingTransfer = transferInfo.kind === '转账';
+        const canResolve = isPendingTransfer && isAssistant && !isGroupMode && Number(id) > 0;
+        card.className = `transfer-card ${isPendingTransfer ? 'pending' : 'resolved'}${canResolve ? ' clickable' : ''}`;
+
+        const main = document.createElement('div');
+        main.className = 'transfer-card-main';
+        const icon = document.createElement('div');
+        icon.className = 'transfer-card-icon';
+        icon.textContent = transferCurrencyGlyph(transferInfo.amount);
+        const copy = document.createElement('div');
+        copy.className = 'transfer-card-copy';
+        const amountEl = document.createElement('div');
+        amountEl.className = 'transfer-card-amount';
+        amountEl.textContent = transferInfo.amount;
+        const noteEl = document.createElement('div');
+        noteEl.className = 'transfer-card-note';
+        noteEl.textContent = transferInfo.note || (
+          transferInfo.kind === '领取转账' ? '领取了转账' :
+          transferInfo.kind === '退回转账' ? '退回了转账' : '转账'
+        );
+        copy.appendChild(amountEl);
+        copy.appendChild(noteEl);
+        main.appendChild(icon);
+        main.appendChild(copy);
+
+        const footer = document.createElement('div');
+        footer.className = 'transfer-card-footer';
+        const footerLabels = {
+          '转账': canResolve ? '转账 · 点击领取或退回' : (isUser ? '等待对方处理' : '转账'),
+          '领取转账': '已领取',
+          '退回转账': '已退回',
+          '已领取转账': '已被领取',
+          '已退回转账': '已退回'
+        };
+        footer.textContent = footerLabels[transferInfo.kind] || '转账';
+        card.appendChild(main);
+        card.appendChild(footer);
+        if (canResolve) {
+          card.onclick = (event) => {
+            event.stopPropagation();
+            openTransferActionModal(id, transferInfo.amount, transferInfo.note, card);
+          };
+        }
+        bubble.appendChild(card);
+      } else if (!text || text.trim() === '') {
         bubble.classList.add('bubble-empty');
         bubble.innerHTML = '<span class="empty-placeholder">（空消息）</span>';
       } else {
@@ -4072,6 +4837,7 @@
         html = html.replace(/\n/g, "<br>");
 
         // 【新增】处理角色指令相关展示 (用斜体提示)
+        html = html.replace(/\[CLICK_REF:(.*?)\]/g, "<i>点击了页面元素 '$1'</i>");
         html = html.replace(/\[CLICK:(.*?)\]/g, "<i>点击了 '$1'</i>");
         html = html.replace(/\[TYPE:(.*?)\|(.*?)\]/g, "<i>在 '$1' 输入了 '$2'</i>");
         html = html.replace(/\[GOTO:(.*?)\]/g, "<i>正在前往 '$1'</i>");
@@ -4174,7 +4940,7 @@
         wrapper.dataset.fulltext = fullText;
         const controls = document.createElement('div');
         controls.classList.add('controls-container');
-        if (role === 'assistant' && !isGroupMode) {
+        if (role === 'assistant' && !isGroupMode && !voiceCallMatch) {
           const regenBtn = document.createElement('button');
           regenBtn.classList.add('regen-btn');
           regenBtn.title = "重新生成 (删除此条并重试)";
@@ -4184,14 +4950,13 @@
         }
 
         // 【语音播放按钮】
-        if (isAssistant) {
+        if (isAssistant && !voiceCallMatch) {
           (function() {
             const rawText = group.dataset.originalContent || group.dataset.resolvedFulltext || fullText || wrapper.dataset.fulltext || '';
-              const ttsText = rawText
+              const ttsText = stripImageTagsFromText(rawText)
                 .replace(/<ruby>([^<]*)<rt>[^<]*<\/rt><\/ruby>/g, '$1')
                 .replace(/<[^>]+>/g, '')
                 .replace(/\[表情\][\s\S]*?(?=\s*\/\s*|$)/g, '')
-                .replace(/\[图片\]\([^\)]+\)(\([^\)]*\))?/g, '')
                 .replace(/\[图片\]/g, '')
                 .replace(/\[表情\]/g, '')
                 .replace(/\[CLICK:.*?\]/g, '')
@@ -4279,14 +5044,13 @@
          // 翻译按钮
          let translateBtn = null;
          const fullMessageText = (group.dataset.originalContent || group.dataset.resolvedFulltext || fullText || wrapper.dataset.fulltext || '').trim();
-         const contentWithoutMedia = fullMessageText
+         const contentWithoutMedia = stripImageTagsFromText(fullMessageText)
            .replace(/\[表情\][\s\S]*?(?=\s*\/\s*|$)/g, '')
-           .replace(/\[图片\]\([^\)]+\)(\([^\)]*\))?/g, '')
            .replace(/\[图片\]/g, '')
            .replace(/\[表情\]/g, '')
            .trim();
          const hasTextContent = contentWithoutMedia.replace(/[\s\/]+/g, '') !== '';
-         if (aiLanguage && aiLanguage !== 'zh' && hasTextContent) {
+         if (!voiceCallMatch && aiLanguage && aiLanguage !== 'zh' && hasTextContent) {
            translateBtn = document.createElement('button');
            translateBtn.className = 'action-btn';
            translateBtn.title = '翻译';
@@ -4298,7 +5062,7 @@
          }
          const timestampEl = document.createElement('div');
          timestampEl.classList.add('timestamp');
-         timestampEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+         timestampEl.textContent = date.toLocaleTimeString([], { timeZone: RECORD_TIMEZONE, hour: '2-digit', minute: '2-digit' });
          const editBtn = document.createElement('button');
          editBtn.className = 'action-btn';
          editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
@@ -4330,8 +5094,8 @@
            likeBtn.onclick = () => addStickerToFavorites(firstStickerPath);
            controls.appendChild(likeBtn);
          }
-         if (id) { controls.appendChild(editBtn); controls.appendChild(delBtn); }
-         controls.appendChild(copyBtn);
+         if (id && !voiceCallMatch) { controls.appendChild(editBtn); controls.appendChild(delBtn); }
+         if (!voiceCallMatch) controls.appendChild(copyBtn);
         wrapper.appendChild(controls);
       }
       st.appendChild(wrapper);
@@ -4365,6 +5129,7 @@
       } else {
         group.appendChild(contentRow);
       }
+      if (safetyAlert.hasSafetyAlert) appendSafetyAlertRow(group, safetyAlert.message);
     } else {
       const contentRows = rows.filter(r => r.type === 'content');
       let contentRowIdx = 0;
@@ -4442,6 +5207,7 @@
           }
         });
       }
+      if (safetyAlert.hasSafetyAlert) appendSafetyAlertRow(group, safetyAlert.message);
     }
 
     buildResolvedFulltextFromGroup(group);
@@ -4471,14 +5237,14 @@
         // 解析日期
         const date = new Date(ts);
         // 生成一个用来对比的 Key，例如 "2025-11-28"
-        const dateKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+        const dateKey = recordDateKey(date);
 
         // 3. 如果这一条的日期 和 上一条不一样，就加个分隔符
         if (dateKey !== lastDateKey) {
           const sep = document.createElement('div');
           sep.classList.add('date-separator');
           // 设置显示的格式
-          sep.textContent = date.toLocaleDateString([], {year:'numeric', month:'long', day:'numeric', weekday:'long'});
+          sep.textContent = date.toLocaleDateString([], {timeZone: RECORD_TIMEZONE, year:'numeric', month:'long', day:'numeric', weekday:'long'});
 
           // 【关键】插入到当前消息组的前面
           group.parentNode.insertBefore(sep, group);
@@ -4511,7 +5277,8 @@
       }
       // 如果是初始加载(或者强制刷新)，不带 before_id，后端默认返最新
 
-      const res = await fetch(url);
+      const res = await fetchWithAuthGuard(url, {cache: 'no-store'});
+      if (handleApiUnauthorized(res)) return;
       const responseText = await res.text();
       if (!res.ok) {
         const error = new Error('历史接口请求失败：HTTP ' + res.status);
@@ -4618,7 +5385,9 @@
     isLoading = true;
     try {
       const url = `${getApiPrefix()}/history?after_id=${afterId}&limit=${messagesPerPage}`;
-      const res = await fetch(url);
+      const res = await fetchWithAuthGuard(url, {cache: 'no-store'});
+      if (handleApiUnauthorized(res)) return;
+      if (!res.ok) throw new Error(`历史接口请求失败：HTTP ${res.status}`);
       const data = await res.json();
 
       if (data.messages && data.messages.length > 0) {
@@ -4663,7 +5432,8 @@
       const controller = new AbortController();
       const id = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const resp = await fetch(url, { ...options, signal: controller.signal });
+        const resp = await fetchWithAuthGuard(url, { ...options, signal: controller.signal });
+        if (handleApiUnauthorized(resp)) throw new Error('登录状态已失效');
         clearTimeout(id);
         return resp;
       } catch (err) {
@@ -4689,6 +5459,7 @@
         const data = await res.json();
         if (data.affinity_delta) showAffinityToast(data.affinity_delta);
         if (data.circuit_breaker) { showCbModal(data.circuit_breaker); return; }
+        if (data.safety_alert) showSafetyAlert(data.safety_alert);
         if (data.error === 'consecutive_tickle') {
           alert(data.message || '不可连续拍一拍同一人，请稍后再试');
           return;
@@ -4766,7 +5537,8 @@
         const pendingSource = pendingUserTransSource;
         pendingUserTransSource = null;
         if (pendingSource) {
-          pendingSentTranslation = { text: pendingSource };
+          // 后端落库后会返回真实消息 ID；翻译必须按该 ID 精确挂到本次发送的气泡。
+          pendingSentTranslation = { text: pendingSource, messageId: null };
         }
 
         // 【新增】拦截并随机替换输入框里的 [表情]开心
@@ -4791,13 +5563,34 @@
           });
           const data = await res.json();
 
+          if (pendingSentTranslation) {
+            if (data.user_id != null) {
+              pendingSentTranslation.messageId = String(data.user_id);
+            } else if (!res.ok || data.error) {
+              // 消息没有成功落库，不能让这次翻译误挂到后续的用户消息上。
+              pendingSentTranslation = null;
+            }
+          }
+
+          if (data.transfer_update && data.transfer_update.content) {
+            replaceRenderedMessageGroup({
+              id: data.transfer_update.source_id,
+              content: data.transfer_update.content
+            });
+          }
+
           if (data.circuit_breaker) { showCbModal(data.circuit_breaker); return; }
 
           // 好感度变动提示
           if (data.affinity_delta) showAffinityToast(data.affinity_delta);
+          if (data.safety_alert) showSafetyAlert(data.safety_alert);
 
           if (data.memory_sync_warning) showMemorySyncWarning(data.memory_sync_warning);
 
+          if (data.incoming_call && data.incoming_call.call_id) {
+            window.location.assign(`/call/${encodeURIComponent(data.incoming_call.call_id)}`);
+            return;
+          }
           // 【Agent】如果 agent 正在等待，检查 AI 回复是否含网页指令 → 通知 agent
           if (agentIsWaiting) {
             const repliesContent = data.replies ? data.replies.map(r => r.content).join(' ') : (data.reply || '');
@@ -4825,10 +5618,417 @@
         chatContainer.scrollTop = chatContainer.scrollHeight;
     }
 
+    // ==============================
+    // 用户语音消息：长按录音 -> STT -> 自动发送
+    // ==============================
+    let voiceInputMode = false;
+    let voiceRecorder = null;
+    let voiceStream = null;
+    let voiceChunks = [];
+    let voicePressActive = false;
+    let voiceCancelRequested = false;
+    let voicePointerStartY = 0;
+    let voiceRecordingStartedAt = 0;
+    let voiceMaxTimer = null;
+    let voiceProcessing = false;
+    let voiceRealtimeState = null;
+    let voiceRealtimeTranscript = '';
+
+    function setVoiceInputMode(enabled) {
+      if (voiceRecorder && voiceRecorder.state === 'recording') return;
+      voiceInputMode = !!enabled;
+      voiceModeBtn.classList.toggle('active', voiceInputMode);
+      voiceModeBtn.setAttribute('aria-pressed', voiceInputMode ? 'true' : 'false');
+      input.style.display = voiceInputMode ? 'none' : '';
+      btn.style.display = voiceInputMode ? 'none' : '';
+      voiceHoldBtn.style.display = voiceInputMode ? 'block' : 'none';
+      voiceHoldBtn.textContent = '按住说话';
+      voiceHoldBtn.classList.remove('recording', 'canceling', 'processing');
+      if (!voiceInputMode) hideVoiceLivePanel();
+    }
+
+    function preferredVoiceMimeType() {
+      if (!window.MediaRecorder) return '';
+      const candidates = [
+        'audio/webm;codecs=opus',
+        'audio/mp4;codecs=mp4a.40.2',
+        'audio/mp4',
+        'audio/ogg;codecs=opus',
+        'audio/webm'
+      ];
+      return candidates.find(type => MediaRecorder.isTypeSupported(type)) || '';
+    }
+
+    function voiceExtensionForMime(mimeType) {
+      const normalized = String(mimeType || '').toLowerCase();
+      if (normalized.includes('mp4') || normalized.includes('m4a')) return 'm4a';
+      if (normalized.includes('ogg')) return 'ogg';
+      if (normalized.includes('wav')) return 'wav';
+      return 'webm';
+    }
+
+    function voicePcmToBase64(pcm) {
+      const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+      let binary = '';
+      const chunkSize = 0x8000;
+      for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+      }
+      return btoa(binary);
+    }
+
+    function downsampleVoicePcm(input, inputRate, outputRate = 16000) {
+      if (!input || !input.length || inputRate < outputRate) return null;
+      const ratio = inputRate / outputRate;
+      const outputLength = Math.max(1, Math.floor(input.length / ratio));
+      const output = new Int16Array(outputLength);
+      let inputOffset = 0;
+      for (let outputOffset = 0; outputOffset < outputLength; outputOffset++) {
+        const nextInputOffset = Math.min(
+          input.length,
+          Math.max(inputOffset + 1, Math.floor((outputOffset + 1) * ratio))
+        );
+        let sum = 0;
+        for (let index = inputOffset; index < nextInputOffset; index++) sum += input[index];
+        const sample = Math.max(-1, Math.min(1, sum / (nextInputOffset - inputOffset)));
+        output[outputOffset] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+        inputOffset = nextInputOffset;
+      }
+      return output;
+    }
+
+    function showVoiceLivePanel() {
+      voiceLivePanel.classList.add('active');
+      voiceLivePanel.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('voice-recording-ui');
+      voiceLiveStatus.textContent = '实时识别';
+      voiceLiveTranscriptEl.textContent = '正在聆听…';
+    }
+
+    function hideVoiceLivePanel() {
+      voiceLivePanel.classList.remove('active', 'canceling');
+      voiceLivePanel.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('voice-recording-ui');
+    }
+
+    function updateVoiceRecordingLabel() {
+      if (!voicePressActive || !voiceRecorder) return;
+      if (voiceCancelRequested) {
+        voiceHoldBtn.textContent = '松开取消';
+        voiceLivePanel.classList.add('canceling');
+        voiceLiveStatus.textContent = '取消录音';
+        voiceLiveTranscriptEl.textContent = '松开即可取消本次录音';
+        return;
+      }
+      voiceLivePanel.classList.remove('canceling');
+      voiceLiveStatus.textContent = '实时识别';
+      const liveText = String(voiceRealtimeTranscript || '').replace(/\s+/g, ' ').trim();
+      voiceHoldBtn.textContent = '松开发送 · 上滑取消';
+      voiceLiveTranscriptEl.textContent = liveText || '正在聆听…';
+    }
+
+    function stopRealtimeVoiceTranscription() {
+      const state = voiceRealtimeState;
+      voiceRealtimeState = null;
+      voiceRealtimeTranscript = '';
+      if (!state) return;
+      state.stopped = true;
+      try { state.processor.onaudioprocess = null; } catch (_) {}
+      try { state.source.disconnect(); } catch (_) {}
+      try { state.processor.disconnect(); } catch (_) {}
+      try { state.silentGain.disconnect(); } catch (_) {}
+      if (state.socket && state.socket.readyState < WebSocket.CLOSING) {
+        try { state.socket.close(1000, 'recording_finished'); } catch (_) {}
+      }
+      if (state.context && state.context.state !== 'closed') {
+        state.context.close().catch(() => {});
+      }
+    }
+
+    async function startRealtimeVoiceTranscription(stream) {
+      stopRealtimeVoiceTranscription();
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextCtor || !window.WebSocket) return;
+
+      let state = null;
+      try {
+        const context = new AudioContextCtor();
+        await context.resume();
+        if (!voicePressActive) {
+          await context.close();
+          return;
+        }
+        const source = context.createMediaStreamSource(stream);
+        const processor = context.createScriptProcessor(4096, 1, 1);
+        const silentGain = context.createGain();
+        silentGain.gain.value = 0;
+        state = {
+          context,
+          source,
+          processor,
+          silentGain,
+          socket: null,
+          queuedAudio: [],
+          committed: [],
+          partial: '',
+          stopped: false,
+        };
+        voiceRealtimeState = state;
+
+        processor.onaudioprocess = event => {
+          if (state.stopped) return;
+          const pcm = downsampleVoicePcm(
+            event.inputBuffer.getChannelData(0),
+            context.sampleRate,
+            16000
+          );
+          if (!pcm || !pcm.length) return;
+          const audioBase64 = voicePcmToBase64(pcm);
+          if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+            state.socket.send(JSON.stringify({
+              message_type: 'input_audio_chunk',
+              audio_base_64: audioBase64,
+            }));
+          } else if (state.queuedAudio.length < 30) {
+            state.queuedAudio.push(audioBase64);
+          }
+        };
+        source.connect(processor);
+        processor.connect(silentGain);
+        silentGain.connect(context.destination);
+
+        const tokenResponse = await fetch('/api/voice-messages/realtime-token', {
+          method: 'POST',
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+          cache: 'no-store',
+        });
+        const tokenPayload = await tokenResponse.json().catch(() => ({}));
+        if (!tokenResponse.ok || !tokenPayload.token) {
+          throw new Error(tokenPayload.error || '实时语音识别暂时不可用');
+        }
+        if (state.stopped || voiceRealtimeState !== state) return;
+
+        const realtimeUrl = new URL('wss://api.elevenlabs.io/v1/speech-to-text/realtime');
+        realtimeUrl.searchParams.set('model_id', tokenPayload.model_id || 'scribe_v2_realtime');
+        realtimeUrl.searchParams.set('audio_format', tokenPayload.audio_format || 'pcm_16000');
+        realtimeUrl.searchParams.set('token', tokenPayload.token);
+        const socket = new WebSocket(realtimeUrl.toString());
+        state.socket = socket;
+        socket.addEventListener('open', () => {
+          if (state.stopped) return;
+          state.queuedAudio.splice(0).forEach(audioBase64 => {
+            socket.send(JSON.stringify({
+              message_type: 'input_audio_chunk',
+              audio_base_64: audioBase64,
+            }));
+          });
+        });
+        socket.addEventListener('message', event => {
+          if (state.stopped) return;
+          let message;
+          try { message = JSON.parse(event.data); } catch (_) { return; }
+          const messageType = String(message.message_type || '');
+          const text = String(message.text || '').trim();
+          if (messageType === 'partial_transcript') {
+            state.partial = text;
+          } else if (messageType === 'committed_transcript' && text) {
+            state.committed.push(text);
+            state.partial = '';
+          } else if (messageType.endsWith('_error') || messageType === 'error') {
+            console.warn('[VoiceRealtime]', messageType);
+            return;
+          } else {
+            return;
+          }
+          voiceRealtimeTranscript = [...state.committed, state.partial]
+            .filter(Boolean)
+            .join(' ')
+            .trim();
+          updateVoiceRecordingLabel();
+        });
+        socket.addEventListener('error', () => {
+          console.warn('[VoiceRealtime] WebSocket connection failed; batch STT remains available');
+        });
+      } catch (error) {
+        console.warn('[VoiceRealtime] disabled for this recording:', error);
+        if (voiceRealtimeState === state) stopRealtimeVoiceTranscription();
+      }
+    }
+
+    function stopVoiceTracks() {
+      stopRealtimeVoiceTranscription();
+      if (voiceStream) {
+        voiceStream.getTracks().forEach(track => track.stop());
+        voiceStream = null;
+      }
+      if (voiceMaxTimer) {
+        clearTimeout(voiceMaxTimer);
+        voiceMaxTimer = null;
+      }
+    }
+
+    async function uploadRecordedVoice(blob, durationMs) {
+      const extension = voiceExtensionForMime(blob.type);
+      const form = new FormData();
+      form.append('file', blob, `recording.${extension}`);
+      form.append('duration_ms', String(durationMs));
+      form.append('scope_type', isGroupMode ? 'group' : 'chat');
+      form.append('scope_id', currentId);
+      const response = await fetch('/api/voice-messages', {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        body: form
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || data.message || '语音识别失败');
+      }
+      return data;
+    }
+
+    async function finishRecordedVoice(blob, durationMs, cancelled) {
+      stopVoiceTracks();
+      hideVoiceLivePanel();
+      voiceRecorder = null;
+      voiceHoldBtn.classList.remove('recording', 'canceling');
+      if (cancelled) {
+        voiceHoldBtn.textContent = '已取消';
+        setTimeout(() => {
+          if (!voiceProcessing) voiceHoldBtn.textContent = '按住说话';
+        }, 600);
+        return;
+      }
+      if (!blob.size || durationMs < 500) {
+        voiceHoldBtn.textContent = '说话时间太短';
+        setTimeout(() => {
+          if (!voiceProcessing) voiceHoldBtn.textContent = '按住说话';
+        }, 900);
+        return;
+      }
+
+      voiceProcessing = true;
+      voiceHoldBtn.disabled = true;
+      voiceHoldBtn.classList.add('processing');
+      voiceHoldBtn.textContent = '正在识别并发送…';
+      try {
+        const result = await uploadRecordedVoice(blob, durationMs);
+        input.value = result.tag;
+        await sendMessage();
+      } catch (error) {
+        console.error('[VoiceMessage] failed:', error);
+        alert(error.message || '语音消息发送失败');
+      } finally {
+        voiceProcessing = false;
+        voiceHoldBtn.disabled = false;
+        voiceHoldBtn.classList.remove('processing');
+        voiceHoldBtn.textContent = '按住说话';
+      }
+    }
+
+    async function startVoiceRecording() {
+      if (voiceProcessing || !voicePressActive) return;
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+        alert('当前浏览器不支持录音，请使用最新版 Chrome、Edge 或 Safari');
+        voicePressActive = false;
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (!voicePressActive) {
+          stream.getTracks().forEach(track => track.stop());
+          voiceHoldBtn.textContent = '按住说话';
+          return;
+        }
+        voiceStream = stream;
+        const mimeType = preferredVoiceMimeType();
+        voiceRecorder = mimeType
+          ? new MediaRecorder(stream, { mimeType })
+          : new MediaRecorder(stream);
+        voiceChunks = [];
+        voiceRecordingStartedAt = performance.now();
+        voiceRecorder.addEventListener('dataavailable', event => {
+          if (event.data && event.data.size) voiceChunks.push(event.data);
+        });
+        voiceRecorder.addEventListener('stop', () => {
+          const durationMs = Math.min(
+            60000,
+            Math.max(0, Math.round(performance.now() - voiceRecordingStartedAt))
+          );
+          const mime = voiceRecorder?.mimeType || mimeType || 'audio/webm';
+          const blob = new Blob(voiceChunks, { type: mime });
+          const cancelled = voiceCancelRequested;
+          voiceChunks = [];
+          finishRecordedVoice(blob, durationMs, cancelled);
+        }, { once: true });
+        voiceRecorder.start(250);
+        voiceHoldBtn.classList.add('recording');
+        voiceRealtimeTranscript = '';
+        voiceHoldBtn.textContent = '松开发送 · 上滑取消';
+        showVoiceLivePanel();
+        startRealtimeVoiceTranscription(stream);
+        voiceMaxTimer = setTimeout(() => {
+          voicePressActive = false;
+          voiceCancelRequested = false;
+          if (voiceRecorder && voiceRecorder.state === 'recording') voiceRecorder.stop();
+        }, 60000);
+      } catch (error) {
+        stopVoiceTracks();
+        hideVoiceLivePanel();
+        voiceRecorder = null;
+        voicePressActive = false;
+        voiceHoldBtn.classList.remove('recording', 'canceling');
+        voiceHoldBtn.textContent = '按住说话';
+        alert(error && error.name === 'NotAllowedError'
+          ? '需要允许麦克风权限才能发送语音消息'
+          : '无法启动录音，请检查麦克风是否可用');
+      }
+    }
+
+    function stopCurrentVoiceRecording(cancelled) {
+      if (voiceProcessing) return;
+      voiceCancelRequested = !!cancelled;
+      voicePressActive = false;
+      stopRealtimeVoiceTranscription();
+      hideVoiceLivePanel();
+      if (voiceRecorder && voiceRecorder.state === 'recording') {
+        voiceRecorder.stop();
+      } else {
+        stopVoiceTracks();
+        voiceHoldBtn.classList.remove('recording', 'canceling');
+        voiceHoldBtn.textContent = '按住说话';
+      }
+    }
+
+    voiceModeBtn.addEventListener('click', () => {
+      if (!voiceProcessing) setVoiceInputMode(!voiceInputMode);
+    });
+    voiceHoldBtn.addEventListener('contextmenu', event => event.preventDefault());
+    voiceHoldBtn.addEventListener('pointerdown', event => {
+      if (voiceProcessing || voiceRecorder) return;
+      event.preventDefault();
+      voicePressActive = true;
+      voiceCancelRequested = false;
+      voicePointerStartY = event.clientY;
+      try { voiceHoldBtn.setPointerCapture(event.pointerId); } catch (_) {}
+      startVoiceRecording();
+    });
+    voiceHoldBtn.addEventListener('pointermove', event => {
+      if (!voicePressActive || !voiceRecorder) return;
+      voiceCancelRequested = voicePointerStartY - event.clientY > 70;
+      voiceHoldBtn.classList.toggle('canceling', voiceCancelRequested);
+      updateVoiceRecordingLabel();
+    });
+    voiceHoldBtn.addEventListener('pointerup', event => {
+      event.preventDefault();
+      stopCurrentVoiceRecording(voiceCancelRequested);
+    });
+    voiceHoldBtn.addEventListener('pointercancel', () => stopCurrentVoiceRecording(true));
+
     window.addEventListener('DOMContentLoaded', async () => {
       chatContainer.innerHTML = '';
 
-      await initUI();
+      const uiReady = await initUI();
+      if (!uiReady) return;
 
       // 【Agent】页面加载时检查 agent 状态（处理刷新后状态丢失）
       startAgentPolling();
@@ -4839,7 +6039,9 @@
         // === 跳转模式 ===
         try {
           // 直接请求带 target_id 的接口
-          const res = await fetch(`${getApiPrefix()}/history?target_id=${jumpId}`);
+          const res = await fetchWithAuthGuard(`${getApiPrefix()}/history?target_id=${jumpId}`, {cache: 'no-store'});
+          if (handleApiUnauthorized(res)) return;
+          if (!res.ok) throw new Error(`历史接口请求失败：HTTP ${res.status}`);
           const data = await res.json();
 
           totalMessages = data.total;
@@ -4927,7 +6129,9 @@
 
       try {
         const url = `${getApiPrefix()}/history?after_id=${afterId}&limit=9999`;
-        const res = await fetch(url);
+        const res = await fetchWithAuthGuard(url, {cache: 'no-store'});
+        if (handleApiUnauthorized(res)) return;
+        if (!res.ok) throw new Error(`轮询接口请求失败：HTTP ${res.status}`);
         const data = await res.json();
 
         if (data.messages && data.messages.length > 0) {
@@ -5182,19 +6386,45 @@
       const newContent = document.getElementById('editInput').value.trim();
       if(!newContent) return alert("内容不能为空");
 
+      const editingId = currentEditId;
+      const editingGroup = currentEditGroup || document.querySelector(`.message-group[data-id="${editingId}"]`);
+      const saveButton = document.getElementById('saveEditBtn');
+      saveButton.disabled = true;
+      saveButton.textContent = '保存中…';
+
       try {
         // 【修改】使用 getApiPrefix()
-        const res = await fetch(`${getApiPrefix()}/messages/${currentEditId}`, {
+        const res = await fetch(`${getApiPrefix()}/messages/${editingId}`, {
           method: 'PUT',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({content: newContent})
         });
         if(res.ok) {
-          sessionStorage.setItem('jump_to_msg_id', currentEditId);
-          location.reload();
+          const data = await res.json();
+          if (editingGroup) {
+            const msgId = parseInt(editingId, 10);
+            const cacheKey = _getChatTransCacheKey(msgId, editingGroup);
+            if (cacheKey) localStorage.removeItem(cacheKey);
+            chatHiddenTrans.delete(_chatTransToggleKey(msgId));
+            replaceRenderedMessageGroup({
+              id: editingId,
+              content: data.content != null ? data.content : newContent,
+              role: editingGroup.dataset.sender,
+              timestamp: editingGroup.dataset.timestamp
+            });
+          } else {
+            await refreshRenderedMessageById(editingId);
+          }
+          closeEditModal();
+        } else {
+          const data = await res.json().catch(() => ({}));
+          alert(data.error || '修改失败');
         }
       } catch(e) { alert("修改失败"); }
-      closeEditModal();
+      finally {
+        saveButton.disabled = false;
+        saveButton.textContent = '保存';
+      }
     };
 
   async function deleteMessage(id, groupElement) {
@@ -5268,6 +6498,60 @@
     if (failCount > 0) alert(`部分消息删除失败（${failCount} 条）`);
   }
 
+    // 选中语音通话时，生成记录、转发记录和论坛引用都使用真实通话文字。
+    const selectedCallRecordCache = new Map();
+    const selectedCallTagPattern = /^\[voice_call\]\(call_[a-f0-9]{32}\)$/i;
+
+    function selectedMessageRawContent(group) {
+      return ((group && (group.dataset.originalContent || group.dataset.resolvedFulltext)) || '').trim();
+    }
+
+    function selectedMessageResolvedContent(group, allowVisualFallback = true) {
+      const raw = selectedMessageRawContent(group);
+      if (selectedCallRecordCache.has(raw)) return selectedCallRecordCache.get(raw);
+      if (raw || !allowVisualFallback || !group) return raw;
+      const contentEl = group.querySelector('.bubble-text, .bubble, [class*="content"]');
+      return contentEl ? contentEl.textContent.trim() : '';
+    }
+
+    async function preloadSelectedCallRecords(groups) {
+      const pending = Array.from(new Set(
+        groups.map(selectedMessageRawContent).filter(raw => (
+          selectedCallTagPattern.test(raw) && !selectedCallRecordCache.has(raw)
+        ))
+      ));
+      if (pending.length === 0) return true;
+
+      try {
+        const response = await fetch('/api/calls/resolve-records', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+          },
+          body: JSON.stringify({contents: pending})
+        });
+        if (!response.ok) throw new Error('resolve call records failed');
+        const payload = await response.json();
+        if (!Array.isArray(payload.contents) || payload.contents.length !== pending.length) {
+          throw new Error('invalid call records response');
+        }
+        pending.forEach((raw, index) => {
+          selectedCallRecordCache.set(
+            raw,
+            String(payload.contents[index] || '[语音通话记录已失效]')
+          );
+        });
+        return true;
+      } catch (error) {
+        console.error('Failed to resolve selected call records:', error);
+        pending.forEach(raw => {
+          selectedCallRecordCache.set(raw, '[语音通话记录暂时无法读取]');
+        });
+        return false;
+      }
+    }
+
     // --- 【论坛体选择器】复用当前聊天页选消息载入论坛 ---
     (function initForumPicker() {
       const urlParams = new URLSearchParams(window.location.search);
@@ -5317,7 +6601,7 @@
       window.location.href = '/forum';
     }
 
-    function forumPickerConfirm() {
+    async function forumPickerConfirm() {
       const selectedEls = Array.from(document.querySelectorAll('.message-group.selected'));
       if (selectedEls.length === 0) return alert('请先选择消息！');
 
@@ -5325,11 +6609,13 @@
         return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
       });
 
+      const callsResolved = await preloadSelectedCallRecords(selectedEls);
+      if (!callsResolved) alert('部分语音通话记录暂时无法读取');
+
       const messages = [];
       selectedEls.forEach(group => {
         const role = group.dataset.role || '';
-        const contentEl = group.querySelector('.bubble-text, .bubble, [class*="content"]');
-        const content = contentEl ? contentEl.textContent.trim() : '';
+        const content = selectedMessageResolvedContent(group);
         const timeEl = group.querySelector('.time, [class*="time"]');
         const timestamp = timeEl ? timeEl.textContent.trim() : '';
         if (content) {
@@ -5474,7 +6760,7 @@
     }
 
     // 3. 导出生成逻辑 (修改为弹窗显示)
-    function exportSelectedMessages() {
+    async function exportSelectedMessages() {
       const selectedEls = Array.from(document.querySelectorAll('.message-group.selected'));
       if (selectedEls.length === 0) return alert("请先选择消息！");
 
@@ -5482,6 +6768,9 @@
       selectedEls.sort((a, b) => {
         return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
       });
+
+      const callsResolved = await preloadSelectedCallRecords(selectedEls);
+      if (!callsResolved) alert('部分语音通话记录暂时无法读取');
 
       // --- 【修改】使用从后端传入的用户姓名 ---
       const roleMap = {
@@ -5519,19 +6808,16 @@
         const dateObj = new Date(timestampStr);
 
         // 日期头
-        const year = dateObj.getFullYear();
-        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-        const day = String(dateObj.getDate()).padStart(2, '0');
-        const currentDateStr = `${year}-${month}-${day}`;
+        const currentDateStr = recordDateKey(dateObj);
 
         if (currentDateStr !== lastDateStr) {
-          const weekDay = weekDays[dateObj.getDay()];
+          const weekDay = recordWeekday(dateObj);
           resultText += `\n${currentDateStr}（${weekDay}）\n`;
           lastDateStr = currentDateStr;
         }
 
         // 内容：优先导出原始结构化文本（拍一拍/撤回/表情/图片），并去除注音标签
-        let contentText = (group.dataset.originalContent || group.dataset.resolvedFulltext || "").trim();
+        let contentText = selectedMessageResolvedContent(group, false);
         if (!contentText) {
           const bubbles = group.querySelectorAll('.bubble');
           contentText = "";
@@ -5543,9 +6829,7 @@
         contentText = stripRubyTags(contentText);
 
         // 时间
-        const hours = String(dateObj.getHours()).padStart(2, '0');
-        const minutes = String(dateObj.getMinutes()).padStart(2, '0');
-        const timeStr = `${hours}:${minutes}`;
+        const timeStr = recordTimeKey(dateObj);
 
         resultText += `${name}：${contentText}（${timeStr}）\n`;
       });
@@ -5554,7 +6838,7 @@
       exportResultInput.value = resultText.trim();
 
       // 【新增】同时生成图片版的HTML
-      generateExportImageContent();
+      await generateExportImageContent();
 
       exportResultModal.style.display = 'flex';
     }
@@ -5650,6 +6934,9 @@
         return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
       });
 
+      const callsResolved = await preloadSelectedCallRecords(selectedEls);
+      if (!callsResolved) alert('部分语音通话记录暂时无法读取');
+
       // 判断当前来源类型和 ID（用于生成 CHATLOG 标签）
       const sourceId = isGroupMode ? currentId : currentId;
       let chatlogText = '[CHATLOG:' + sourceId + ']\n';
@@ -5661,19 +6948,15 @@
         const ts = group.dataset.timestamp;
         if (!ts) return;
         const dateObj = new Date(ts);
-        const dateStr = dateObj.getFullYear() + '-' +
-          String(dateObj.getMonth() + 1).padStart(2, '0') + '-' +
-          String(dateObj.getDate()).padStart(2, '0');
-        const timeStr = String(dateObj.getHours()).padStart(2, '0') + ':' +
-          String(dateObj.getMinutes()).padStart(2, '0') + ':' +
-          String(dateObj.getSeconds()).padStart(2, '0');
+        const dateStr = recordDateKey(dateObj);
+        const timeStr = recordTimeKey(dateObj, true);
 
         if (dateStr !== lastDate) {
           chatlogText += '[DATE:' + dateStr + ']\n';
           lastDate = dateStr;
         }
 
-        const content = (group.dataset.originalContent || group.dataset.resolvedFulltext || '').trim();
+        const content = stripRubyTags(selectedMessageResolvedContent(group, false));
         chatlogText += '[LOG:' + sender + '|' + timeStr + ']' + content + '[/LOG]\n';
       });
 
@@ -5765,6 +7048,7 @@
       selectedEls.sort((a, b) => {
         return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
       });
+      await preloadSelectedCallRecords(selectedEls);
 
       // 确定要显示的名字
       let displayName = currentConfig.remark || currentConfig.name || charConfig.name || '聊天';
@@ -5815,16 +7099,25 @@
         const ts = group.dataset.timestamp;
         if (!ts) return;
         const dateObj = new Date(ts);
-        const dateStr = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+        const dateStr = recordDateKey(dateObj);
 
         if (dateStr !== lastDateStr) {
-          const weekDay = weekDays[dateObj.getDay()];
+          const weekDay = recordWeekday(dateObj);
           messagesHtml += `<div style="text-align: center; color: #999; font-size: 12px; margin: 15px 0 10px 0;">${dateStr}（${weekDay}）</div>`;
           lastDateStr = dateStr;
         }
 
         const clonedGroup = group.cloneNode(true);
         clonedGroup.classList.remove('selected');
+        const rawContent = selectedMessageRawContent(group);
+        if (selectedCallTagPattern.test(rawContent)) {
+          const callBubble = clonedGroup.querySelector('.bubble-call, .bubble');
+          if (callBubble) {
+            callBubble.classList.remove('bubble-call');
+            callBubble.style.whiteSpace = 'pre-wrap';
+            callBubble.textContent = selectedMessageResolvedContent(group, false);
+          }
+        }
         if (hideCharName) {
           clonedGroup.querySelectorAll('.bubble-name').forEach(bn => bn.style.display = 'none');
           clonedGroup.querySelectorAll('.avatar-img').forEach(av => {
@@ -5958,6 +7251,8 @@
 
           // 如果您非要用原来的格式，可以写：
           // alert(`记忆整理完成！\n共提取了 ${data.count} 个关键事件。`);
+        } else if(data.status === 'up_to_date' || data.status === 'no_messages') {
+          alert(data.message);
         } else {
           alert("整理失败: " + (data.message || data.error));
         }
@@ -6009,7 +7304,9 @@
       list.forEach(msg => {
         // 高亮关键词
         const highlightContent = msg.content.replace(new RegExp(kw, 'gi'), match => `<span style="color:#e91e63; font-weight:bold;">${match}</span>`);
-        const dateStr = parseChatTimestamp(msg.timestamp).toLocaleString();
+        const dateStr = parseChatTimestamp(msg.timestamp).toLocaleString([], {
+          timeZone: RECORD_TIMEZONE
+        });
         const name = msg.role === 'user' ? currentUserName : (isGroupMode ? (groupMembers[msg.role]?.remark || groupMembers[msg.role]?.name) : (currentConfig?.remark || currentConfig?.name)) || msg.role;
 
         html += `
@@ -6118,7 +7415,84 @@
       setTimeout(() => { chatContainer.scrollTop = chatContainer.scrollHeight; }, 300);
     }
 
+    function chooseImageDescription(file, initialMode) {
+      return new Promise((resolve) => {
+        const modal = document.getElementById('imageDescriptionModal');
+        const preview = document.getElementById('imageDescriptionPreview');
+        const input = document.getElementById('imageDescriptionInput');
+        const help = document.getElementById('imageDescriptionHelp');
+        const confirmBtn = document.getElementById('imageDescriptionConfirm');
+        const cancelBtn = document.getElementById('imageDescriptionCancel');
+        const modeButtons = Array.from(modal.querySelectorAll('.image-description-mode'));
+        const objectUrl = URL.createObjectURL(file);
+        let mode = initialMode === 'manual' ? 'manual' : 'ai';
+
+        preview.src = objectUrl;
+        input.value = '';
+        function setMode(nextMode) {
+          mode = nextMode;
+          modeButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.mode === mode));
+          input.classList.toggle('show', mode === 'manual');
+          help.textContent = mode === 'ai'
+            ? 'AI 会自动理解图片内容，此操作会消耗较多 Token。'
+            : '描述只用于帮助角色理解图片，不会显示在图片气泡上。';
+          if (mode === 'manual') setTimeout(() => input.focus(), 0);
+        }
+        function finish(value) {
+          modal.classList.remove('show');
+          URL.revokeObjectURL(objectUrl);
+          modeButtons.forEach(btn => { btn.onclick = null; });
+          confirmBtn.onclick = null;
+          cancelBtn.onclick = null;
+          modal.onclick = null;
+          resolve(value);
+        }
+        modeButtons.forEach(btn => { btn.onclick = () => setMode(btn.dataset.mode); });
+        cancelBtn.onclick = () => finish(null);
+        modal.onclick = (event) => { if (event.target === modal) finish(null); };
+        confirmBtn.onclick = () => {
+          const description = input.value.trim();
+          if (mode === 'manual' && !description) {
+            alert('请填写图片描述');
+            input.focus();
+            return;
+          }
+          finish({ mode, description });
+        };
+        setMode(mode);
+        modal.classList.add('show');
+      });
+    }
+
     window.morePanelAction = function(action) {
+      if (action === 'call') {
+        if (typeof isGroupMode !== 'undefined' && isGroupMode) {
+          alert('目前只支持与单个角色进行通话');
+          return;
+        }
+        closeAllPanels();
+        (async () => {
+          try {
+            const response = await fetch('/api/calls', {
+              method: 'POST',
+              headers: {'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
+              body: JSON.stringify({char_id: charId})
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              if (data.code === 'call_already_live' && data.call && data.call.call_id) {
+                window.location.href = `/call/${encodeURIComponent(data.call.call_id)}`;
+                return;
+              }
+              throw new Error(data.error || '无法发起通话');
+            }
+            window.location.href = `/call/${encodeURIComponent(data.call.call_id)}`;
+          } catch (error) {
+            alert(error.message || '无法发起通话');
+          }
+        })();
+        return;
+      }
       if (action === 'image') {
         // 创建一个隐藏的 input=file
         const fileInput = document.createElement('input');
@@ -6131,8 +7505,8 @@
           const file = e.target.files[0];
           if (!file) return;
 
-          // 确认对话框提示扣费
-          if (!confirm('识别并发送图片将消耗较多 Token，是否继续？')) {
+          let descriptionChoice = await chooseImageDescription(file, 'ai');
+          if (!descriptionChoice) {
             document.body.removeChild(fileInput);
             return;
           }
@@ -6146,27 +7520,30 @@
           btn.disabled = true;
 
           try {
-            const formData = new FormData();
-            formData.append('file', file);
+            let uploadData = null;
+            while (descriptionChoice) {
+              const formData = new FormData();
+              formData.append('file', file);
+              formData.append('description_mode', descriptionChoice.mode);
+              if (descriptionChoice.mode === 'manual') {
+                formData.append('description', descriptionChoice.description);
+              }
 
-            // 1. 上传图片并获取识图结果
-            const uploadRes = await fetch('/api/vision/upload', {
-              method: 'POST',
-              body: formData
-            });
-            const uploadData = await uploadRes.json();
-
-            if (uploadData.error || uploadData.status !== 'success') {
-              alert('图片上传失败：' + (uploadData.error || '未知错误'));
-              btn.innerText = originalBtnText;
-              btn.disabled = false;
-              document.body.removeChild(fileInput);
-              return;
+              const uploadRes = await fetch('/api/vision/upload', { method: 'POST', body: formData });
+              uploadData = await uploadRes.json();
+              if (uploadRes.ok && uploadData.status === 'success') break;
+              if (uploadData.code === 'vision_failed') {
+                alert(uploadData.error || 'AI识图失败，请改用手动描述');
+                descriptionChoice = await chooseImageDescription(file, 'manual');
+                continue;
+              }
+              throw new Error(uploadData.error || '图片上传失败');
             }
+            if (!descriptionChoice || !uploadData) return;
 
             // 2. 存库与发给 AI 的格式：[图片](地址)(描述)。显示时只显示图片
             const path = uploadData.path || uploadData.url.split('/').pop();
-            const desc = (uploadData.description || '无').replace(/\)/g, '）'); // 避免描述里的 ) 破坏解析
+            const desc = uploadData.description || '无';
             const messageContent = `[图片](${path})(${desc})`;
 
             const endpoint = isGroupMode ? `/api/group/${encodeURIComponent(currentId)}/chat` : `/api/${encodeURIComponent(charId)}/chat_v2`;
@@ -6183,6 +7560,7 @@
 
             if (data.affinity_delta) showAffinityToast(data.affinity_delta);
             if (data.circuit_breaker) { showCbModal(data.circuit_breaker); return; }
+            if (data.safety_alert) showSafetyAlert(data.safety_alert);
 
             if (data.error) {
               if (data.error === 'consecutive_tickle') {
@@ -6195,7 +7573,7 @@
             }
           } catch (err) {
             console.error('发送图片异常', err);
-            alert('图片发送失败！');
+            alert('图片发送失败：' + (err.message || '未知错误'));
           } finally {
             btn.innerText = originalBtnText;
             btn.disabled = false;
@@ -6478,11 +7856,17 @@
           try {
             const r = await fetch('/api/stickers/upload', { method: 'POST', body: fd });
             const data = await r.json();
-            if (data.path) {
-              await fetch('/api/stickers/favorites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: data.path }) });
-              renderStickerFavorites();
-            } else if (data.message) alert(data.message);
-          } catch (e) { alert('上传失败'); }
+            if (!r.ok || !data.path) throw new Error(data.message || '上传失败');
+
+            const favoriteResponse = await fetch('/api/stickers/favorites', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: data.path })
+            });
+            const favoriteData = await favoriteResponse.json().catch(function(){ return {}; });
+            if (!favoriteResponse.ok) throw new Error(favoriteData.message || '加入喜欢失败');
+            await renderStickerFavorites();
+          } catch (e) { alert(e.message || '上传失败'); }
         };
       };
       input.click();
@@ -6779,6 +8163,7 @@
 
       if (data.affinity_delta) showAffinityToast(data.affinity_delta);
       if (data.circuit_breaker) { showCbModal(data.circuit_breaker); return; }
+      if (data.safety_alert) showSafetyAlert(data.safety_alert);
 
       if (data.status === 'success') {
         // 1. 移除旧的整组消息
@@ -6819,25 +8204,32 @@
 
   function _applyPendingTranslation() {
     if (!pendingSentTranslation) return;
-    const text = pendingSentTranslation.text;
-    pendingSentTranslation = null;
-    const userGroup = chatContainer.querySelector('.message-group.user:last-of-type');
-    if (!userGroup) return;
-    const msgId = parseInt(userGroup.dataset.id, 10);
+    const pending = pendingSentTranslation;
+    if (pending.messageId == null) return;
+
+    // 不再猜测“最后一个用户气泡”：深睡眠无回复、轮询或并发渲染都可能改变末尾元素。
+    // 使用聊天接口返回的用户消息 ID，确保翻译只挂到刚刚发送并落库的那条消息。
+    const userGroup = Array.from(chatContainer.querySelectorAll('.message-group.user'))
+      .find(group => group.dataset.id === String(pending.messageId));
+    if (!userGroup) return; // 气泡还没由轮询渲染，保留 pending 供下一次重试。
+
+    const msgId = parseInt(pending.messageId, 10);
     if (!msgId || msgId > 1600000000000) return;
-    const cacheKey = `kt_chat_${isGroupMode ? 'g' : 'c'}_${currentId}_${msgId}`;
+    const lastWrapper = userGroup.querySelector('.message-wrapper:last-of-type');
+    const target = lastWrapper || userGroup.querySelector('.bubble-stack');
+    if (!target) return;
+
+    const text = pending.text;
+    const cacheKey = _getChatTransCacheKey(msgId, userGroup);
     try { localStorage.setItem(cacheKey, text); } catch (e) {}
     if (!userGroup.querySelector('.translation-result')) {
-      const lastWrapper = userGroup.querySelector('.message-wrapper:last-of-type');
-      const target = lastWrapper || userGroup.querySelector('.bubble-stack');
-      if (target) {
-        const transDiv = document.createElement('div');
-        transDiv.className = 'translation-result';
-        transDiv.style.cssText = 'margin-top: 8px; font-size: 13px; color: #555; background: rgba(0,0,0,0.05); padding: 6px 10px; border-radius: 6px; border-left: 3px solid #666;';
-        transDiv.textContent = text;
-        target.appendChild(transDiv);
-      }
+      const transDiv = document.createElement('div');
+      transDiv.className = 'translation-result';
+      transDiv.style.cssText = 'margin-top: 8px; font-size: 13px; color: #555; background: rgba(0,0,0,0.05); padding: 6px 10px; border-radius: 6px; border-left: 3px solid #666;';
+      transDiv.textContent = text;
+      target.appendChild(transDiv);
     }
+    pendingSentTranslation = null;
   }
 
   function _getChatTransCacheKey(msgId, group) {

@@ -54,12 +54,17 @@ def init_users_db():
             display_name TEXT,
             created_at TEXT,
             provider TEXT,
-            provider_user_id TEXT
+            provider_user_id TEXT,
+            auth_version INTEGER DEFAULT 1
         )
         """
     )
     try:
         cur.execute("ALTER TABLE users ADD COLUMN is_frozen INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cur.execute("ALTER TABLE users ADD COLUMN auth_version INTEGER DEFAULT 1")
     except sqlite3.OperationalError:
         pass
     cur.execute(

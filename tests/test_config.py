@@ -92,6 +92,64 @@ class TestSystemRules:
         off = get_mode_context("zh", "offline")
         assert on != off, "online and offline mode context should differ"
 
+    def test_deep_sleep_rules_cover_temporary_unavailability_and_overwrite(self):
+        from core.config import (
+            GLOBAL_SYSTEM_RULES_EN_AGENT,
+            GLOBAL_SYSTEM_RULES_JA_AGENT,
+            GLOBAL_SYSTEM_RULES_ZH_AGENT,
+        )
+
+        assert "比赛、上课" in GLOBAL_SYSTEM_RULES_ZH_AGENT
+        assert "每次设置都会覆盖原时间段" in GLOBAL_SYSTEM_RULES_ZH_AGENT
+        assert "把结束时间改为" in GLOBAL_SYSTEM_RULES_ZH_AGENT
+
+        assert "試合や授業" in GLOBAL_SYSTEM_RULES_JA_AGENT
+        assert "以前の時間帯を上書き" in GLOBAL_SYSTEM_RULES_JA_AGENT
+        assert "終了時刻" in GLOBAL_SYSTEM_RULES_JA_AGENT
+
+        assert "match or class" in GLOBAL_SYSTEM_RULES_EN_AGENT
+        assert "replaces the previous window" in GLOBAL_SYSTEM_RULES_EN_AGENT
+        assert "change the end" in GLOBAL_SYSTEM_RULES_EN_AGENT
+
+    def test_offline_context_includes_calls_without_blocking_action_tags(self):
+        from core.config import get_mode_context
+
+        zh = get_mode_context("zh", "offline")
+        ja = get_mode_context("ja", "offline")
+        en = get_mode_context("en", "offline")
+
+        assert "见面、语音通话或视频通话" in zh
+        assert "语音通话时不得声称看见用户" in zh
+        assert "Agent Action Tags 不受此限制" in zh
+
+        assert "対面、音声通話、ビデオ通話" in ja
+        assert "音声通話ではユーザーが見えると述べない" in ja
+        assert "Agent Action Tags はこの制限の対象外" in ja
+
+        assert "in person, on an audio call, or on a video call" in en
+        assert "On an audio call, do not claim to see the user" in en
+        assert "Agent Action Tags are exempt" in en
+
+    def test_online_special_messages_offer_private_transfer_with_currency(self):
+        from core.config import (
+            GLOBAL_SYSTEM_RULES_EN_MODE_ONLINE,
+            GLOBAL_SYSTEM_RULES_JA_MODE_ONLINE,
+            GLOBAL_SYSTEM_RULES_ZH_MODE_ONLINE,
+        )
+
+        for rules in (
+            GLOBAL_SYSTEM_RULES_ZH_MODE_ONLINE,
+            GLOBAL_SYSTEM_RULES_JA_MODE_ONLINE,
+            GLOBAL_SYSTEM_RULES_EN_MODE_ONLINE,
+        ):
+            assert "[转账:88.00元" in rules
+            assert "[转账:1000円]" in rules
+            assert "[转账:$12.50" in rules
+
+        assert "仅限与用户单聊" in GLOBAL_SYSTEM_RULES_ZH_MODE_ONLINE
+        assert "個別チャットのみ" in GLOBAL_SYSTEM_RULES_JA_MODE_ONLINE
+        assert "private chat with the user only" in GLOBAL_SYSTEM_RULES_EN_MODE_ONLINE
+
 
 class TestConfigConstants:
     def test_max_context_lines(self):

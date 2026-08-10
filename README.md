@@ -25,6 +25,7 @@ KunigamiProject/
 │   ├── group.py                  #   多角色群聊 (19)
 │   ├── lbs.py                    #   地图 / 天气 / 地理编码 (13)
 │   ├── media.py                  #   表情包 / 音乐播放 / TTS / Vision (38)
+│   ├── calls.py                  #   一对一角色语音电话 / 通话状态 / 实时轮次
 │   ├── moments.py                #   朋友圈动态 (19)
 │   ├── square.py                 #   角色广场 (17)
 │   └── views.py                  #   HTML 页面入口 (7)
@@ -45,6 +46,7 @@ KunigamiProject/
 │   └── <user_id>/
 │       ├── characters/<char_id>/ # 角色数据 (chat.db, prompts/, 头像, 背景)
 │       ├── groups/<group_id>/    # 群聊数据 (chat.db, prompts/)
+│       ├── voice_calls/calls.db  # 电话状态与文字记录（不保存音频）
 │       └── configs/              # 用户级配置 (characters.json, user_settings.json)
 │
 ├── docs/                         # 文档
@@ -59,7 +61,9 @@ KunigamiProject/
   - **👋 拍一拍 (Tickle)**: 双击头像发送拍一拍，支持群聊与单聊，自带多语言提示与自定义后缀。
   - **🖼️ 表情包系统**: AI 可通过 `[表情]开心` 描述词发送表情，支持多套表情库、用户上传与"写时随机"机制。
   - **🎵 音乐播放器**: 聊天中可通过 `[音乐]曲名` 标签触发搜索与播放，支持播放列表管理。
-  - **🗣️ 语音克隆 (TTS)**: 基于 ElevenLabs 的语音合成，点击消息即可朗读。
+  - **🎙️ 用户语音消息**: 长按录音、ElevenLabs Scribe 自动转写、私聊/群聊原声播放，识别文字会进入角色上下文与记忆。
+  - **🗣️ 私有音色与语音合成 (TTS)**: 用户配置自己的 ElevenLabs API Key，可在角色页即时克隆私有音色并朗读消息。
+  - **☎️ 角色语音电话**: 用户或角色均可发起一对一来电；角色按人设自主接听/拒绝，通话中实时转写双方文字，并使用 Eleven v3 按自然语言语气生成角色声音。电话音频不落库。
 
 - **🧠 自动化分级记忆系统**
   - **短期记忆 (Short)**: 按天记录的事件级日志，对话与朋友圈互动后自动提取。
@@ -115,6 +119,12 @@ KunigamiProject/
 
 ```env
 # === 必须配置 ===
+# 生产环境与凭证加密（两个密钥必须分别生成，不能复用）
+KUNIGAMI_ENV=production
+FLASK_SECRET_KEY=replace_with_a_random_session_secret
+CREDENTIAL_ENCRYPTION_KEYS=replace_with_a_fernet_key
+SESSION_LIFETIME_DAYS=14
+
 # Google Gemini API
 GEMINI_API_KEY=your_gemini_api_key
 
@@ -145,8 +155,14 @@ COS_BUCKET=your_bucket_name
 SILICONFLOW_API_KEY=your_siliconflow_key
 SERPER_API_KEY=your_serper_key
 
-# === ElevenLabs TTS (可选) ===
-ELEVENLABS_API_KEY=your_elevenlabs_key
+# 只有用户语音消息的 Speech-to-Text 使用该平台 Key。
+# 角色 TTS、试听与音色克隆使用用户在个人主页加密保存的个人 Key。
+ELEVENLABS_API_KEY=your_platform_elevenlabs_stt_key
+# 每位用户每小时最多发起的语音转写次数，0 表示不限制。
+VOICE_STT_MAX_REQUESTS_PER_HOUR=60
+VOICE_STT_MAX_REALTIME_SESSIONS_PER_HOUR=60
+# 每位用户每小时最多创建的电话实时 STT 会话；每轮发言会建立一条短会话。
+VOICE_CALL_STT_SESSIONS_PER_HOUR=240
 
 # === 网易云音乐 (可选) ===
 NCM_APP_ID=your_ncm_app_id
@@ -196,6 +212,24 @@ python app.py
 - `/map` — 地图
 - `/sakura` — Sakura 樱语 AI Direct Chat
 - `/admin/dashboard` — 管理后台 (仅 admin)
+
+### 用户 API Key 安全迁移
+
+生产环境部署前，分别生成 Session 密钥和凭证加密密钥：
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+将二者分别写入服务器环境变量后，先预演、再由服务器管理员执行迁移：
+
+```bash
+python scripts/migrate_user_credentials.py
+python scripts/migrate_user_credentials.py --apply
+```
+
+如果预演提示全局 `configs/user_settings.json` 仍有旧 Key 或明文密码，先确认它属于哪个用户，再显式增加 `--global-user-id <用户ID>`。脚本只有在 `users.db` 中确认该用户已有密码哈希后才会清理明文密码；它不会猜测归属，也不会输出任何 Key 或密码。`--apply` 会创建仅供回滚的明文备份目录；确认所有用户登录及模型调用正常后，应从服务器安全删除该目录。迁移及验证期间不要更换或删除 `CREDENTIAL_ENCRYPTION_KEYS`。
 
 ## 📝 更新日志
 

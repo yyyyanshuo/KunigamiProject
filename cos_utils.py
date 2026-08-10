@@ -42,6 +42,18 @@ def upload_to_cos(local_path, cos_path):
         print(f"❌ COS 上传失败: {e}")
         return None
 
+
+def delete_from_cos(cos_path):
+    """Delete one exact COS object key. Returns True when the request succeeds."""
+    if not bucket or not region or not cos_path:
+        return False
+    try:
+        client.delete_object(Bucket=bucket, Key=cos_path)
+        return True
+    except Exception as e:
+        print(f"❌ COS 删除失败: {e}")
+        return False
+
 def get_cos_list(prefix, get_folders=False):
     """
     prefix: 路径前缀，例如 'stickers/'

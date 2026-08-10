@@ -42,6 +42,23 @@
     }
     button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(255,182,185,0.4); }
     .error-msg { color: red; font-size: 12px; margin-bottom: 10px; display: none; }
+    .hint-msg { color: #777; font-size: 12px; line-height: 1.5; margin: -4px 0 12px; }
+    button:disabled { opacity: 0.65; cursor: not-allowed; transform: none; box-shadow: none; }
+    .age-modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.28);
+      display: none; align-items: center; justify-content: center; z-index: 1000;
+      padding: 20px; box-sizing: border-box;
+    }
+    .age-modal {
+      width: 100%; max-width: 320px; background: rgba(255,255,255,0.98);
+      border-radius: 16px; padding: 22px; box-shadow: 0 16px 38px rgba(0,0,0,0.18);
+      text-align: left; box-sizing: border-box;
+    }
+    .age-modal-title { font-size: 17px; font-weight: 700; color: #d81b60; margin-bottom: 10px; }
+    .age-modal-text { font-size: 14px; color: #555; line-height: 1.7; margin-bottom: 18px; }
+    .age-modal-actions { display: flex; gap: 10px; }
+    .age-modal-actions button { border-radius: 10px; }
+    .age-modal-actions .secondary { background: #eee; color: #666; }
     .switch-link { margin-top: 8px; font-size: 12px; color: #888; }
     .switch-link a { color: #d81b60; text-decoration: none; }
   </style>
@@ -53,49 +70,115 @@
   <h2>创建新账号</h2>
 
   <div id="error-msg" class="error-msg"></div>
+  <div id="hint-msg" class="hint-msg">本产品仅面向年满18周岁的用户。注册前需要完成年龄确认。</div>
 
   <input type="email" id="email" name="email" placeholder="邮箱 (Email)">
   <input type="text" id="display_name" name="display_name" placeholder="昵称 / 显示名 (可选)">
   <input type="password" id="password" name="password" placeholder="密码 (Password)">
 
-  <button onclick="doRegister()">注 册</button>
+  <button id="registerBtn" onclick="doRegister()">注 册</button>
 
   <div class="switch-link">
     已有账号？<a href="/login">去登录</a>
   </div>
 </div>
 
-<script>
-  async function doRegister() {
-    const email = document.getElementById('email').value.trim();
-    const displayName = document.getElementById('display_name').value.trim();
-    const password = document.getElementById('password').value.trim();
-    const errorEl = document.getElementById('error-msg');
+<div class="age-modal-overlay" id="ageModalOverlay">
+  <div class="age-modal">
+    <div class="age-modal-title" id="ageModalTitle"></div>
+    <div class="age-modal-text" id="ageModalText"></div>
+    <div class="age-modal-actions">
+      <button type="button" class="secondary" id="ageModalCancel">取消</button>
+      <button type="button" id="ageModalConfirm">确认</button>
+    </div>
+  </div>
+</div>
 
-    if (!email || !password) {
-      errorEl.textContent = "请输入邮箱和密码";
-      errorEl.style.display = 'block';
-      return;
+<script>
+  let pendingRegisterPayload = null;
+
+  function setError(message) {
+    const errorEl = document.getElementById('error-msg');
+    errorEl.textContent = message || '';
+    errorEl.style.display = message ? 'block' : 'none';
+  }
+
+  function setLoading(isLoading, text) {
+    const btn = document.getElementById('registerBtn');
+    btn.disabled = !!isLoading;
+    btn.textContent = text || (isLoading ? '处理中...' : '注 册');
+  }
+
+  function showAgeModal(step) {
+    const overlay = document.getElementById('ageModalOverlay');
+    const title = document.getElementById('ageModalTitle');
+    const text = document.getElementById('ageModalText');
+    const confirmBtn = document.getElementById('ageModalConfirm');
+    const cancelBtn = document.getElementById('ageModalCancel');
+
+    if (step === 1) {
+      title.textContent = '年龄确认';
+      text.textContent = '本产品仅面向年满18周岁的用户。请确认你是否已经年满18周岁。';
+      confirmBtn.textContent = '我已年满18周岁';
+      cancelBtn.textContent = '未满18周岁';
+      confirmBtn.onclick = () => showAgeModal(2);
+    } else {
+      title.textContent = '再次确认';
+      text.textContent = '继续注册即表示你确认自己已年满18周岁，并同意遵守用户协议和隐私政策。';
+      confirmBtn.textContent = '确认并注册';
+      cancelBtn.textContent = '取消';
+      confirmBtn.onclick = () => {
+        overlay.style.display = 'none';
+        submitRegister();
+      };
     }
 
+    cancelBtn.onclick = () => {
+      overlay.style.display = 'none';
+      pendingRegisterPayload = null;
+      setLoading(false);
+    };
+    overlay.style.display = 'flex';
+  }
+
+  async function submitRegister() {
+    if (!pendingRegisterPayload) return;
+    setLoading(true, '正在注册...');
     try {
       const res = await fetch('/api/register', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ email, password, display_name: displayName })
+        body: JSON.stringify({ ...pendingRegisterPayload, adult_confirmed: true })
       });
       const result = await res.json();
 
       if (result.status === 'success') {
         window.location.href = '/';
       } else {
-        errorEl.textContent = result.message || "注册失败";
-        errorEl.style.display = 'block';
+        setError(result.message || '注册失败');
+        setLoading(false);
       }
     } catch (e) {
-      errorEl.textContent = "网络错误";
-      errorEl.style.display = 'block';
+      setError('网络错误');
+      setLoading(false);
+    } finally {
+      pendingRegisterPayload = null;
     }
+  }
+
+  async function doRegister() {
+    const email = document.getElementById('email').value.trim();
+    const displayName = document.getElementById('display_name').value.trim();
+    const password = document.getElementById('password').value.trim();
+    setError('');
+
+    if (!email || !password) {
+      setError('请输入邮箱和密码');
+      return;
+    }
+
+    pendingRegisterPayload = { email, password, display_name: displayName };
+    showAgeModal(1);
   }
 
   document.addEventListener('keydown', (e) => {
@@ -107,4 +190,3 @@
   <script src="/static/ai-cruise.js"></script>
 </body>
 </html>
-

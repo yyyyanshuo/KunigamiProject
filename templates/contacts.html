@@ -15,6 +15,7 @@
     <title>消息列表</title>
     <!-- 【新增】主题加载脚本 -->
     <script src="/static/theme-loader.js"></script>
+    <script defer src="/static/voice-call-incoming.js"></script>
   <script>
     window.GLOBAL_COS_BASE_URL = "{{ COS_BASE_URL | default('') }}";
     window.GLOBAL_USER_PREFIX = "users/{{ session.get('user_id', 1) }}";
@@ -377,11 +378,11 @@
         <h3 class="modal-title">设置深睡眠时间（仅对选中的单聊生效）</h3>
         <div class="input-group">
             <label class="input-label">入睡时间 (HH:MM)</label>
-            <input type="text" id="ds_start_input" class="input-field" placeholder="例如: 23:00">
+            <input type="text" id="ds_start_input" class="input-field" placeholder="用户当地时间，例如: 23:00">
         </div>
         <div class="input-group" style="margin-bottom: 20px;">
             <label class="input-label">起床时间 (HH:MM)</label>
-            <input type="text" id="ds_end_input" class="input-field" placeholder="例如: 07:00">
+            <input type="text" id="ds_end_input" class="input-field" placeholder="用户当地时间，例如: 07:00">
         </div>
         <div class="modal-actions">
             <button onclick="closeDeepSleepTimeModal()" class="btn-cancel">取消</button>
@@ -390,6 +391,7 @@
     </div>
 </div>
 
+<script src="/static/auth-guard.js"></script>
 <script>
 	    // --- 全局变量缓存 ---
 	    let allContactsData = []; // 存一下API返回的数据，方便弹窗里复用
@@ -404,7 +406,9 @@
 
 	    async function loadGlobalBedtimeDiarySetting() {
 	        try {
-	            const res = await fetch('/api/bedtime_diary_settings');
+	            const res = await fetchWithAuthGuard('/api/bedtime_diary_settings');
+	            if (handleApiUnauthorized(res)) return;
+	            if (!res.ok) throw new Error(`HTTP ${res.status}`);
 	            const data = await res.json();
 	            globalBedtimeDiaryEnabled = data.enabled !== false;
 	        } catch (e) {
@@ -416,11 +420,12 @@
 	    async function toggleGlobalBedtimeDiary() {
 	        const next = !globalBedtimeDiaryEnabled;
 	        try {
-	            const res = await fetch('/api/bedtime_diary_settings', {
+	            const res = await fetchWithAuthGuard('/api/bedtime_diary_settings', {
 	                method: 'POST',
 	                headers: {'Content-Type': 'application/json'},
 	                body: JSON.stringify({ enabled: next })
 	            });
+	            if (handleApiUnauthorized(res)) return;
 	            if (!res.ok) throw new Error('save failed');
 	            globalBedtimeDiaryEnabled = next;
 	            renderGlobalBedtimeDiaryButton();
@@ -484,11 +489,12 @@
         if (members.length < 2) return alert("请至少选择2个成员");
 
         try {
-            const res = await fetch('/api/groups/add', {
+            const res = await fetchWithAuthGuard('/api/groups/add', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ id, name, members })
             });
+            if (handleApiUnauthorized(res)) return;
             const result = await res.json();
             if (res.ok) {
                 alert("群聊创建成功！");
@@ -503,11 +509,17 @@
     // --- 列表渲染逻辑 (修改) ---
     async function loadContacts() {
         try {
-            const res = await fetch('/api/contacts');
+            const res = await fetchWithAuthGuard('/api/contacts', {cache: 'no-store'});
+            if (handleApiUnauthorized(res)) return;
+            if (!res.ok) throw new Error(`联系人接口请求失败：HTTP ${res.status}`);
             const data = await res.json();
+            if (!Array.isArray(data)) throw new Error('联系人接口返回格式不正确');
             allContactsData = data; // 【关键】缓存数据供弹窗使用
             renderList(data);
-        } catch(e) { document.getElementById('list').innerHTML = '<div style="text-align:center; padding:20px;">加载失败</div>'; }
+        } catch(e) {
+            console.error('联系人加载失败', e);
+            document.getElementById('list').innerHTML = '<div style="text-align:center; padding:20px;">加载失败，请稍后重试</div>';
+        }
     }
 
     let selectMode = false;
@@ -516,6 +528,7 @@
     const listEl = document.getElementById('list');
 
     function renderList(contacts) {
+        if (!Array.isArray(contacts)) contacts = [];
         if(contacts.length === 0) {
             listEl.innerHTML = '<div style="text-align:center; padding:28px; color:#ccc; font-size:13px;">暂无联系人</div>';
             return;
@@ -657,7 +670,7 @@
 
     async function saveSelectModeAndExit() {
         const deleteCount = pendingOps.filter(op => op.action === 'delete').reduce((sum, op) => sum + op.items.length, 0);
-        if (deleteCount > 0 && !confirm(`本次操作包含删除 ${deleteCount} 项，确定保存吗？删除后无法恢复。`)) return;
+        if (deleteCount > 0 && !confirm(`本次操作包含删除 ${deleteCount} 项，确定保存吗？角色的聊天、记忆、朋友圈互动和地图位置也会一并清理，删除后无法恢复。`)) return;
         for (const op of pendingOps) {
             if (op.action === 'delete') {
                 for (const x of op.items) {
@@ -866,11 +879,12 @@
         if (!/^[a-zA-Z0-9_]+$/.test(id)) return alert("ID 只能包含字母、数字或下划线");
 
         try {
-            const res = await fetch('/api/characters/add', {
+            const res = await fetchWithAuthGuard('/api/characters/add', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ id: id, name: name })
             });
+            if (handleApiUnauthorized(res)) return;
 
             const result = await res.json();
 
@@ -886,25 +900,6 @@
         }
     }
 </script>
-
-<!-- 打赏弹窗 (每日首次) -->
-<div class="modal-overlay" id="daily-donate-modal" style="position:fixed; display:none; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); backdrop-filter:blur(4px); z-index:3000; align-items:center; justify-content:center;">
-  <div style="background:#fff; padding:20px; border-radius:18px; width:85%; max-width:320px; box-shadow:0 10px 30px rgba(0,0,0,0.15);">
-    <div style="text-align:center; padding-bottom:16px; border-bottom:1px solid #eee;">
-      <div style="font-size:48px; margin-bottom:8px;">☕</div>
-      <h3 style="margin:0; font-size:18px; color:#2c3e50;">打赏开发者</h3>
-    </div>
-    <div style="padding:20px 0; font-size:13px; color:#8ca0b3; line-height:1.6; text-align:center;">
-      <p style="margin:0 0 8px 0;">开发者是用爱发电的卑微大学生，为了给大家提供不卡顿的 38ms 极速通道和最聪明的 AI，服务器每天都在疯狂燃烧我的余额😭</p>
-      <p style="margin:8px 0; font-weight:600; color:var(--primary-color);">如果这个角色曾经治愈过你，求老板请我喝瓶可乐续命！</p>
-      <p style="margin:8px 0 0 0;">你的每一分钱都会变成新功能开发的代码！</p>
-    </div>
-    <div style="display:flex; gap:12px; margin:20px 0 0 0;">
-      <button onclick="document.getElementById('daily-donate-modal').style.display='none'; localStorage.setItem('last_donate_show', new Date().toISOString().split('T')[0]);" style="flex:1; background:#f5f5f5; color:#555; border:none; padding:10px; border-radius:10px; cursor:pointer; font-weight:600;">稍后再说</button>
-      <a href="/profile" style="flex:1; background:var(--primary-color); color:white; border:none; text-decoration:none; text-align:center; padding:10px; border-radius:10px; font-weight:600;">查看收款码</a>
-    </div>
-  </div>
-</div>
 
   <!-- AI巡航悬浮球 -->
   <script src="/static/ai-cruise.js"></script>

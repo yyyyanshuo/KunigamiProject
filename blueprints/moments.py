@@ -15,11 +15,21 @@ from core.config import (
     COS_BASE_URL, USERS_ROOT, BASE_DIR,
 )
 from core.context import get_current_user_id, set_background_user
+from core.time_utils import (
+    beijing_now,
+    get_character_timezone,
+    get_zone,
+    parse_beijing_timestamp,
+    utc_now,
+)
 from core.utils import (
     get_paths, safe_save_json, _get_characters_config_file,
     get_characters_config_for_current_user, get_current_username,
     _load_user_settings, _get_groups_config_file,
+    is_character_available_for_group_chat,
 )
+from services.memory_store import append_short_memory_events
+from services.image_tags import build_image_tag
 
 # --- Fallback constants (redefined in blueprint scope) ---
 MOMENTS_DATA_FILE = os.path.join(BASE_DIR, "configs", "moments_data.json")
@@ -32,6 +42,15 @@ moments_bp = Blueprint('moments', __name__, template_folder='templates')
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
+def _character_now(char_id, user_id=None):
+    """角色当地时间只用于 Prompt；持久化时间戳必须使用 beijing_now。"""
+    try:
+        with open(_get_characters_config_file(user_id=user_id), "r", encoding="utf-8") as f:
+            info = (json.load(f) or {}).get(char_id, {}) or {}
+    except Exception:
+        info = {}
+    return utc_now().astimezone(get_zone(get_character_timezone(info)))
 
 def clean_moments_agent_instructions(text):
     """
@@ -164,7 +183,7 @@ def process_moments_media_tags(text, char_id, user_id=None):
     search_pattern = r'[\[【]SEARCH_IMG[:：\s]*(.*?)[\]】]'
 
     # 计算朋友圈存储子目录 (YYYYMM)
-    yyyymm = datetime.now().strftime("%Y%m")
+    yyyymm = beijing_now().strftime("%Y%m")
     moments_prefix = f"moments/{yyyymm}"
 
     # 处理搜图
@@ -178,10 +197,10 @@ def process_moments_media_tags(text, char_id, user_id=None):
             if "search_" in url or "moments/" in url:
                 clean_url = url.split('?')[0]
                 filename = clean_url.split('/')[-1]
-                return f"[图片]({filename})({keyword})"
+                return build_image_tag(filename, keyword)
             else:
                 # 否则说明是未成功上传至 COS 的外部原始搜索外链，保留完整外链供前端加载展示
-                return f"[图片]({url})({keyword})"
+                return build_image_tag(url, keyword)
         return f" (没找到相关图片: {keyword}) "
 
     # 如果 AI 用了生图标签，在朋友圈场景下强制转为搜图
@@ -191,7 +210,9 @@ def process_moments_media_tags(text, char_id, user_id=None):
     return text
 
 
-def append_moment_event_to_short_memory(char_id, context_text, user_id=None):
+def append_moment_event_to_short_memory(
+    char_id, context_text, user_id=None, timestamp_str=None
+):
     """
     将朋友圈互动用 AI 总结为一句话，追加到角色的当日短期记忆中。
     使用与记忆总结相同的模型（summary），context_text 为互动描述。
@@ -207,34 +228,17 @@ def append_moment_event_to_short_memory(char_id, context_text, user_id=None):
         line = re.sub(r"^-\s*\[\d{2}:\d{2}\]\s*", "", line).strip()
         if not line:
             return
-        _, prompts_dir = get_paths(char_id)
+        _, prompts_dir = get_paths(char_id, user_id=user_id)
         short_file = os.path.join(prompts_dir, "6_memory_short.json")
-        date_str = datetime.now().strftime("%Y-%m-%d")
-        time_str = datetime.now().strftime("%H:%M")
-
-        current_data = {}
-        if os.path.exists(short_file):
-            with open(short_file, "r", encoding="utf-8") as f:
-                try:
-                    current_data = json.load(f)
-                except Exception:
-                    pass
-
-        day_data = current_data.get(date_str, {})
-        if isinstance(day_data, list):
-            existing_events = list(day_data)
-            last_id = 0
-        else:
-            existing_events = list(day_data.get("events", []))
-            last_id = day_data.get("last_id", 0)
-
-        existing_events.append({"time": time_str, "event": line})
-        existing_events.sort(key=lambda x: x["time"])
-
-        current_data[date_str] = {"events": existing_events, "last_id": last_id}
-        os.makedirs(os.path.dirname(short_file), exist_ok=True)
-        with open(short_file, "w", encoding="utf-8") as f:
-            json.dump(current_data, f, ensure_ascii=False, indent=2)
+        now_bjt = parse_beijing_timestamp(timestamp_str) or beijing_now()
+        date_str = now_bjt.strftime("%Y-%m-%d")
+        time_str = now_bjt.strftime("%H:%M")
+        event_text = line if line.startswith("[朋友圈]") else f"[朋友圈] {line}"
+        append_short_memory_events(
+            short_file,
+            date_str,
+            [{"time": time_str, "event": event_text}],
+        )
     except Exception as e:
         print(f"   [Moments] 写入短期记忆失败 [{char_id}]: {e}")
 
@@ -244,12 +248,10 @@ def sync_memory_before_moments(char_id, user_id=None):
     发朋友圈前，同步该角色的单聊及群聊记忆。
     """
     from app import sync_memory_before_single_chat, update_short_memory_for_date
-    now = datetime.now()
+    now = beijing_now()
     today_str = now.strftime("%Y-%m-%d")
-    dates = [today_str]
-    if now.hour < 4:
-        yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
-        dates.insert(0, yesterday_str)
+    yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    dates = [yesterday_str, today_str]
 
     try:
         # 1. 先同步群聊记忆
@@ -259,7 +261,9 @@ def sync_memory_before_moments(char_id, user_id=None):
         # 2. 再汇总单聊记忆 (复用现有的单聊日结函数)
         for d in dates:
             try:
-                update_short_memory_for_date(char_id, d, user_id=user_id)
+                result = update_short_memory_for_date(char_id, d, user_id=user_id)
+                if not result.ok:
+                    return False, f"朋友圈前单聊记忆同步失败: {result.status} {result.message}"
             except Exception as e:
                 print(f"   [Sync] 发朋友圈前单聊记忆 {char_id} 日期 {d} 同步失败: {e}")
         return True, None
@@ -386,7 +390,7 @@ def _generate_moment_comment(commenter_id, post_author_id, post_content, is_ment
         pass
 
     lang = get_ai_language(commenter_id, user_id=user_id)
-    now = datetime.now()
+    now = _character_now(commenter_id, user_id=user_id)
 
     mention_instruction = ""
     if is_mentioned:
@@ -401,7 +405,7 @@ def _generate_moment_comment(commenter_id, post_author_id, post_content, is_ment
         user_msg = (
             "【评论任务说明】\n"
             f"当前时间：{now.strftime('%Y-%m-%d %H:%M %A')}\n"
-            "你现在要为一条朋友圈写一条简短评论（仅一句话，100字以内）。只输出评论内容，不要加引号，也不要加「评论：」之类的前缀。\n\n"
+            "你现在要为一条朋友圈写一条简短评论（正文仅一句话，100字以内）。只输出评论正文，不要加引号，也不要加「评论：」之类的前缀；若需要转向，可在正文后另起一行附加一个转向标签，标签不计入句数和字数。\n\n"
             f"{mention_instruction}"
             "【朋友圈原文】\n"
             f"发布者：{author_name}\n"
@@ -420,7 +424,7 @@ def _generate_moment_comment(commenter_id, post_author_id, post_content, is_ment
         user_msg = (
             "【コメントタスク説明】\n"
             f"現在時刻：{now.strftime('%Y-%m-%d %H:%M %A')}\n"
-            "あなたは今、ある朋友圈の投稿に対して短いコメント（1文のみ、100文字以内）を書きます。コメント内容のみを出力し、引用符や「コメント：」などの接頭辞は不要です。\n\n"
+            "あなたは今、ある朋友圈の投稿に対して短いコメントを書きます（本文は1文のみ、100文字以内）。本文だけを出力し、引用符や接頭辞は不要です。会話を切り替える場合のみ、本文の次の行に切り替えタグを1つ追加できます。タグは文数・文字数に含みません。\n\n"
             f"{mention_instruction}"
             "【投稿原文】\n"
             f"投稿者：{author_name}\n"
@@ -439,7 +443,7 @@ def _generate_moment_comment(commenter_id, post_author_id, post_content, is_ment
         user_msg = (
             "[Comment Task Instructions]\n"
             f"Current time: {now.strftime('%Y-%m-%d %H:%M %A')}\n"
-            "You are to write a short comment (only one sentence, 100 chars max) for a post on Moments. Output only the content of the comment, without quotes or prefixes like 'Comment:'.\n\n"
+            "Write a short comment for a post on Moments (body: one sentence, 100 chars max). Output only the comment body without quotes or prefixes. If redirecting, you may append exactly one redirect tag on a new line; the tag does not count toward the sentence or character limit.\n\n"
             f"{mention_instruction}"
             "[Original Post]\n"
             f"Author: {author_name}\n"
@@ -467,13 +471,21 @@ def _generate_moment_comment(commenter_id, post_author_id, post_content, is_ment
         if text:
             text = text.strip().strip('"\'')
             text, _, directive = process_agent_actions(commenter_id, text, user_id or get_current_user_id())
-            if directive:
-                uid = user_id or get_current_user_id()
-                _d, _cid, _txt = directive, commenter_id, text
-                def _bg(): set_background_user(uid); _execute_directive(_d, _cid, _txt)
-                threading.Thread(target=_bg, daemon=True).start()
             if len(text) > 200:
                 text = text[:200]
+            text = clean_moments_agent_instructions(text)
+
+            author_ref = "用户" if post_author_id == "user" else author_name
+            mem_ctx = f"看到{author_ref}的朋友圈：「{post_content[:100]}」。你评论说：「{text}」。"
+            append_moment_event_to_short_memory(commenter_id, mem_ctx, user_id=user_id)
+
+            if directive:
+                uid = user_id or get_current_user_id()
+                _d = dict(directive, source_scene="moments")
+                _cid = commenter_id
+                _txt = f"朋友圈原文：{post_content}\n你的评论：{text}"
+                def _bg(): set_background_user(uid); _execute_directive(_d, _cid, _txt)
+                threading.Thread(target=_bg, daemon=True).start()
 
             # (底层不再自动写入记忆，由调用方统一处理)
             return text
@@ -509,27 +521,27 @@ def _generate_moment_reply_to_user(author_char_id, post_content, user_comment, u
         sys_prompt = build_system_prompt(author_char_id, include_global_format=False, recent_messages=recent_messages, user_id=user_id)
 
     lang = get_ai_language(author_char_id, user_id=user_id)
-    now = datetime.now()
+    now = _character_now(author_char_id, user_id=user_id)
     if lang == "zh":
         user_msg = (
             f"当前时间：{now.strftime('%Y-%m-%d %H:%M %A')}\n"
             f"你在朋友圈发了这条内容：\n{post_content}\n\n"
             f"用户评论说：「{user_comment}」\n\n"
-            f"请以你的身份回复一条简短评论（一句话，100字以内）。只输出回复内容，不要引号或前缀。你也可以在回复中 @其他角色。"
+            f"请以你的身份回复一条简短评论（正文一句话，100字以内）。只输出回复正文，不要引号或前缀。你也可以在回复中 @其他角色；若需要转向，可在正文后另起一行附加一个转向标签，标签不计入句数和字数。"
         )
     elif lang == "en":
         user_msg = (
             f"Current time: {now.strftime('%Y-%m-%d %H:%M %A')}\n"
             f"You posted this on Moments: \n{post_content}\n\n"
             f"User commented: \"{user_comment}\"\n\n"
-            "Please reply with a short comment (one sentence, 100 chars max) in character. Output only the reply, without quotes or prefixes. You can also @ mention other characters."
+            "Reply in character with a short body (one sentence, 100 chars max), without quotes or prefixes. You may @ mention characters. If redirecting, append exactly one redirect tag on a new line; the tag does not count toward the sentence or character limit."
         )
     else:
         user_msg = (
             f"現在時刻：{now.strftime('%Y-%m-%d %H:%M %A')}\n"
             f"あなたの朋友圈投稿：\n{post_content}\n\n"
             f"ユーザーのコメント：「{user_comment}」\n\n"
-            f"あなたの立場で短い返信を一言（100文字以内）で書いてください。返信の内容だけを出力し、引用符や接頭辞は不要です。必要に応じて他のキャラを @メンション することも可能です。"
+            f"あなたの立場で短い返信本文を一言（100文字以内）で書いてください。引用符や接頭辞は不要です。他のキャラを @メンションできます。会話を切り替える場合のみ、本文の次の行に切り替えタグを1つ追加できます。タグは文数・文字数に含みません。"
         )
     messages = [
         {"role": "system", "content": sys_prompt},
@@ -544,15 +556,20 @@ def _generate_moment_reply_to_user(author_char_id, post_content, user_comment, u
         if text:
             text = text.strip().strip('"\'')
             text, _, directive = process_agent_actions(author_char_id, text, user_id or get_current_user_id())
-            if directive:
-                uid = user_id or get_current_user_id()
-                _d, _cid, _txt = directive, author_char_id, text
-                def _bg(): set_background_user(uid); _execute_directive(_d, _cid, _txt)
-                threading.Thread(target=_bg, daemon=True).start()
             if len(text) > 200:
                 text = text[:200]
 
             text = clean_moments_agent_instructions(text)
+            mem_ctx = f"你在朋友圈发了内容：「{post_content}」。对于用户的评论「{user_comment}」，你回复说：「{text}」。"
+            append_moment_event_to_short_memory(author_char_id, mem_ctx, user_id=user_id)
+
+            if directive:
+                uid = user_id or get_current_user_id()
+                _d = dict(directive, source_scene="moments")
+                _cid = author_char_id
+                _txt = f"你的朋友圈：{post_content}\n用户评论：{user_comment}\n你的回复：{text}"
+                def _bg(): set_background_user(uid); _execute_directive(_d, _cid, _txt)
+                threading.Thread(target=_bg, daemon=True).start()
             # (底层不再自动写入记忆，由调用方统一处理)
             return text
     except Exception as e:
@@ -604,21 +621,21 @@ def _execute_directive(directive, char_id, message_text):
             # 始终以 system + user 格式构建消息，确保 Gemini 有内容可以回应
             s_msgs = [{"role": "system", "content": s_sys}]
 
-            now_dt = datetime.now()
+            character_now = _character_now(char_id, user_id=user_id)
             lang = get_ai_language(char_id, user_id=user_id)
             if lang == "zh":
                 user_msg = (
-                    f"（系统提示：现在是 {now_dt.strftime('%H:%M')}。你想跟用户说点话，请自然地发一条消息。）\n"
+                    f"（系统提示：现在是 {character_now.strftime('%H:%M')}。你想跟用户说点话，请自然地发一条消息。）\n"
                     f"（要求：简短、自然，符合你的人设。不要使用任何特殊标签。）"
                 )
             elif lang == "ja":
                 user_msg = (
-                    f"（システム通知：現在は {now_dt.strftime('%H:%M')} です。ユーザーに話したいことがあります。自然にメッセージを送ってください。）\n"
+                    f"（システム通知：現在は {character_now.strftime('%H:%M')} です。ユーザーに話したいことがあります。自然にメッセージを送ってください。）\n"
                     f"（要件：簡潔で自然、キャラクターらしく。特別なタグは使わないこと。）"
                 )
             else:
                 user_msg = (
-                    f"(System: It is {now_dt.strftime('%H:%M')}. You want to talk to the user. Send a natural message.)\n"
+                    f"(System: It is {character_now.strftime('%H:%M')}. You want to talk to the user. Send a natural message.)\n"
                     f"(Requirements: Short, natural, in character. Do not use any special tags.)"
                 )
             s_msgs.append({"role": "user", "content": user_msg})
@@ -639,7 +656,8 @@ def _execute_directive(directive, char_id, message_text):
             if s_clean:
                 s_conn2 = sqlite3.connect(s_db_path)
                 s_cursor2 = s_conn2.cursor()
-                s_cursor2.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", ("assistant", s_clean, now_dt.strftime('%Y-%m-%d %H:%M:%S')))
+                record_ts = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
+                s_cursor2.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", ("assistant", s_clean, record_ts))
                 s_conn2.commit()
                 s_conn2.close()
                 print(f"  {char_name}: {s_clean}", flush=True)
@@ -657,6 +675,7 @@ def _execute_directive(directive, char_id, message_text):
                     if d_group_id in d_gconf:
                         group_name = d_gconf[d_group_id].get("name", d_group_id)
             d_all_members = (d_gconf or {}).get(d_group_id, {}).get("members", [])
+            d_group_chat_mode = (d_gconf or {}).get(d_group_id, {}).get("group_chat_mode", "online")
             print(f"  [_execute_directive] {char_name} 发起群聊 {group_name} (id={d_group_id}), members={d_all_members}", flush=True)
 
             sync_memory_before_group_chat(d_group_id)
@@ -698,8 +717,8 @@ def _execute_directive(directive, char_id, message_text):
                     dname = "User" if r_id == "user" else get_char_name(r_id)
                     init_msgs.append({"role": "user", "content": f"[{dname}]: {row['content']}"})
 
-        init_now = datetime.now()
-        init_time_str = init_now.strftime('%H:%M')
+        character_now = _character_now(char_id, user_id=user_id)
+        init_time_str = character_now.strftime('%H:%M')
         init_lang = get_ai_language(char_id, group_id=d_group_id, user_id=user_id)
         if is_existing_group:
             if init_lang == "zh":
@@ -758,26 +777,27 @@ def _execute_directive(directive, char_id, message_text):
         if init_reply:
             d_conn = sqlite3.connect(d_db_path)
             d_cursor = d_conn.cursor()
-            d_cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", (char_id, init_reply, init_now.strftime('%Y-%m-%d %H:%M:%S')))
+            record_ts = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
+            d_cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", (char_id, init_reply, record_ts))
             d_conn.commit()
             d_conn.close()
         print(f"{'~'*50}")
 
-        # --- 其他成员多轮自动回复 ---
-        d_other = [m for m in d_all_members if m != "user"]
+        # --- 仅由被拉入成员自动回复，发起者不进入自己的回复池 ---
+        d_other = [m for m in d_all_members if m not in ("user", char_id)]
         if d_other:
-            online_other = []
-            c_conf_all = get_characters_config_for_current_user()
-            for cid in d_other:
-                cinfo = c_conf_all.get(cid, {})
-                is_sleeping = cinfo.get("deep_sleep", False)
-                member_chat_mode = cinfo.get("chat_mode", "online")
-                if member_chat_mode == "offline":
-                    is_sleeping = False
-                if not is_sleeping:
-                    online_other.append(cid)
+            def _current_available_invited_members():
+                latest_conf = get_characters_config_for_current_user()
+                return [
+                    cid for cid in d_other
+                    if is_character_available_for_group_chat(
+                        latest_conf.get(cid, {}), d_group_chat_mode
+                    )
+                ]
+
+            online_other = _current_available_invited_members()
             if not online_other:
-                print(f"  其他成员均处于深睡，跳过自动回复")
+                print(f"  所有被拉入角色当前均不可参与，保留发起者首条消息并结束")
             else:
                 MAX_ROUNDS = 5
                 decay_probs = [1.0, 0.7, 0.4, 0.2, 0.2]
@@ -786,6 +806,10 @@ def _execute_directive(directive, char_id, message_text):
                 should_stop = False
 
                 for round_i in range(MAX_ROUNDS):
+                    online_other = _current_available_invited_members()
+                    if not online_other:
+                        print(f"  所有被拉入角色已不可参与，提前结束自动回复")
+                        break
                     n_online = len(online_other)
                     k = random.randint(1, n_online) if n_online >= 2 else 1
 
@@ -810,6 +834,12 @@ def _execute_directive(directive, char_id, message_text):
                     for si, d_speaker_id in enumerate(round_speakers):
                         d_speaker_name = get_char_name(d_speaker_id)
                         try:
+                            latest_conf = get_characters_config_for_current_user()
+                            if not is_character_available_for_group_chat(
+                                latest_conf.get(d_speaker_id, {}), d_group_chat_mode
+                            ):
+                                print(f"  {d_speaker_name} 已进入深睡，跳过本轮回复")
+                                continue
                             d_conn2 = sqlite3.connect(d_db_path)
                             d_conn2.row_factory = sqlite3.Row
                             d_cursor2 = d_conn2.cursor()
@@ -847,7 +877,8 @@ def _execute_directive(directive, char_id, message_text):
 
                             d_conn3 = sqlite3.connect(d_db_path)
                             d_cursor3 = d_conn3.cursor()
-                            d_cursor3.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", (d_speaker_id, d_clean, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                            record_ts = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
+                            d_cursor3.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", (d_speaker_id, d_clean, record_ts))
                             d_conn3.commit()
                             d_conn3.close()
                             print(f"  {d_speaker_name}: {d_clean}")
@@ -879,7 +910,7 @@ def _execute_directive(directive, char_id, message_text):
                     if round_i == MAX_ROUNDS - 1:
                         print(f"  已达最大轮数 {MAX_ROUNDS}")
         else:
-            print(f"  群聊无其他成员，跳过自动回复")
+            print(f"  群聊没有被拉入的其他角色，跳过自动回复")
     except Exception as e:
         print(f"  [_execute_directive] 崩溃: {e}", flush=True)
         import traceback
@@ -934,17 +965,17 @@ def _generate_ai_reply_to_any_comment(replying_char_id, post_author_id, post_con
     # 生成系统提示：包含对 "目标评论者" 的关系
     # 朋友圈回复评论不需要全局格式规则
     if should_use_prompt_v2(replying_char_id):
-        sys_prompt = build_system_prompt_v2(replying_char_id, include_global_format=False, recent_messages=[post_content, target_comment_content], target_char_id=target_comment_author_id, user_id=user_id)
+        sys_prompt = build_system_prompt_v2(replying_char_id, include_global_format=False, recent_messages=[post_content, target_comment_content], target_char_id=target_comment_author_id, include_recent_messages=False, user_id=user_id)
     else:
         sys_prompt = build_system_prompt(replying_char_id, include_global_format=False, recent_messages=[post_content, target_comment_content], target_char_id=target_comment_author_id, user_id=user_id)
 
     lang = get_ai_language(replying_char_id, user_id=user_id)
-    now = datetime.now()
+    now = _character_now(replying_char_id, user_id=user_id)
     if lang == "zh":
         user_msg = (
             "评论互动任务\n"
             f"当前时间：{now.strftime('%Y-%m-%d %H:%M %A')}\n"
-            "你正在浏览社交软件的朋友圈，现在你需要对其中的一条评论进行「回复」。只输出回复内容，不要加引号或「回复：」等前缀。\n\n"
+            "你正在浏览社交软件的朋友圈，现在你需要对其中的一条评论进行回复。只输出回复正文，不要加引号或前缀；若需要转向，可在正文后另起一行附加一个转向标签，标签不计入句数和字数。\n\n"
             f"朋友圈原文\n"
             f"发布者：{post_author_name}\n"
             f"内容：{post_content}\n\n"
@@ -960,7 +991,7 @@ def _generate_ai_reply_to_any_comment(replying_char_id, post_author_id, post_con
         user_msg = (
             "コメント返信タスク\n"
             f"現在時刻：{now.strftime('%Y-%m-%d %H:%M %A')}\n"
-            "あなたは今、朋友圈に投稿されたあるコメントに対して「返信」をします。返信内容のみを出力し、引用符や「返信：」などは不要です。\n\n"
+            "あなたは今、朋友圈のコメントに返信します。返信本文のみを出力し、引用符や接頭辞は不要です。会話を切り替える場合のみ、本文の次の行に切り替えタグを1つ追加できます。タグは文数・文字数に含みません。\n\n"
             f"投稿原文\n"
             f"投稿者：{post_author_name}\n"
             f"内容：{post_content}\n\n"
@@ -976,7 +1007,7 @@ def _generate_ai_reply_to_any_comment(replying_char_id, post_author_id, post_con
         user_msg = (
             "[Comment Interaction Task]\n"
             f"Current time: {now.strftime('%Y-%m-%d %H:%M %A')}\n"
-            "You are browsing a social media feed and need to reply to a specific comment. Output only the content of the reply, without quotes or prefixes like 'Reply:'.\n\n"
+            "You are replying to a specific comment. Output only the reply body without quotes or prefixes. If redirecting, append exactly one redirect tag on a new line; the tag does not count toward the sentence or character limit.\n\n"
             f"[Original Post]\n"
             f"Author: {post_author_name}\n"
             f"Content: {post_content}\n\n"
@@ -1003,15 +1034,26 @@ def _generate_ai_reply_to_any_comment(replying_char_id, post_author_id, post_con
         if text:
             text = text.strip().strip('"\'')
             text, _, directive = process_agent_actions(replying_char_id, text, user_id or get_current_user_id())
-            if directive:
-                uid = user_id or get_current_user_id()
-                _d, _cid, _txt = directive, replying_char_id, text
-                def _bg(): set_background_user(uid); _execute_directive(_d, _cid, _txt)
-                threading.Thread(target=_bg, daemon=True).start()
             if len(text) > 200:
                 text = text[:200]
 
             text = clean_moments_agent_instructions(text)
+            memory_event = (
+                f"在{post_author_name}的朋友圈：「{post_content[:100]}」下，"
+                f"你回复了{target_author_name}的评论「{target_comment_content}」，你说：「{text}」。"
+            )
+            append_moment_event_to_short_memory(replying_char_id, memory_event, user_id=user_id)
+
+            if directive:
+                uid = user_id or get_current_user_id()
+                _d = dict(directive, source_scene="moments")
+                _cid = replying_char_id
+                _txt = (
+                    f"朋友圈原文：{post_content}\n目标评论：{target_comment_content}\n"
+                    f"你的回复：{text}"
+                )
+                def _bg(): set_background_user(uid); _execute_directive(_d, _cid, _txt)
+                threading.Thread(target=_bg, daemon=True).start()
             # (底层不再自动写入记忆，由调用方统一处理)
             return text
     except Exception as e:
@@ -1130,17 +1172,6 @@ def _background_generate_moment_reactions(user_id, char_id, post_ts_str, post_co
                             "content": comment_text,
                             "timestamp": comment_ts
                         })
-                        # 记录短期记忆
-                        try:
-                            from app import get_char_name
-                            def get_name_internal(cid):
-                                if cid == "user": return get_current_username()
-                                return remarks.get(cid) or get_char_name(cid) or cid
-                            author_name = get_name_internal(char_id)
-                            author_ref = "用户" if char_id == "user" else author_name
-                            mem_ctx = f"看到{author_ref}的朋友圈：「{post_content[:100]}」。你评论说：「{comment_text}」。"
-                            append_moment_event_to_short_memory(target_cid, mem_ctx)
-                        except: pass
                     else:
                         print(f"   [Moments Background] Comment generation failed for {target_cid}.")
 
@@ -1179,7 +1210,7 @@ def _background_generate_moment_reactions(user_id, char_id, post_ts_str, post_co
 
 def _generate_likes_comments_for_user_moment(post_ts_str, post_content, only_mentioned=False, user_id=None):
     """用户发朋友圈后，根据各角色亲密度随机生成点赞和评论。返回 (likers, comments)。"""
-    now = datetime.now()
+    now = beijing_now().replace(tzinfo=None)
     try:
         post_dt = datetime.strptime(post_ts_str, "%Y-%m-%d %H:%M:%S")
     except Exception:
@@ -1291,25 +1322,21 @@ def trigger_active_moments(char_id, user_id=None, instruction=None):
         except Exception:
             pass
 
-    now = datetime.now()
-    post_ts_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    character_now = _character_now(char_id, user_id=user_id)
+    post_ts_str = beijing_now().strftime("%Y-%m-%d %H:%M:%S")
     lang = get_ai_language(char_id, user_id=user_id)
 
     # 统一指令模板：直接用语言代码，AI 能理解
     trigger_msg = (
         f"[Task: Post to Moments / タスク：朋友圈投稿]\n"
-        f"Current time: {now.strftime('%Y-%m-%d %H:%M %A')}\n"
+        f"Current time: {character_now.strftime('%Y-%m-%d %H:%M %A')}\n"
         f"Post a short, natural Moments update based on current time and recent experiences. You may:\n"
         "- Text only; or\n"
         "- Photos: `[SEARCH_IMG: keyword]` tag (up to 9). Example: `[SEARCH_IMG: sunset]`\n"
         "- @mentions: Mention other characters (e.g., @Name) if you want them to engage.\n"
         "- Redirect: `[DIRECT_TO_GROUP: char1, char2]` with `+user` or `[DIRECT_TO_USER]`.\n"
-        "- Movement: Move around using:\n"
-        "\t1. `[MOVE_TO: location_id]` - Move to a known location (use when moving to a place already in your known/perceived list).\n"
-        "\t2. `[MOVE_TO_COORD: x,y]` - Move to coordinates (use when wandering around freely without a specific named location).\n"
-        "\t3. `[EXPLORE: x,y,\"name\",\"desc\"]` - Move to a new location (use when moving to a place NOT in your known/perceived list, this creates a new location).\n"
         f"\n**IMPORTANT: You MUST write this post exclusively in language code `{lang}`.**\n"
-        "Output ONLY the post content. No quotes or prefixes."
+        "Output ONLY the post body, without quotes or prefixes. If redirecting, append exactly one redirect tag on a new line; the tag is not part of the post body."
     )
 
     if instruction and instruction.strip():
@@ -1344,11 +1371,6 @@ def trigger_active_moments(char_id, user_id=None, instruction=None):
             return False
 
         content, _, directive_m = process_agent_actions(char_id, content, user_id or get_current_user_id())
-        if directive_m:
-            uid = user_id or get_current_user_id()
-            _d, _cid, _txt = directive_m, char_id, content
-            def _bg(): set_background_user(uid); _execute_directive(_d, _cid, _txt)
-            threading.Thread(target=_bg, daemon=True).start()
 
         # --- 朋友圈媒体标签解析 ---
         content = process_moments_media_tags(content, char_id, user_id=user_id or get_current_user_id())
@@ -1384,14 +1406,6 @@ def trigger_active_moments(char_id, user_id=None, instruction=None):
                     "content": comment_text,
                     "timestamp": post_ts_str
                 })
-                try:
-                    def get_name_internal(cid):
-                        if cid == "user": return get_current_username()
-                        return remarks.get(cid) or get_char_name(cid) or cid
-                    author_name = get_name_internal(char_id)
-                    mem_ctx = f"在{author_name}的朋友圈：「{content[:100]}」下，你评论说：「{comment_text}」。"
-                    append_moment_event_to_short_memory(mid, mem_ctx)
-                except: pass
 
     new_post = {
         "char_id": char_id,
@@ -1416,7 +1430,17 @@ def trigger_active_moments(char_id, user_id=None, instruction=None):
 
     # 记录发帖者记忆
     ctx = f"你发了一条朋友圈，内容：「{(content or '')[:300]}」。"
-    append_moment_event_to_short_memory(char_id, ctx, user_id=user_id)
+    append_moment_event_to_short_memory(
+        char_id, ctx, user_id=user_id, timestamp_str=post_ts_str
+    )
+
+    # 朋友圈事件已落库并写入短期记忆后，才允许切换到单聊或群聊。
+    if directive_m:
+        uid = user_id or get_current_user_id()
+        _d = dict(directive_m, source_scene="moments")
+        _cid, _txt = char_id, content
+        def _bg(): set_background_user(uid); _execute_directive(_d, _cid, _txt)
+        threading.Thread(target=_bg, daemon=True).start()
 
     # 更新上次发帖时间
     last_post = {}
@@ -1442,7 +1466,12 @@ def trigger_active_moments(char_id, user_id=None, instruction=None):
 @moments_bp.route("/moments")
 def moments_view():
     from app import get_ai_language
-    return render_template("moments.html", ai_lang=get_ai_language())
+    from core.time_utils import get_user_timezone
+    return render_template(
+        "moments.html",
+        ai_lang=get_ai_language(),
+        user_timezone=get_user_timezone(_load_user_settings()),
+    )
 
 
 @moments_bp.route("/api/moments/active_enabled", methods=["GET"])
@@ -1552,7 +1581,7 @@ def get_moments_related_characters():
 def get_moments():
     """朋友圈列表。数据格式：char_id, content, timestamp, liker_ids, comments (commenter_id, content, timestamp)。评论时间大于当前时间的不返回。"""
     user_id = get_current_user_id()
-    now = datetime.now()
+    now = beijing_now().replace(tzinfo=None)
     # 分页参数：默认第 1 页，每页 10 条
     try:
         page = int(request.args.get("page", 1))
@@ -1662,7 +1691,7 @@ def moments_like():
     # 幂等：仅当用户尚未点赞时才添加
     already_liked = any(l.get("liker_id") == "user" for l in likers) or ("user" in post.get("liker_ids", []))
     if not already_liked:
-        likers.append({"liker_id": "user", "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+        likers.append({"liker_id": "user", "timestamp": beijing_now().strftime("%Y-%m-%d %H:%M:%S")})
         post["likers"] = likers
         raw[idx] = post
         safe_save_json(moments_path, raw)
@@ -1750,7 +1779,7 @@ def moments_comment():
     if idx is None:
         return jsonify({"error": "未找到该条朋友圈"}), 404
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = beijing_now().strftime("%Y-%m-%d %H:%M:%S")
     comments = post.get("comments", [])
     comments.append({"commenter_id": "user", "content": content, "timestamp": now})
     post["comments"] = comments
@@ -1771,9 +1800,6 @@ def moments_comment():
             raw[idx] = post
             safe_save_json(moments_path, raw)
             replied_ids.add(author_char_id)
-            # 记录记忆
-            ctx = f"你在朋友圈发了内容：「{post_content}」。对于用户的评论「{content}」，你回复说：「{reply_text}」。"
-            append_moment_event_to_short_memory(author_char_id, ctx)
 
     # 处理评论中的 @ 提及（支持 name、remark、cid 三种标识）
     name_to_id = _get_moments_name_to_id()
@@ -1795,10 +1821,6 @@ def moments_comment():
                 raw[idx] = post
                 safe_save_json(moments_path, raw)
                 replied_ids.add(m_id)
-                # 记录记忆
-                author_name = (chars_config.get(author_char_id, {}).get("remark") or chars_config.get(author_char_id, {}).get("name") or author_char_id) if author_char_id != "user" else "用户"
-                ctx = f"在{author_name}的朋友圈：「{post_content}」下，你被提及并评论说：「{ai_comment}」。"
-                append_moment_event_to_short_memory(m_id, ctx)
 
     return jsonify({"status": "success", "comment": {"commenter_id": "user", "content": content, "timestamp": now}})
 
@@ -1846,7 +1868,7 @@ def moments_comment_regenerate():
 
     post_author_id = post.get("char_id", "")
     post_content = post.get("content", "")
-    old_ts = old_comment.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    old_ts = old_comment.get("timestamp", beijing_now().strftime("%Y-%m-%d %H:%M:%S"))
     reply_to = old_comment.get("reply_to")
 
     new_text = None
@@ -1955,7 +1977,10 @@ def moments_memory_regenerate():
 
         ctx = f"你发了一条朋友圈，内容：「{post_content}」。"
 
-    append_moment_event_to_short_memory(target_id, ctx)
+    memory_ts = comment.get("timestamp") if comment_index is not None else timestamp_str
+    append_moment_event_to_short_memory(
+        target_id, ctx, user_id=user_id, timestamp_str=memory_ts
+    )
     return jsonify({"status": "success", "char_id": target_id})
 
 
@@ -2074,7 +2099,7 @@ def moments_user_reply_to_comment():
     if target_commenter_id == "user":
         return jsonify({"error": "不能回复自己的评论"}), 400
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = beijing_now().strftime("%Y-%m-%d %H:%M:%S")
 
     # 1. 保存用户的回复
     user_comment_obj = {
@@ -2106,9 +2131,6 @@ def moments_user_reply_to_comment():
         }
         comments.append(ai_reply_obj)
 
-        # 记录朋友圈记忆
-        memory_event = f"在朋友圈回复了用户的回复：{ai_reply_text}"
-        append_moment_event_to_short_memory(target_commenter_id, memory_event)
 
     post["comments"] = comments
     raw[idx] = post
@@ -2124,9 +2146,13 @@ def moments_user_post():
     - content: 文字内容
     - images: 文件列表
     """
-    from app import get_model_config, call_openrouter, get_effective_gemini_key
-    from blueprints.media import _compress_chat_image_to_jpg
+    from blueprints.media import (
+        _compress_chat_image_to_jpg,
+        _generate_image_description,
+        _public_base_url,
+    )
     from cos_utils import upload_to_cos
+    from services.image_tags import normalize_image_description
 
     user_id = get_current_user_id()
     if not user_id:
@@ -2139,8 +2165,38 @@ def moments_user_post():
         return jsonify({"error": "内容或图片不能为空"}), 400
     if content and len(content) > 2000:
         return jsonify({"error": "发帖内容不得超过2000字"}), 400
+    if len(files) > 9:
+        return jsonify({"error": "朋友圈最多上传9张图片"}), 400
 
-    now_dt = datetime.now()
+    raw_metadata = request.form.get("image_metadata")
+    if raw_metadata:
+        try:
+            image_metadata = json.loads(raw_metadata)
+        except (TypeError, ValueError):
+            return jsonify({"error": "图片描述信息格式无效"}), 400
+        if not isinstance(image_metadata, list) or len(image_metadata) != len(files):
+            return jsonify({"error": "图片与描述信息数量不一致"}), 400
+    else:
+        # 兼容旧客户端：没有元数据时沿用 AI 识图。
+        image_metadata = [{"mode": "ai", "description": ""} for _ in files]
+
+    normalized_metadata = []
+    for item in image_metadata:
+        if not isinstance(item, dict):
+            return jsonify({"error": "图片描述信息格式无效"}), 400
+        mode = str(item.get("mode") or "ai").strip().lower()
+        if mode not in {"ai", "manual"}:
+            return jsonify({"error": "图片描述方式无效"}), 400
+        try:
+            description = (
+                normalize_image_description(item.get("description"))
+                if mode == "manual" else ""
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        normalized_metadata.append({"mode": mode, "description": description})
+
+    now_dt = beijing_now()
     now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
 
     image_data_list = []
@@ -2152,15 +2208,10 @@ def moments_user_post():
         # 3. 上传 COS
         # 4. 清理临时文件
 
-        # 识图模型配置
-        route, current_model = get_model_config("vision")
-        vision_prompt = "请用中文简要描述这张图片的内容，直接描述你看到了什么，不用过多主观判断。"
-
-        for file in files:
+        for file_index, file in enumerate(files):
             if not file or file.filename == "":
                 continue
 
-            ext = os.path.splitext(file.filename)[1].lower() or ".jpg"
             base_name = uuid.uuid4().hex
             tmp_dir = os.path.join(BASE_DIR, "tmp")
             os.makedirs(tmp_dir, exist_ok=True)
@@ -2169,73 +2220,20 @@ def moments_user_post():
             file.save(tmp_raw_path)
 
             compressed_path = os.path.join(tmp_dir, f"{base_name}.jpg")
+            public_file_path = None
             try:
                 # 压缩
                 _compress_chat_image_to_jpg(tmp_raw_path, compressed_path, max_edge=1024, max_bytes=500 * 1024)
-
-                # 为识图模型准备临时公网 URL (复用 static/uploads)
-                static_upload_dir = os.path.join(BASE_DIR, "static", "uploads")
-                os.makedirs(static_upload_dir, exist_ok=True)
-                public_filename = f"tmp_vision_{base_name}.jpg"
-                public_file_path = os.path.join(static_upload_dir, public_filename)
-                shutil.copy2(compressed_path, public_file_path)
-
-                def _get_public_url(filename):
-                    configured = (os.getenv("PUBLIC_BASE_URL", "") or os.getenv("SITE_URL", "")).strip()
-                    if configured:
-                        parsed = urlparse(configured)
-                        base = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else configured.rstrip("/")
-                    else:
-                        forwarded_proto = (request.headers.get("X-Forwarded-Proto") or request.scheme or "https").split(",")[0].strip()
-                        forwarded_host = (request.headers.get("X-Forwarded-Host") or request.headers.get("Host") or "").split(",")[0].strip()
-                        base = f"{forwarded_proto}://{forwarded_host}" if forwarded_host else request.host_url.rstrip("/")
-                    return f"{base}/static/uploads/{filename}"
-
-                public_image_url = _get_public_url(public_filename)
-
-                # 识图
-                import requests as req_lib
-                description = ""
-                try:
-                    if route == "relay":
-                        messages = [{
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": vision_prompt},
-                                {"type": "image_url", "image_url": {"url": public_image_url}}
-                            ]
-                        }]
-                        description = call_openrouter(messages, char_id=None, model_name=current_model)
-                    else:
-                        base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
-                        url = f"{base_url}/v1beta/models/{current_model}:generateContent?key={get_effective_gemini_key()}"
-                        payload = {
-                            "contents": [{
-                                "role": "user",
-                                "parts": [
-                                    {"text": vision_prompt},
-                                    {"file_data": {"mime_type": "image/jpeg", "file_uri": public_image_url}}
-                                ]
-                            }],
-                            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 4096},
-                            "safetySettings": [
-                                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-                            ]
-                        }
-                        r = req_lib.post(url, json=payload, timeout=60)
-                        if r.status_code == 200:
-                            result = r.json()
-                            finish_reason = (result.get("candidates") or [{}])[0].get("finishReason")
-                            if finish_reason and finish_reason != "STOP":
-                                print(f"   [Vision] Gemini finishReason={finish_reason} (可能被截断)")
-                            parts = (((result.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
-                            description = "".join([p.get("text", "") for p in parts]).strip()
-                except Exception as ve:
-                    print(f"Vision error for {file.filename}: {ve}")
-                    description = "图片描述生成失败"
+                metadata = normalized_metadata[file_index]
+                description = metadata["description"]
+                if metadata["mode"] == "ai":
+                    static_upload_dir = os.path.join(BASE_DIR, "static", "uploads")
+                    os.makedirs(static_upload_dir, exist_ok=True)
+                    public_filename = f"tmp_vision_{base_name}.jpg"
+                    public_file_path = os.path.join(static_upload_dir, public_filename)
+                    shutil.copy2(compressed_path, public_file_path)
+                    public_image_url = f"{_public_base_url()}/static/uploads/{public_filename}"
+                    description = _generate_image_description(public_image_url)
 
                 # 上传 COS
                 # 路径规则：users/<user_id>/moments/<YYYYMM>/<timestamp_uuid>.png
@@ -2244,14 +2242,21 @@ def moments_user_post():
                 cos_path = f"users/{user_id}/moments/{yyyymm}/{cos_filename}"
 
                 cos_url = upload_to_cos(compressed_path, cos_path)
-                if cos_url:
-                    # 按照要求格式存储：[图片](<年月>/文件名)(AI生成的描述语)
-                    image_data_list.append(f"[图片]({yyyymm}/{cos_filename})({description})")
+                if not cos_url:
+                    raise RuntimeError("图片上传失败")
+                image_data_list.append(build_image_tag(f"{yyyymm}/{cos_filename}", description))
 
             except Exception as e:
                 print(f"Process image error: {e}")
+                status_code = 502 if normalized_metadata[file_index]["mode"] == "ai" else 400
+                message = "AI识图失败，请改用手动描述" if status_code == 502 else f"图片处理失败: {e}"
+                return jsonify({
+                    "error": message,
+                    "code": "vision_failed" if status_code == 502 else "image_processing_failed",
+                    "image_index": file_index,
+                }), status_code
             finally:
-                if 'public_file_path' in dir() and os.path.exists(public_file_path): os.remove(public_file_path)
+                if public_file_path and os.path.exists(public_file_path): os.remove(public_file_path)
                 if os.path.exists(tmp_raw_path): os.remove(tmp_raw_path)
                 if os.path.exists(compressed_path): os.remove(compressed_path)
 
@@ -2296,12 +2301,6 @@ def moments_user_post():
     raw.append(new_post)
     safe_save_json(moments_path, raw)
 
-    # 触发 AI 角色感知：记录同步回复的短期记忆
-    for c in new_post.get("comments", []):
-        cid = c.get("commenter_id")
-        if cid and cid != "user":
-            ctx = f"看到用户的朋友圈：「{final_content[:100]}」。你评论说：「{c.get('content', '')}」。"
-            append_moment_event_to_short_memory(cid, ctx)
 
     # 启动后台任务：处理其余非 @ 角色的随机互动
     _background_generate_moment_reactions(user_id, "user", now_str, final_content, mentioned_ids=mentioned_ids)
@@ -2359,6 +2358,7 @@ def moments_regenerate():
         post["likers"] = likers
         post["comments"] = comments
     else:
+        directive_m = None
         try:
             ok, err = sync_memory_before_moments(char_id)
             if not ok:
@@ -2373,7 +2373,7 @@ def moments_regenerate():
             base_system_prompt = build_system_prompt(char_id, include_global_format=False, recent_messages=None, include_long_memory=False, user_id=user_id)
 
         lang = get_ai_language(char_id, user_id=user_id)
-        now = datetime.now()
+        now = _character_now(char_id, user_id=user_id)
         if lang == "zh":
             trigger_msg = (
                 f"任务：发朋友圈\n"
@@ -2385,16 +2385,12 @@ def moments_regenerate():
                 "\t2. 多图：你可以根据需要连续使用多个标签来发布多张照片（最多9张）。\n"
                 "\t示例：`今天训练真累 [SEARCH_IMG: 足球场][SEARCH_IMG: 运动饮料]`\n"
                 "- 如果你希望某位角色看到并评论这条朋友圈，可以在文中 @对方（如 @洁世一 或 @isagi）。被提及的角色会对此进行互动。\n"
-                "- 移动位置（如果你正在移动或前往某个地方）：\n"
-                "\t1. `[MOVE_TO: 地点ID]` - 移动到已知地点（移动到你的认知或附近感知中已有的地点时使用）。\n"
-                "\t2. `[MOVE_TO_COORD: x,y]` - 移动到指定坐标（用于随便探索或没有具体命名地点的空白区域）。\n"
-                "\t3. `[EXPLORE: x,y,\"名称\",\"描述\"]` - 前往并开辟新地点（移动到认知和感知中没有的地点时使用，系统会自动建立新地点）。\n"
                 "- 对话转向（强烈推荐！跟谁聊得来就拉谁一起聊——大胆用！）\n"
                 "\t- 拉人建群：想和朋友/其他角色一起聊？把对方拉进群！`[DIRECT_TO_GROUP: 角色1, 角色2]`， 不要写用户名字到成员里，用末尾 `+user` 表示用户也在场。自定义群名：`[DIRECT_TO_GROUP: 群名 | 角色1, 角色2]`。\n"
                 "\t- 切回单聊：想和用户单独聊？切回私聊！`[DIRECT_TO_USER]`（无需参数）。\n"
                 "\t- 放心输出：这些标签对用户不可见，直接在末尾另起一行输出即可。\n\n"
                 "注意事项\n"
-                "1. 只输出这一条朋友圈的内容，不要加引号、不要加「朋友圈：」等前缀。\n"
+                "1. 只输出朋友圈正文，不要加引号或前缀；若要转向，只可在正文后另起一行附加一个转向标签，标签不属于正文。\n"
                 f"2. 你的语言设定为 {lang}，请务必使用该语言发布。"
             )
         elif lang == "ja":
@@ -2408,16 +2404,12 @@ def moments_regenerate():
                 "\t2. 複数写真：複数の写真（0-9枚）を投稿する場合は、複数のタグを並べてください。\n"
                 "\t例：`[SEARCH_IMG: 夕焼け][SEARCH_IMG: サッカーボール]`\n"
                 "- 投稿を特定のキャラクター（例：@潔世一 または @isagi）に見てほしい場合は、文中でメンションしてください。\n"
-                "- 位置移動（移動中やどこかに行く場合）：\n"
-                "\t1. `[MOVE_TO: 地点ID]` - 既知の地点への移動（自分の認知または周辺知覚にすでにある地点に移動する場合に使用）。\n"
-                "\t2. `[MOVE_TO_COORD: x,y]` - 座標指定での単純移動（名前のない任意の場所に移動したり、自由に探索する場合に使用）。\n"
-                "\t3. `[EXPLORE: x,y,\"名称\",\"説明\"]` - 未知の地点を開拓して移動（自分の認知や周辺知覚にない新規地点を作成して移動する場合に使用）。\n"
                 "- 会話切り替え（強く推奨！気が合う相手をどんどんグループに呼ぼう！）\n"
                 "\t- グループ作成：友達や他のキャラクターと話したい？すぐにグループに呼ぼう！`[DIRECT_TO_GROUP: キャラ1, キャラ2]`、 メンバーにユーザー名を直接書かず、末尾 `+user` でユーザーも参加。カスタム名：`[DIRECT_TO_GROUP: グループ名 | キャラ1]`。\n"
                 "\t- 個別チャットに戻る：ユーザーと二人で話したい？個別チャットに戻ろう！`[DIRECT_TO_USER]`（引数不要）。\n"
                 "\t- 遠慮なく：タグはユーザーに見えないので、末尾に改行して自由に出力しよう。\n\n"
                 "注意事項\n"
-                "1. 投稿内容のみを出力し、余計な説明や「朋友圈：」のような接頭辞は不要です。\n"
+                "1. 投稿本文のみを出力し、引用符や接頭辞は不要です。会話を切り替える場合のみ、本文の次の行に切り替えタグを1つ追加できます。タグは本文に含みません。\n"
                 f"2. 指定言語は {lang} です。必ずその言語で投稿してください。"
             )
         else:
@@ -2431,16 +2423,12 @@ def moments_regenerate():
                 "\t2. Multiple photos: You can use multiple tags (0-9).\n"
                 "\tExample: `[SEARCH_IMG: sunset][SEARCH_IMG: soccer]`\n"
                 "- Mention other characters (e.g., @Isagi) if you want them to see and comment.\n"
-                "- Movement (if you are moving or going somewhere):\n"
-                "\t1. `[MOVE_TO: location_id]` - Move to a known location (use when moving to a place already in your known/perceived list).\n"
-                "\t2. `[MOVE_TO_COORD: x,y]` - Move to coordinates (use when wandering around freely without a specific named location).\n"
-                "\t3. `[EXPLORE: x,y,\"name\",\"desc\"]` - Move to a new location (use when moving to a place NOT in your known/perceived list, this creates a new location).\n"
                 "- Chat Redirection (strongly recommended! Pull in whoever you vibe with — don't hesitate!):\n"
                 "\t- Create group: Want to chat with friends/other characters? Pull them in! `[DIRECT_TO_GROUP: char1, char2]`,  append `+user` to include user. Custom name: `[DIRECT_TO_GROUP: GroupName | char1, char2]`.\n"
                 "\t- Return to solo chat: Want to talk to the user privately? Go solo! `[DIRECT_TO_USER]` (no parameters).\n"
                 "\t- Feel free: These tags are invisible to users — just output on a new line at the end.\n\n"
                 "[Notes]\n"
-                "1. Output ONLY the post content. No quotes or prefixes.\n"
+                "1. Output only the post body without quotes or prefixes. If redirecting, append exactly one redirect tag on a new line; the tag is not part of the body.\n"
                 f"2. Your assigned language is {lang}. Please post in this language."
             )
 
@@ -2462,12 +2450,6 @@ def moments_regenerate():
                 content = content.strip().strip('"\'')
                 if content:
                     content, _, directive_m = process_agent_actions(char_id, content, user_id or get_current_user_id())
-                    if directive_m:
-                        uid = user_id or get_current_user_id()
-                        _d, _cid, _txt = directive_m, char_id, content
-                        def _bg(): set_background_user(uid); _execute_directive(_d, _cid, _txt)
-                        threading.Thread(target=_bg, daemon=True).start()
-
                     # --- 重新生成也需要解析媒体标签 ---
                     content = process_moments_media_tags(content, char_id, user_id=user_id or get_current_user_id())
                     content = clean_moments_agent_instructions(content)
@@ -2500,12 +2482,6 @@ def moments_regenerate():
                                     "content": comment_text,
                                     "timestamp": timestamp_str
                                 })
-                                # 记录记忆
-                                try:
-                                    author_name = remarks.get(char_id) or get_char_name(char_id) or char_id
-                                    mem_ctx = f"在{author_name}的朋友圈：「{content[:100]}」下，你评论说：「{comment_text}」。"
-                                    append_moment_event_to_short_memory(mid, mem_ctx)
-                                except: pass
 
                         # 触发后台互动（为其补充非 @ 角色的互动）
                         user_id = get_current_user_id()
@@ -2516,6 +2492,18 @@ def moments_regenerate():
 
         raw[idx] = post
         safe_save_json(moments_path, raw)
+
+        # 重新生成后的朋友圈先写入短期记忆，再执行转向。
+        if directive_m:
+            ctx = f"你重新发布了一条朋友圈，内容：「{(post.get('content') or '')[:300]}」。"
+            append_moment_event_to_short_memory(
+                char_id, ctx, user_id=user_id, timestamp_str=timestamp_str
+            )
+            uid = user_id or get_current_user_id()
+            _d = dict(directive_m, source_scene="moments")
+            _cid, _txt = char_id, post.get("content", "")
+            def _bg(): set_background_user(uid); _execute_directive(_d, _cid, _txt)
+            threading.Thread(target=_bg, daemon=True).start()
     return jsonify({"status": "success"})
 
 

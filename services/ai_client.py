@@ -24,6 +24,16 @@ from core.utils import get_effective_gemini_key, get_effective_openrouter_key
 API_CONFIG_FILE = os.path.join(BASE_DIR, "configs", "api_settings.json")
 
 
+class AIResponseText(str):
+    """String-compatible response carrying transport completeness metadata."""
+
+    def __new__(cls, value, *, complete=True, finish_reason=""):
+        obj = super().__new__(cls, value or "")
+        obj.complete = bool(complete)
+        obj.finish_reason = finish_reason or ""
+        return obj
+
+
 def _write_user_log(user_id, text):
     if user_id:
         log_dir = os.path.join(USERS_ROOT, str(user_id), "logs")
@@ -178,7 +188,14 @@ def get_relay_provider(user_id=None):
         return "old"
 
 
-def call_openrouter(messages, char_id="unknown", model_name="gpt-3.5-turbo", user_id=None, max_tokens=4096):
+def call_openrouter(
+    messages,
+    char_id="unknown",
+    model_name="gpt-3.5-turbo",
+    user_id=None,
+    max_tokens=4096,
+    temperature=1,
+):
     user_agents = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -227,7 +244,7 @@ def call_openrouter(messages, char_id="unknown", model_name="gpt-3.5-turbo", use
     payload = {
         "model": model_name,
         "messages": final_messages,
-        "temperature": 1,
+        "temperature": temperature,
         "max_tokens": max_tokens
     }
 
@@ -343,7 +360,11 @@ def call_openrouter(messages, char_id="unknown", model_name="gpt-3.5-turbo", use
 
         if _uid:
             reset_route_success(_uid, "relay")
-        return content
+        return AIResponseText(
+            content,
+            complete=not finish_reason or finish_reason == "stop",
+            finish_reason=finish_reason,
+        )
 
     except requests.exceptions.Timeout:
         return "（系统提示：连接 AI 服务器超时，对方思考得太久了，请稍后重试。）"
@@ -352,10 +373,16 @@ def call_openrouter(messages, char_id="unknown", model_name="gpt-3.5-turbo", use
         return "（系统提示：网络链路不稳定，请稍后再试。）"
 
 
-def call_gemini(messages, char_id="unknown", model_name="gemini-2.0-flash", user_id=None):
+def call_gemini(
+    messages,
+    char_id="unknown",
+    model_name="gemini-2.0-flash",
+    user_id=None,
+    temperature=1,
+):
     base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
     api_key = get_effective_gemini_key(user_id=user_id)
-    url = f"{base_url}/v1beta/models/{model_name}:generateContent?key={api_key}"
+    url = f"{base_url}/v1beta/models/{model_name}:generateContent"
 
     gemini_contents = []
     system_parts = []
@@ -373,13 +400,14 @@ def call_gemini(messages, char_id="unknown", model_name="gemini-2.0-flash", user
 
     headers = {
         "Content-Type": "application/json",
+        "x-goog-api-key": api_key,
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
     }
 
     payload = {
         "contents": gemini_contents,
         "generationConfig": {
-            "temperature": 1,
+            "temperature": temperature,
             "maxOutputTokens": 4096
         },
         "safetySettings": [
@@ -393,7 +421,7 @@ def call_gemini(messages, char_id="unknown", model_name="gemini-2.0-flash", user
         payload["systemInstruction"] = system_instruction
 
     import time
-    max_retries = 2
+    max_retries = 3
     r = None
 
     clear_circuit_breaker_info()
@@ -411,8 +439,9 @@ def call_gemini(messages, char_id="unknown", model_name="gemini-2.0-flash", user
             if r.status_code == 200:
                 break
 
-            # 如果是临时服务载荷过载 (503), 超时 (504) 或内部服务器错误 (500)
-            if r.status_code in [500, 503, 504]:
+            # 429 is often a short per-minute burst limit.  Memory generation
+            # is safe to retry because it commits only after a complete result.
+            if r.status_code in [429, 500, 503, 504]:
                 if attempt < max_retries - 1:
                     sleep_time = min(8, 2 ** attempt)
                     print(f"⚠️ [Gemini {r.status_code}] 谷歌服务端临时故障。第 {attempt+1}/{max_retries} 次尝试失败，{sleep_time} 秒后自动重试...")
@@ -452,10 +481,10 @@ def call_gemini(messages, char_id="unknown", model_name="gemini-2.0-flash", user
         except Exception as e:
             if attempt < max_retries - 1:
                 sleep_time = min(8, 2 ** attempt)
-                print(f"⚠️ [Gemini Exception] 未知连接异常: {e}。第 {attempt+1}/{max_retries} 次尝试失败，{sleep_time} 秒后自动重试...")
+                print(f"⚠️ [Gemini Exception] {type(e).__name__}。第 {attempt+1}/{max_retries} 次尝试失败，{sleep_time} 秒后自动重试...")
                 time.sleep(sleep_time)
                 continue
-            print(f"🔥 [Gemini 未知异常]: {e}")
+            print(f"🔥 [Gemini 未知异常]: {type(e).__name__}")
             return "（系统提示：网络连接波动，请稍后再试。）"
 
     # 如果成功获取到了 200 响应
@@ -489,7 +518,11 @@ def call_gemini(messages, char_id="unknown", model_name="gemini-2.0-flash", user
 
         try:
             if 'content' in candidate and 'parts' in candidate['content']:
-                text = candidate['content']['parts'][0]['text']
+                text = "".join(
+                    str(part.get("text", ""))
+                    for part in candidate['content']['parts']
+                    if isinstance(part, dict) and part.get("text") is not None
+                )
             else:
                 finish_reason = candidate.get('finishReason', 'UNKNOWN')
                 text = f"（由于系统限制，AI 无法生成此段对话。原因: {finish_reason}）"
@@ -501,7 +534,12 @@ def call_gemini(messages, char_id="unknown", model_name="gemini-2.0-flash", user
 
         if _uid:
             reset_route_success(_uid, "gemini")
-        return text
+        finish_reason = candidate.get('finishReason', '')
+        return AIResponseText(
+            text,
+            complete=not finish_reason or finish_reason == "STOP",
+            finish_reason=finish_reason,
+        )
 
 
 def get_model_config(task_type="chat", user_id=None):
@@ -518,6 +556,8 @@ def get_model_config(task_type="chat", user_id=None):
         api_cfg_file = API_CONFIG_FILE
 
     if not os.path.exists(api_cfg_file):
+        if task_type == "call":
+            return "relay", "gemini-3.6-flash"
         return "relay", "gpt-3.5-turbo"
 
     try:
@@ -528,6 +568,8 @@ def get_model_config(task_type="chat", user_id=None):
         models = config.get("routes", {}).get(route, {}).get("models", {})
         if task_type == "moments" and "moments" not in models:
             model_name = models.get("chat", "gpt-3.5-turbo")
+        elif task_type == "call" and "call" not in models:
+            model_name = "gemini-3.6-flash"
         elif task_type == "translation" and "translation" not in models:
             model_name = models.get("chat", "gpt-3.5-turbo")
         elif task_type == "summary" and "summary" not in models:
@@ -539,4 +581,6 @@ def get_model_config(task_type="chat", user_id=None):
 
         return route, model_name
     except:
+        if task_type == "call":
+            return "gemini", "gemini-3.6-flash"
         return "gemini", "gemini-2.5-pro"

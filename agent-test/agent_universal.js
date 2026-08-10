@@ -73,20 +73,31 @@ function cleanupState(userId) {
 
 // ==================== API 调用 ====================
 
-async function chatViaCharApi(snapshot, charId, userId, cookieString) {
+async function chatViaCharApi(snapshot, charId, userId, cookieString, lastActionResult = null) {
     // 用 WEB_CRUISE 包裹页面快照，作为 user 消息发给 chat_v2
     // chat_v2 自带人设加载 + 存库，前端自动渲染"正在阅读"cruise-row
     let msg = `[WEB_CRUISE:${snapshot.url}]\n【当前页面文本】\n${snapshot.text}\n`;
     if (snapshot.inputs) msg += `\n【可用的输入框】\n${snapshot.inputs}\n`;
     if (snapshot.buttons) msg += `\n【可点击的按钮/链接】\n${snapshot.buttons}\n`;
+    if (lastActionResult) {
+        msg += `\n【上一轮浏览器操作结果】\n`;
+        msg += `指令：${lastActionResult.command}\n`;
+        msg += `状态：${lastActionResult.success ? '成功' : '失败'}\n`;
+        msg += `说明：${lastActionResult.message}\n`;
+    }
     msg += `\n请根据你的性格和当前页面内容，自然地和用户交谈，并在回复末尾附带网页操作指令:\n`;
-    msg += `1. [CLICK:文本或选择器] - 点击页面元素\n`;
-    msg += `2. [TYPE:输入框描述|文本内容] - 在输入框输入内容\n`;
-    msg += `3. [GOTO:URL] - 跳转到新网址\n`;
-    msg += `4. [BACK] - 返回上一页\n`;
-    msg += `5. [FINISH] - 任务完成\n`;
-    msg += `6. [ASK:问题内容] - 暂停操作，向用户提问，等待回复后继续\n`;
-    msg += `7. [WAIT] - 暂停操作，等待用户后续指令\n`;
+    msg += `1. [CLICK_REF:元素编号] - 点击快照中的指定元素（优先使用）\n`;
+    msg += `2. [CLICK:纯文字] - 按文字点击页面元素（仅在没有元素编号时使用）\n`;
+    msg += `3. [TYPE:输入框描述|文本内容] - 在输入框输入内容\n`;
+    msg += `4. [GOTO:URL] - 跳转到新网址\n`;
+    msg += `5. [BACK] - 返回上一页\n`;
+    msg += `6. [FINISH] - 任务完成\n`;
+    msg += `7. [ASK:问题内容] - 暂停操作，向用户提问，等待回复后继续\n`;
+    msg += `8. [WAIT] - 暂停操作，等待用户后续指令\n`;
+    msg += `\n【重要操作规则】\n`;
+    msg += `- 每轮只能输出一个网页操作指令。\n`;
+    msg += `- 页面需要分步骤操作时，只执行当前第一步，等待新页面快照后再决定下一步。\n`;
+    msg += `- enabled=false 的元素当前不可点击，不要对它输出点击指令。\n`;
     msg += `[/WEB_CRUISE]`;
 
     const res = await fetch(`${BASE_URL}/api/${charId}/chat_v2`, {
@@ -138,11 +149,19 @@ async function captureSnapshot(page) {
                 const inputs = Array.from(document.querySelectorAll('input, textarea')).map(i => {
                     return `[输入框] ID:${i.id || '无'} Name:${i.name || '无'} Placeholder:${i.placeholder || '无'}`;
                 }).join('\n');
-                const buttons = Array.from(document.querySelectorAll('button, a, [role="button"], [onclick], input[type="submit"], input[type="button"]')).slice(0, 30).map(el => {
+                const buttons = Array.from(document.querySelectorAll('button, a, [role="button"], [onclick], input[type="submit"], input[type="button"]')).slice(0, 30).map((el, index) => {
+                    const ref = `btn-${index}`;
+                    el.setAttribute('data-kunigami-agent-ref', ref);
                     const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim().substring(0, 50);
-                    const cls = typeof el.className === 'string' ? el.className : (el.getAttribute('class') || '');
-                    const sel = el.id ? '#' + el.id : (el.name ? '[name="' + el.name + '"]' : cls ? '.' + cls.split(' ')[0] : '');
-                    return `[按钮] 文字:"${text}" ${sel ? '选择器:' + sel : ''} 标签:${el.tagName.toLowerCase()}`;
+                    const enabled = !el.disabled && el.getAttribute('aria-disabled') !== 'true';
+                    const ariaPressed = el.getAttribute('aria-pressed');
+                    const ariaSelected = el.getAttribute('aria-selected');
+                    const hasCheckedState = typeof el.checked === 'boolean';
+                    let selected = 'unknown';
+                    if (ariaPressed !== null) selected = ariaPressed === 'true';
+                    else if (ariaSelected !== null) selected = ariaSelected === 'true';
+                    else if (hasCheckedState) selected = el.checked;
+                    return `[按钮 ref="${ref}" enabled=${enabled} selected=${selected}] 文字:"${text}" 标签:${el.tagName.toLowerCase()} 建议指令:[CLICK_REF:${ref}]`;
                 }).join('\n');
                 return { text: visibleText, inputs, buttons, url: window.location.href };
             });
@@ -162,86 +181,167 @@ async function captureSnapshot(page) {
     }
 }
 
-async function executeCommands(page, reply) {
-    const commands = reply.match(/\[(CLICK|TYPE|GOTO|BACK):.+?\]/gi) || [];
-    const backMatch = reply.match(/\[BACK\]/i);
-    if (backMatch) commands.push('[BACK]');
+function normalizeClickableText(text) {
+    return String(text || '')
+        .normalize('NFKC')
+        .replace(/\s+/g, '')
+        .replace(/[\uFE0F\u200D]/g, '')
+        .trim();
+}
 
-    for (const cmd of commands) {
-        try {
-            if (cmd.startsWith('[CLICK:')) {
-                let target = cmd.slice(7, -1);
-                const hadPrefix = target.startsWith('ID:') || target.startsWith('Name:');
-                if (target.startsWith('ID:')) {
-                    target = '#' + target.slice(3);
-                } else if (target.startsWith('Name:')) {
-                    target = '[name="' + target.slice(5) + '"]';
-                }
-                console.log(`[Action] 点击: ${target}`);
-                const textLoc = page.getByText(target, { exact: false }).first();
-                if (await textLoc.count() > 0) {
-                    await textLoc.click({ timeout: 3000 });
-                } else if (!hadPrefix && cmd.slice(7, -1).indexOf('|') === -1) {
-                    try {
-                        await page.click('#' + cmd.slice(7, -1), { timeout: 3000 });
-                    } catch {
-                        await page.click(target, { timeout: 3000 });
-                    }
-                } else {
-                    await page.click(target, { timeout: 3000 });
-                }
-            }
-            else if (cmd.startsWith('[TYPE:')) {
-                const inner = cmd.slice(6, -1);
-                const pipeIdx = inner.indexOf('|');
-                let selector = pipeIdx >= 0 ? inner.substring(0, pipeIdx) : inner;
-                const text = pipeIdx >= 0 ? inner.substring(pipeIdx + 1) : '';
-                const hadPrefix = selector.startsWith('ID:') || selector.startsWith('Name:');
-                if (selector.startsWith('ID:')) {
-                    selector = '#' + selector.slice(3);
-                } else if (selector.startsWith('Name:')) {
-                    selector = '[name="' + selector.slice(5) + '"]';
-                }
-                console.log(`[Action] 输入: "${text}" -> ${selector}`);
-                const inputLoc = page.getByPlaceholder(selector, { exact: false }).first();
-                if (await inputLoc.count() > 0) {
-                    await inputLoc.fill(text);
-                } else if (!hadPrefix) {
-                    const rawSelector = pipeIdx >= 0 ? inner.substring(0, pipeIdx) : inner;
-                    try {
-                        await page.fill('#' + rawSelector, text);
-                    } catch {
-                        try {
-                            await page.fill('[name="' + rawSelector + '"]', text);
-                        } catch {
-                            await page.fill(selector, text);
-                        }
-                    }
-                } else {
-                    await page.fill(selector, text);
-                }
-            }
-            else if (cmd.startsWith('[GOTO:')) {
-                let url = cmd.slice(6, -1);
-                url = url.replace(/^https:(?!\/\/)/, 'https://');
-                url = url.replace(/^http:(?!\/\/)/, 'http://');
-                console.log(`[Action] 导航至: ${url}`);
-                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-                await waitForPageSettled(page);
-            }
-            else if (cmd === '[BACK]') {
-                console.log(`[Action] 回退页面`);
-                await page.goBack({ waitUntil: 'domcontentloaded', timeout: 15000 });
-                await waitForPageSettled(page);
-            }
-        } catch (err) {
-            console.warn(`[Action Error] 执行指令 ${cmd} 失败:`, err.message);
+function escapeAttributeValue(value) {
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+async function findClickableByText(page, target) {
+    const candidates = page.locator(
+        'button, a, [role="button"], [onclick], input[type="submit"], input[type="button"]'
+    );
+    const expected = normalizeClickableText(target);
+
+    if (!expected) return null;
+
+    const count = await candidates.count();
+    for (let index = 0; index < count; index++) {
+        const candidate = candidates.nth(index);
+        if (!await candidate.isVisible().catch(() => false)) continue;
+
+        const innerText = await candidate.innerText().catch(() => '');
+        const value = await candidate.getAttribute('value').catch(() => '');
+        const ariaLabel = await candidate.getAttribute('aria-label').catch(() => '');
+        const actual = normalizeClickableText(innerText || value || ariaLabel);
+
+        if (actual === expected || actual.includes(expected) || expected.includes(actual)) {
+            return candidate;
         }
+    }
+
+    return null;
+}
+
+async function executeCommands(page, reply) {
+    const commands = reply.match(/\[(?:CLICK_REF|CLICK|TYPE|GOTO):.+?\]|\[BACK\]/gi) || [];
+    const cmd = commands[0];
+
+    if (!cmd) return null;
+
+    try {
+        const clickRefMatch = cmd.match(/^\[CLICK_REF:(.+?)\]$/i);
+        const clickMatch = cmd.match(/^\[CLICK:(.+?)\]$/i);
+        const typeMatch = cmd.match(/^\[TYPE:(.+?)\]$/i);
+        const gotoMatch = cmd.match(/^\[GOTO:(.+?)\]$/i);
+
+        if (clickRefMatch) {
+            const ref = clickRefMatch[1].trim();
+            console.log(`[Action] 按编号点击: ${ref}`);
+            const locator = page.locator(
+                `[data-kunigami-agent-ref="${escapeAttributeValue(ref)}"]`
+            ).first();
+
+            if (await locator.count() === 0) {
+                throw new Error(`元素编号已失效: ${ref}`);
+            }
+            if (!await locator.isVisible()) {
+                throw new Error(`元素不可见: ${ref}`);
+            }
+            if (!await locator.isEnabled()) {
+                throw new Error(`元素当前不可点击或已禁用: ${ref}`);
+            }
+
+            await locator.click({ timeout: 5000 });
+        }
+        else if (clickMatch) {
+            const target = clickMatch[1].trim();
+            console.log(`[Action] 按文字点击: ${target}`);
+
+            let locator = null;
+            if (target.startsWith('ID:')) {
+                locator = page.locator(
+                    `[id="${escapeAttributeValue(target.slice(3))}"]`
+                ).first();
+            } else if (target.startsWith('Name:')) {
+                locator = page.locator(
+                    `[name="${escapeAttributeValue(target.slice(5))}"]`
+                ).first();
+            } else if (target.startsWith('CSS:')) {
+                locator = page.locator(target.slice(4)).first();
+            } else {
+                locator = await findClickableByText(page, target);
+            }
+
+            if (!locator || await locator.count() === 0) {
+                throw new Error(`找不到可点击元素: ${target}`);
+            }
+            if (!await locator.isVisible()) {
+                throw new Error(`元素不可见: ${target}`);
+            }
+            if (!await locator.isEnabled()) {
+                throw new Error(`元素当前不可点击或已禁用: ${target}`);
+            }
+
+            await locator.click({ timeout: 5000 });
+        }
+        else if (typeMatch) {
+            const inner = typeMatch[1];
+            const pipeIdx = inner.indexOf('|');
+            let selector = pipeIdx >= 0 ? inner.substring(0, pipeIdx) : inner;
+            const text = pipeIdx >= 0 ? inner.substring(pipeIdx + 1) : '';
+            const hadPrefix = selector.startsWith('ID:') || selector.startsWith('Name:');
+            if (selector.startsWith('ID:')) {
+                selector = '#' + selector.slice(3);
+            } else if (selector.startsWith('Name:')) {
+                selector = '[name="' + selector.slice(5) + '"]';
+            }
+            console.log(`[Action] 输入: "${text}" -> ${selector}`);
+            const inputLoc = page.getByPlaceholder(selector, { exact: false }).first();
+            if (await inputLoc.count() > 0) {
+                await inputLoc.fill(text);
+            } else if (!hadPrefix) {
+                const rawSelector = pipeIdx >= 0 ? inner.substring(0, pipeIdx) : inner;
+                try {
+                    await page.fill('#' + rawSelector, text);
+                } catch {
+                    try {
+                        await page.fill('[name="' + rawSelector + '"]', text);
+                    } catch {
+                        await page.fill(selector, text);
+                    }
+                }
+            } else {
+                await page.fill(selector, text);
+            }
+        }
+        else if (gotoMatch) {
+            let url = gotoMatch[1];
+            url = url.replace(/^https:(?!\/\/)/, 'https://');
+            url = url.replace(/^http:(?!\/\/)/, 'http://');
+            console.log(`[Action] 导航至: ${url}`);
+            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+            await waitForPageSettled(page);
+        }
+        else if (/^\[BACK\]$/i.test(cmd)) {
+            console.log(`[Action] 回退页面`);
+            await page.goBack({ waitUntil: 'domcontentloaded', timeout: 15000 });
+            await waitForPageSettled(page);
+        }
+
+        return {
+            command: cmd,
+            success: true,
+            message: '操作执行成功'
+        };
+    } catch (err) {
+        console.warn(`[Action Error] 执行指令 ${cmd} 失败:`, err.message);
+        return {
+            command: cmd,
+            success: false,
+            message: err.message
+        };
     }
 }
 
 function hasWebCommands(text) {
-    return /\[(CLICK|TYPE|GOTO):.+?\]/i.test(text) || /\[BACK\]/i.test(text) || /\[FINISH\]/i.test(text);
+    return /\[(CLICK_REF|CLICK|TYPE|GOTO):.+?\]/i.test(text) || /\[BACK\]/i.test(text) || /\[FINISH\]/i.test(text);
 }
 
 // ==================== 主循环 ====================
@@ -294,6 +394,7 @@ async function runUniversalAgent(targetUrl) {
     // 主循环
     let step = 1;
     let status = 'active';
+    let lastActionResult = null;
 
     while (step <= MAX_STEPS) {
         await page.waitForTimeout(1500);
@@ -319,9 +420,8 @@ async function runUniversalAgent(targetUrl) {
             } else if (input && input.command === 'web_action') {
                 console.log(`[Agent] 收到 web_action 指令: ${input.tags}`);
                 if (input.tags && input.tags.length > 0) {
-                    for (const tag of input.tags) {
-                        await executeCommands(page, tag);
-                    }
+                    // 即使一次收到多个标签，本轮也只执行第一个网页动作。
+                    lastActionResult = await executeCommands(page, input.tags.join('\n'));
                 }
                 status = 'active';
                 updateState(currentUserId, { status: 'active', question: '' });
@@ -343,7 +443,15 @@ async function runUniversalAgent(targetUrl) {
             // 触发带人设的回复，并让前端渲染"正在阅读"，回复自动存库显示）
             let reply = '';
             try {
-                reply = await chatViaCharApi(snapshot, charId, currentUserId, cookieString);
+                const actionResultForThisStep = lastActionResult;
+                lastActionResult = null;
+                reply = await chatViaCharApi(
+                    snapshot,
+                    charId,
+                    currentUserId,
+                    cookieString,
+                    actionResultForThisStep
+                );
             } catch (e) {
                 console.error("[Agent] AI 调用失败:", e.message);
                 break;
@@ -391,7 +499,7 @@ async function runUniversalAgent(targetUrl) {
             }
 
             // 执行网页操作指令
-            await executeCommands(page, reply);
+            lastActionResult = await executeCommands(page, reply);
 
             step++;
         }
@@ -402,9 +510,21 @@ async function runUniversalAgent(targetUrl) {
     await browser.close();
 }
 
-// 获取命令行参数
-const urlArg = process.argv[2] || 'https://www.baidu.com';
-runUniversalAgent(urlArg).catch(err => {
-    console.error(`[Agent Fatal] ${err.stack || err.message}`);
-    process.exit(1);
-});
+module.exports = {
+    captureSnapshot,
+    chatViaCharApi,
+    executeCommands,
+    findClickableByText,
+    hasWebCommands,
+    normalizeClickableText,
+    runUniversalAgent
+};
+
+if (require.main === module) {
+    // 获取命令行参数
+    const urlArg = process.argv[2] || 'https://www.baidu.com';
+    runUniversalAgent(urlArg).catch(err => {
+        console.error(`[Agent Fatal] ${err.stack || err.message}`);
+        process.exit(1);
+    });
+}

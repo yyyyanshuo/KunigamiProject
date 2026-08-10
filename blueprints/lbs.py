@@ -5,6 +5,7 @@ import math
 from datetime import datetime
 import weather_api
 from core.config import COS_BASE_URL
+from core.context import get_current_user_id
 from core.utils import (
     safe_save_json,
     _get_locations_file,
@@ -22,6 +23,17 @@ from core.utils import (
     get_location_by_id,
     get_location_at_coord,
     auto_toggle_chat_mode_on_move,
+    normalize_map_state,
+    normalize_real_world_timezone,
+    sync_character_timezone_to_location,
+    move_character_position,
+    move_user_position,
+)
+from core.time_utils import (
+    BEIJING_TZ_NAME,
+    get_zone,
+    is_valid_timezone,
+    search_timezones,
 )
 
 map_bp = Blueprint('map', __name__)
@@ -77,6 +89,10 @@ def api_add_location():
     if rw is not None:
         rw["lat"] = float(rw.get("lat", 0)) if rw.get("lat") is not None else None
         rw["lon"] = float(rw.get("lon", 0)) if rw.get("lon") is not None else None
+        try:
+            rw = normalize_real_world_timezone(rw)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
     new_loc = {
         "id": loc_id,
         "name": name,
@@ -119,6 +135,10 @@ def api_update_location(loc_id):
                 if rw is not None:
                     rw["lat"] = float(rw.get("lat", 0)) if rw.get("lat") is not None else None
                     rw["lon"] = float(rw.get("lon", 0)) if rw.get("lon") is not None else None
+                    try:
+                        rw = normalize_real_world_timezone(rw)
+                    except ValueError as e:
+                        return jsonify({"error": str(e)}), 400
                 loc["real_world"] = rw
             if "x" in data or "y" in data:
                 old_x, old_y = loc["x"], loc["y"]
@@ -150,6 +170,15 @@ def api_update_location(loc_id):
                         pos["known_location_ids"] = known
                 save_character_positions(positions)
             save_locations(locs)
+            if "real_world" in data:
+                positions = load_character_positions()
+                for cid, pos in positions.items():
+                    if pos.get("location_id") == loc_id:
+                        sync_character_timezone_to_location(
+                            cid,
+                            loc,
+                            user_id=get_current_user_id(),
+                        )
             return jsonify(loc)
     return jsonify({"error": "location not found"}), 404
 
@@ -177,34 +206,10 @@ def api_delete_location(loc_id):
 @map_bp.route("/api/map/positions", methods=["GET"])
 def api_get_positions():
     init_map_data()
-    char_positions = load_character_positions()
-    all_locs = load_locations().get("locations", [])
-    locs_by_id = {l["id"]: l for l in all_locs}
-    needs_save = False
-
-    for cid, pos in char_positions.items():
-        known = set(pos.get("known_location_ids", []))
-        cx, cy = pos["x"], pos["y"]
-        original_len = len(known)
-
-        # 角色当前所在的地点自动加入认知（去过的地方）
-        loc_id = pos.get("location_id")
-        if not loc_id:
-            for loc in all_locs:
-                if calc_distance(cx, cy, loc["x"], loc["y"]) < 0.01:
-                    loc_id = loc["id"]
-                    pos["location_id"] = loc_id
-                    needs_save = True
-                    break
-        if loc_id:
-            known.add(loc_id)
-
-        if len(known) != original_len:
-            pos["known_location_ids"] = list(known)
-            needs_save = True
-
-    if needs_save:
-        save_character_positions(char_positions)
+    char_positions, user_position, _ = normalize_map_state(
+        user_id=get_current_user_id(),
+        drop_orphan_positions=True,
+    )
 
     chars_cfg = _get_characters_config_file()
     char_names = {}
@@ -216,7 +221,7 @@ def api_get_positions():
                 char_names[cid] = cinfo.get("name", cid)
         except:
             pass
-    result = {"characters": {}, "user": load_user_position()}
+    result = {"characters": {}, "user": user_position}
     for cid, pos in char_positions.items():
         result["characters"][cid] = {
             **pos,
@@ -228,39 +233,34 @@ def api_get_positions():
 def api_move_character(char_id):
     from app import get_char_name, append_short_memory_event
     data = request.json or {}
-    x = float(data.get("x", 0))
-    y = float(data.get("y", 0))
+    try:
+        x = float(data.get("x", 0))
+        y = float(data.get("y", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid coordinates"}), 400
     location_id = data.get("location_id")
     force = data.get("force", False)
-    positions = load_character_positions()
-    if char_id not in positions:
-        positions[char_id] = {"location_id": "home", "x": 0.0, "y": 0.0, "known_location_ids": ["home"]}
-    old_x, old_y = positions[char_id]["x"], positions[char_id]["y"]
-    old_location_id = positions[char_id].get("location_id")
-    d = calc_distance(old_x, old_y, x, y)
-    if d > 1.0 and not force:
-        return jsonify({"error": f"distance {round(d,2)} exceeds 1.0, cannot move that far in one step"}), 400
-    positions[char_id]["x"] = x
-    positions[char_id]["y"] = y
-    if location_id:
-        positions[char_id]["location_id"] = location_id
-    else:
-        loc_at = get_location_at_coord(x, y)
-        positions[char_id]["location_id"] = loc_at["id"] if loc_at else None
+    try:
+        _, new_position = move_character_position(
+            char_id,
+            x,
+            y,
+            location_id=location_id,
+            force=bool(force),
+            user_id=get_current_user_id(),
+        )
+    except ValueError as e:
+        status = 404 if str(e) in {"character not found", "location not found"} else 400
+        return jsonify({"error": str(e)}), status
 
-    # 只有到达的地点才加入认知
-    cur_loc_id = positions[char_id].get("location_id")
-    if cur_loc_id:
-        known = positions[char_id].get("known_location_ids", [])
-        if cur_loc_id not in known:
-            known.append(cur_loc_id)
-            positions[char_id]["known_location_ids"] = known
-    save_character_positions(positions)
-    auto_toggle_chat_mode_on_move(char_id=char_id, old_location_id=old_location_id, new_location_id=cur_loc_id)
-
-    loc_name = positions[char_id]["location_id"] or f"({round(x,2)}, {round(y,2)})"
+    loc_name = new_position["location_id"] or f"({round(new_position['x'],2)}, {round(new_position['y'],2)})"
     char_name = get_char_name(char_id)
-    encounters = check_co_encounters(char_id, x, y, positions[char_id].get("location_id"))
+    encounters = check_co_encounters(
+        char_id,
+        new_position["x"],
+        new_position["y"],
+        new_position.get("location_id"),
+    )
     encounter_msgs = []
     if encounters:
         for eid in encounters:
@@ -270,32 +270,43 @@ def api_move_character(char_id):
                 ename = get_char_name(eid)
                 encounter_msgs.append(f"与{ename}在{loc_name}相遇")
 
+    timezone_change = new_position.pop("timezone_change", {"changed": False})
     return jsonify({
-        "position": positions[char_id],
-        "encounters": encounters
+        "position": new_position,
+        "encounters": encounters,
+        "timezone_change": timezone_change,
     })
 
 @map_bp.route("/api/map/user/position", methods=["PUT"])
 def api_move_user():
     data = request.json or {}
-    x = float(data.get("x", 0))
-    y = float(data.get("y", 0))
+    try:
+        x = float(data.get("x", 0))
+        y = float(data.get("y", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid coordinates"}), 400
     location_id = data.get("location_id")
-    user_pos = load_user_position()
-    old_location_id = user_pos.get("location_id")
-    user_pos["x"] = x
-    user_pos["y"] = y
-    if location_id:
-        user_pos["location_id"] = location_id
-    else:
-        loc_at = get_location_at_coord(x, y)
-        user_pos["location_id"] = loc_at["id"] if loc_at else None
-    save_user_position(user_pos)
-    auto_toggle_chat_mode_on_move(old_location_id=old_location_id, new_location_id=user_pos.get("location_id"))
+    try:
+        _, user_pos = move_user_position(
+            x,
+            y,
+            location_id=location_id,
+            user_id=get_current_user_id(),
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
     return jsonify(user_pos)
 
 @map_bp.route("/api/map/character/<char_id>/locations", methods=["GET"])
 def api_get_character_known_locations(char_id):
+    cfg_file = _get_characters_config_file()
+    try:
+        with open(cfg_file, "r", encoding="utf-8") as f:
+            chars = json.load(f) or {}
+    except Exception:
+        chars = {}
+    if char_id not in chars:
+        return jsonify({"error": "character not found"}), 404
     positions = load_character_positions()
     if char_id not in positions:
         positions[char_id] = {"location_id": "home", "x": 0.0, "y": 0.0, "known_location_ids": ["home"]}
@@ -311,11 +322,28 @@ def api_get_character_known_locations(char_id):
 @map_bp.route("/api/map/character/<char_id>/known_locations", methods=["PUT"])
 def api_update_character_known_locations(char_id):
     data = request.json or {}
-    known_ids = data.get("known_location_ids", [])
+    cfg_file = _get_characters_config_file()
+    try:
+        with open(cfg_file, "r", encoding="utf-8") as f:
+            chars = json.load(f) or {}
+    except Exception:
+        chars = {}
+    if char_id not in chars:
+        return jsonify({"error": "character not found"}), 404
+    valid_location_ids = {
+        loc["id"] for loc in load_locations().get("locations", [])
+    }
+    known_ids = [
+        loc_id for loc_id in (data.get("known_location_ids") or [])
+        if loc_id in valid_location_ids
+    ]
     positions = load_character_positions()
     if char_id not in positions:
         positions[char_id] = {"location_id": "home", "x": 0.0, "y": 0.0, "known_location_ids": ["home"]}
-    positions[char_id]["known_location_ids"] = known_ids
+    current_location_id = positions[char_id].get("location_id")
+    if current_location_id and current_location_id not in known_ids:
+        known_ids.append(current_location_id)
+    positions[char_id]["known_location_ids"] = list(dict.fromkeys(known_ids))
     save_character_positions(positions)
     return jsonify({"ok": True, "known_location_ids": known_ids})
 
@@ -340,12 +368,40 @@ def api_get_location_weather(loc_id):
 @map_bp.route("/api/map/geocode", methods=["GET"])
 def api_geocode():
     city = request.args.get("city", "").strip()
+    country = request.args.get("country", "").strip() or None
     if not city:
         return jsonify({"error": "city parameter required"}), 400
-    lat, lon = weather_api.geocode(city)
+    lat, lon = weather_api.geocode(city, country=country)
     if lat is None:
         return jsonify({"error": "geocode failed"}), 404
-    return jsonify({"city": city, "lat": lat, "lon": lon})
+    real_world = normalize_real_world_timezone({
+        "city": city,
+        "country": country or "",
+        "lat": lat,
+        "lon": lon,
+    })
+    return jsonify(real_world)
+
+
+@map_bp.route("/api/timezones", methods=["GET"])
+def api_timezones():
+    query = request.args.get("query", "")
+    try:
+        limit = int(request.args.get("limit", 100))
+    except (TypeError, ValueError):
+        limit = 100
+    now = datetime.now(get_zone(BEIJING_TZ_NAME))
+    result = []
+    for name in search_timezones(query, limit):
+        local_now = now.astimezone(get_zone(name))
+        offset = local_now.strftime("%z")
+        offset_display = f"{offset[:3]}:{offset[3:]}" if offset else "+00:00"
+        result.append({
+            "name": name,
+            "offset": f"UTC{offset_display}",
+            "local_time": local_now.strftime("%Y-%m-%d %H:%M"),
+        })
+    return jsonify({"timezones": result})
 
 def sync_known_locations(char_id):
     locs = load_locations()

@@ -620,6 +620,9 @@
       <input type="text" id="edit-loc-lat" placeholder="纬度（自动查询，无需手动填写）" style="margin-bottom: 0;">
       <input type="text" id="edit-loc-lon" placeholder="经度（自动查询，无需手动填写）" style="margin-bottom: 0;">
     </div>
+    <input type="text" id="edit-loc-timezone" list="map-timezone-options"
+           placeholder="时区（自动识别，如 Asia/Tokyo）" style="margin-bottom:8px;"
+           onfocus="loadMapTimezones()">
     <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">输入城市名后点击「查询」可自动获取经纬度，或留空由系统自动查询</div>
     <div class="btn-row">
       <button class="btn-cancel" onclick="closeEditLocationModal()">取消</button>
@@ -694,6 +697,10 @@
       <input type="text" id="new-loc-lat" placeholder="纬度（自动查询，无需手动填写）" style="margin-bottom: 0;">
       <input type="text" id="new-loc-lon" placeholder="经度（自动查询，无需手动填写）" style="margin-bottom: 0;">
     </div>
+    <input type="text" id="new-loc-timezone" list="map-timezone-options"
+           placeholder="时区（自动识别，如 Asia/Tokyo）" style="margin-bottom:8px;"
+           onfocus="loadMapTimezones()">
+    <datalist id="map-timezone-options"></datalist>
     <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">输入城市名后点击「查询」可自动获取经纬度，或留空由系统自动查询</div>
     <div class="btn-row">
       <button class="btn-cancel" onclick="closeAddLocationModal()">取消</button>
@@ -903,6 +910,10 @@
           offsetY = -r.position.y * pixelsPerGrid;
           updateActionBar();
           draw();
+          notifyTimezoneChange(
+            r.timezone_change,
+            r.position.name || selectedCharId
+          );
         } else {
           let err = await res.json();
           alert("移动失败: " + err.error);
@@ -916,6 +927,18 @@
     pixelsPerGrid = DEFAULT_PPG;
     draw();
   };
+
+  function describeTimezoneChange(change, characterName) {
+    if (!change || !change.changed) return null;
+    const oldZone = change.old_timezone || '未设置';
+    const newZone = change.new_timezone || '未设置';
+    return `${characterName || '角色'}的时区已随地点从 ${oldZone} 调整为 ${newZone}`;
+  }
+
+  function notifyTimezoneChange(change, characterName) {
+    const message = describeTimezoneChange(change, characterName);
+    if (message) alert(message);
+  }
 
   window.zoomIn = function() {
     let cx = cssW/2, cy = cssH/2;
@@ -951,10 +974,26 @@
     document.getElementById('new-loc-country').value = '';
     document.getElementById('new-loc-lat').value = '';
     document.getElementById('new-loc-lon').value = '';
+    document.getElementById('new-loc-timezone').value = '';
     document.getElementById('add-location-modal').classList.add('show');
   };
   window.closeAddLocationModal = function() {
     document.getElementById('add-location-modal').classList.remove('show');
+  };
+
+  window.loadMapTimezones = async function() {
+    const list = document.getElementById('map-timezone-options');
+    if (!list || list.dataset.loaded === '1') return;
+    try {
+      const res = await fetch('/api/timezones?limit=500');
+      const data = await res.json();
+      list.innerHTML = (data.timezones || [])
+        .map(item => `<option value="${item.name}">${item.offset} · ${item.local_time}</option>`)
+        .join('');
+      list.dataset.loaded = '1';
+    } catch (e) {
+      console.error('加载时区失败', e);
+    }
   };
 
   window.autoGeocode = async function(prefix) {
@@ -970,6 +1009,7 @@
         let data = await res.json();
         document.getElementById(prefix + '-loc-lat').value = data.lat;
         document.getElementById(prefix + '-loc-lon').value = data.lon;
+        document.getElementById(prefix + '-loc-timezone').value = data.timezone || '';
       } else {
         alert('未找到该城市，请检查拼写或手动填写经纬度');
       }
@@ -991,15 +1031,17 @@
     let country = document.getElementById('new-loc-country').value.trim();
     let latStr = document.getElementById('new-loc-lat').value.trim();
     let lonStr = document.getElementById('new-loc-lon').value.trim();
+    let timezone = document.getElementById('new-loc-timezone').value.trim();
     let real_world = null;
-    if (city) {
+    if (city || timezone || latStr || lonStr) {
       let lat = parseFloat(latStr);
       let lon = parseFloat(lonStr);
       real_world = {
         city: city,
         country: country,
         lat: isNaN(lat) ? null : lat,
-        lon: isNaN(lon) ? null : lon
+        lon: isNaN(lon) ? null : lon,
+        timezone: timezone || undefined
       };
     }
 
@@ -1466,8 +1508,10 @@
           return;
         }
         let r = await res.json();
+        const movedCharacterName = charPositions[dragTarget.id]?.name || dragTarget.id;
         await loadData();
         draw();
+        notifyTimezoneChange(r.timezone_change, movedCharacterName);
         if (r.encounters && r.encounters.length > 0) {
           let msgs = [];
           for (let eid of r.encounters) {
@@ -1508,7 +1552,10 @@
     let bubble = document.getElementById('location-bubble');
     document.getElementById('bubble-name').textContent = loc.name;
     document.getElementById('bubble-desc').textContent = loc.description || '';
-    document.getElementById('bubble-coords').textContent = `坐标: (${loc.x}, ${loc.y}) 极坐标: (${loc.r}, ${loc.theta?.toFixed(2)})`;
+    const tzText = loc.real_world && loc.real_world.timezone
+      ? ` 时区: ${loc.real_world.timezone}`
+      : '';
+    document.getElementById('bubble-coords').textContent = `坐标: (${loc.x}, ${loc.y}) 极坐标: (${loc.r}, ${loc.theta?.toFixed(2)})${tzText}`;
 
     let weatherEl = document.getElementById('bubble-weather');
     let w = weatherData[loc.id];
@@ -1652,6 +1699,7 @@
     document.getElementById('edit-loc-country').value = rw.country || '';
     document.getElementById('edit-loc-lat').value = rw.lat != null ? rw.lat : '';
     document.getElementById('edit-loc-lon').value = rw.lon != null ? rw.lon : '';
+    document.getElementById('edit-loc-timezone').value = rw.timezone || '';
     document.getElementById('edit-location-modal').classList.add('show');
   };
 
@@ -1673,15 +1721,17 @@
     let country = document.getElementById('edit-loc-country').value.trim();
     let latStr = document.getElementById('edit-loc-lat').value.trim();
     let lonStr = document.getElementById('edit-loc-lon').value.trim();
+    let timezone = document.getElementById('edit-loc-timezone').value.trim();
     let real_world = null;
-    if (city) {
+    if (city || timezone || latStr || lonStr) {
       let lat = parseFloat(latStr);
       let lon = parseFloat(lonStr);
       real_world = {
         city: city,
         country: country,
         lat: isNaN(lat) ? null : lat,
-        lon: isNaN(lon) ? null : lon
+        lon: isNaN(lon) ? null : lon,
+        timezone: timezone || undefined
       };
     }
     try {
@@ -1735,6 +1785,7 @@
     document.querySelector('#bulk-move-modal .btn-ok').disabled = true;
 
     try {
+      let timezoneMessages = [];
       for (let id of toMove) {
         if (id === 'user') {
           await fetch('/api/map/user/position', {
@@ -1743,17 +1794,30 @@
             body: JSON.stringify({x: loc.x, y: loc.y, location_id: loc.id})
           });
         } else {
-          await fetch(`/api/map/character/${id}/position`, {
+          const res = await fetch(`/api/map/character/${id}/position`, {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({x: loc.x, y: loc.y, location_id: loc.id, force: true})
           });
+          if (!res.ok) {
+            const error = await res.json();
+            throw new Error(error.error || `移动 ${id} 失败`);
+          }
+          const result = await res.json();
+          const message = describeTimezoneChange(
+            result.timezone_change,
+            charPositions[id]?.name || id
+          );
+          if (message) timezoneMessages.push(message);
         }
       }
 
       closeBulkMoveModal();
       await loadData();
       draw();
+      if (timezoneMessages.length) {
+        alert(timezoneMessages.join('\n'));
+      }
 
       document.querySelector('#bulk-move-modal .btn-ok').textContent = '确认移动';
       document.querySelector('#bulk-move-modal .btn-ok').disabled = false;

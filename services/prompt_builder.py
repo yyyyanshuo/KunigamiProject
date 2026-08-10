@@ -12,12 +12,25 @@ from core.config import (
     GLOBAL_SYSTEM_RULES_JA_AGENT_BRIEF, GLOBAL_SYSTEM_RULES_EN_AGENT_BRIEF, GLOBAL_SYSTEM_RULES_ZH_AGENT_BRIEF,
 )
 from core.context import get_current_user_id
+from core.memory_periods import parse_week_key_to_dates
+from core.time_utils import (
+    BEIJING_TZ,
+    beijing_now,
+    get_character_timezone,
+    get_user_timezone,
+    get_zone,
+    parse_beijing_timestamp,
+    utc_now,
+)
 from core.utils import (
     _add_furigana_to_japanese, get_paths, get_current_username,
     _get_characters_config_file, _get_groups_config_file, _load_user_settings,
     load_character_positions, load_user_position, load_locations,
     calc_distance, get_location_by_id, get_group_dir,
+    normalize_map_state,
 )
+from services.voice_messages import voice_message_for_ai
+from services.voice_calls import voice_call_for_ai
 
 
 def get_ai_language(target_id=None, group_id=None, user_id=None):
@@ -71,8 +84,8 @@ def get_ai_language(target_id=None, group_id=None, user_id=None):
     return data.get("ai_language", default_lang)
 
 
-def get_char_name(char_id):
-    config_file = _get_characters_config_file()
+def get_char_name(char_id, user_id=None):
+    config_file = _get_characters_config_file(user_id=user_id)
     if not os.path.exists(config_file):
         return char_id
     try:
@@ -83,8 +96,8 @@ def get_char_name(char_id):
         return char_id
 
 
-def get_char_age(char_id):
-    config_file = _get_characters_config_file()
+def get_char_age(char_id, user_id=None):
+    config_file = _get_characters_config_file(user_id=user_id)
     if not os.path.exists(config_file):
         return None
     try:
@@ -92,8 +105,21 @@ def get_char_age(char_id):
             data = json.load(f)
             age = data.get(char_id, {}).get("age")
             return int(age) if age is not None else None
-    except:
+    except Exception:
         return None
+
+
+def _get_character_time_info(char_id, user_id=None):
+    info = {}
+    try:
+        config_file = _get_characters_config_file(user_id=user_id)
+        with open(config_file, "r", encoding="utf-8") as f:
+            info = (json.load(f) or {}).get(char_id, {}) or {}
+    except Exception:
+        info = {}
+    timezone_name = get_character_timezone(info)
+    now = utc_now().astimezone(get_zone(timezone_name))
+    return info, timezone_name, now
 
 
 def _get_char_chat_mode(char_id, user_id=None):
@@ -108,13 +134,115 @@ def _get_char_chat_mode(char_id, user_id=None):
     return "online"
 
 
-def get_user_age():
+def get_user_age(user_id=None):
     data = _load_user_settings()
+    if user_id:
+        settings_path = os.path.join(USERS_ROOT, str(user_id), "configs", "user_settings.json")
+        if os.path.exists(settings_path):
+            try:
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                pass
     age = data.get("user_age")
     try:
         return int(age) if age is not None else None
     except Exception:
         return None
+
+
+def _get_username_for_user(user_id=None):
+    if user_id:
+        settings_path = os.path.join(USERS_ROOT, str(user_id), "configs", "user_settings.json")
+        if os.path.exists(settings_path):
+            try:
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    return (json.load(f).get("current_user_name") or "User").strip()
+            except Exception:
+                pass
+    return get_current_username()
+
+
+def _get_settings_for_user(user_id=None):
+    if user_id:
+        settings_path = os.path.join(
+            USERS_ROOT, str(user_id), "configs", "user_settings.json"
+        )
+        if os.path.exists(settings_path):
+            try:
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    return json.load(f) or {}
+            except Exception:
+                pass
+    return _load_user_settings()
+
+
+def build_agent_current_state_section(char_id, prompts_dir, target_char_id=None, group_id=None, user_id=None):
+    """Build only the mutable runtime state; other prompt sections own context data."""
+    try:
+        cfg_file = _get_characters_config_file(user_id=user_id)
+        with open(cfg_file, "r", encoding="utf-8") as f:
+            all_config = json.load(f)
+        info = all_config.get(char_id)
+        if not isinstance(info, dict):
+            return ""
+    except Exception as e:
+        print(f"[Current State] failed to read character metadata for {char_id}: {e}")
+        return ""
+
+    lang = get_ai_language(char_id, group_id=group_id, user_id=user_id)
+    bool_text = {
+        "zh": lambda value: "开启" if value else "关闭",
+        "ja": lambda value: "オン" if value else "オフ",
+        "en": lambda value: "on" if value else "off",
+    }.get(lang, lambda value: "开启" if value else "关闭")
+
+    state = {
+        "emotion": info.get("emotion", 1),
+        "moments_index": info.get("moments_index", 1),
+        "intimacy": info.get("intimacy", 60),
+        "voice_emotion": info.get("voice_emotion") or "平静",
+        "chat_mode": info.get("chat_mode") or "online",
+        "light_sleep": bool(info.get("light_sleep", True)),
+        "deep_sleep": bool(info.get("deep_sleep", False)),
+        "sleep_window": f"{info.get('ds_start', '23:00')}-{info.get('ds_end', '07:00')}",
+    }
+
+    if lang == "ja":
+        lines = [
+            f"- 社交欲求度 emotion: {state['emotion']}（0〜20）",
+            f"- 投稿・表現欲求 moments_index: {state['moments_index']}（0.1〜10）",
+            f"- ユーザー親密度 intimacy: {state['intimacy']}（0〜100）",
+            f"- 音声感情 voice_emotion: {state['voice_emotion']}",
+            f"- チャットモード chat_mode: {state['chat_mode']}",
+            f"- 浅い睡眠: {bool_text(state['light_sleep'])}",
+            f"- 深い睡眠: {bool_text(state['deep_sleep'])}（時間帯 {state['sleep_window']}）",
+        ]
+        header = "【現在の状態 / Current State】"
+    elif lang == "en":
+        lines = [
+            f"- Social desire emotion: {state['emotion']} (0-20)",
+            f"- Posting/expression desire moments_index: {state['moments_index']} (0.1-10)",
+            f"- User intimacy: {state['intimacy']} (0-100)",
+            f"- Voice mood voice_emotion: {state['voice_emotion']}",
+            f"- Chat mode: {state['chat_mode']}",
+            f"- Light sleep: {bool_text(state['light_sleep'])}",
+            f"- Deep sleep: {bool_text(state['deep_sleep'])} (window {state['sleep_window']})",
+        ]
+        header = "【Current State / 当前状态】"
+    else:
+        lines = [
+            f"- 社交渴望度 emotion：{state['emotion']}（0~20）",
+            f"- 朋友圈表达欲 moments_index：{state['moments_index']}（0.1~10）",
+            f"- 对用户亲密度 intimacy：{state['intimacy']}（0~100）",
+            f"- 语音情绪 voice_emotion：{state['voice_emotion']}",
+            f"- 聊天模式 chat_mode：{state['chat_mode']}",
+            f"- 浅睡眠：{bool_text(state['light_sleep'])}",
+            f"- 深睡眠：{bool_text(state['deep_sleep'])}（时间段 {state['sleep_window']}）",
+        ]
+        header = "【当前状态 / Current State】"
+
+    return header + "\n" + "\n".join(lines)
 
 
 def _get_sticker_allowed_descriptions():
@@ -138,22 +266,6 @@ def _get_sticker_allowed_descriptions():
     return out if out else ["开心", "难过", "生气", "爱心", "抱抱", "哭", "晚安", "早安", "谢谢", "加油"]
 
 
-
-def _build_real_conversation_guide(lang="zh", chat_mode="online"):
-    # Keep this prompt text ASCII-escaped so Windows code pages cannot corrupt it.
-    ZH_ONLINE = '\u3010Real Conversation Guide / \u771f\u5b9e\u4ea4\u6d41\u884c\u4e3a\u6307\u5357\u3011\n- \u5f53\u6c14\u6c1b\u53d8\u5f97\u5c34\u5c2c\u65f6\uff0c\u4f60\u53ef\u4ee5\u4ec0\u4e48\u90fd\u4e0d\u8bf4\uff0c\u4ec5\u56de\u590d\u201c\u2026\u201d\n- \u5bf9\u8bdd\u4e2d\u53ef\u81ea\u7136\u51fa\u73b0\u77ed\u6682\u601d\u8003\u505c\u987f\uff0c\u5982\u201c\u55ef\u2026\u201d\u201c\u7a0d\u7b49\u201d\u201c\u6211\u60f3\u60f3\u201d\n- \u53ef\u4ee5\u51fa\u73b0\u8f7b\u5fae\u53e3\u8bef\u5e76\u81ea\u6211\u4fee\u6b63\uff0c\u5982\u201c\u54ce\u4e0d\u5bf9\uff0c\u662f\u6628\u5929\u4e0d\u662f\u4eca\u5929\u201d\u3002\u5fc5\u8981\u65f6\u53ef\u4ee5\u901a\u8fc7 [recall] \u64a4\u56de\u4f60\u521a\u521a\u8bf4\u9519\u6216\u4e0d\u60f3\u53d1\u9001\u7684\u6d88\u606f\u3002\n- \u804a\u5929\u65f6\u53ef\u4ee5\u901a\u8fc7\u8054\u60f3\u8f6c\u6362\u8bdd\u9898\uff0c\u4e5f\u53ef\u4ee5\u5728\u591a\u8f6e\u540e\u56de\u5230\u539f\u8bdd\u9898\u3002\n- \u53ef\u4ee5\u968f\u673a\u63d0\u5230\u8fc7\u53bb\u7684\u4e00\u4ef6\u4e8b\u6216\u5bf9\u65b9\u4e4b\u524d\u8bf4\u8fc7\u7684\u8bdd\u6765\u5f00\u542f\u8bdd\u9898\u3002\n- \u53ef\u4ee5\u4e3b\u52a8\u6253\u65ad\u81ea\u5df1\u8bf4\u7684\u8bdd\uff0c\u5982\u201c\u6211\u4eca\u5929\u2026\u7b97\u4e86\u201d\u3002\n- \u4e0d\u7528\u603b\u662f\u5f88\u786e\u5b9a\uff0c\u53ef\u4ee5\u8868\u73b0\u51fa\u6a21\u7cca\u7684\u6001\u5ea6\u503e\u5411\uff0c\u5982\u201c\u5e94\u8be5\u662f\u8fd9\u6837\u5427\uff0c\u6211\u4e5f\u4e0d\u77e5\u9053\u201d\u3002\n- \u53ef\u4ee5\u968f\u65f6\u63d0\u53ca\u5f53\u524d\u73af\u5883\u611f\u77e5\uff0c\u5982\u5730\u70b9\u3001\u5929\u6c14\u3001\u5468\u56f4\u6c1b\u56f4\u3002\n- \u60c5\u7eea\u6fc0\u52a8\u65f6\uff0c\u53ef\u4ee5\u5927\u91cf\u91cd\u590d\u67d0\u4e00\u53e5\u8bdd\u6765\u8868\u8fbe\u60c5\u7eea\u3002\n- \u53ef\u4ee5\u5728\u5408\u9002\u7684\u65f6\u673a\u4e3b\u52a8\u7ed3\u675f\u8bdd\u9898\uff0c\u5982\u201c\u4e0b\u6b21\u518d\u804a\u201d\u3002\n\n## \u5e38\u7528\u8868\u8fbe\u53c2\u8003\n\u4ee5\u4e0b\u8868\u8fbe\u4ec5\u4f5c\u81ea\u7136\u53e3\u8bed\u53c2\u8003\uff0c\u4e0d\u8981\u6c42\u6bcf\u6b21\u4f7f\u7528\uff0c\u4e0d\u8981\u673a\u68b0\u5806\u53e0\uff1b\u5fc5\u987b\u4f18\u5148\u9075\u5b88\u89d2\u8272\u4eba\u8bbe\u3001\u8bed\u8a00\u63a7\u5236\u548c Agent Action \u8f93\u51fa\u8981\u6c42\u3002\n\n| \u7c7b\u578b | \u4e2d\u6587 | \u65e5\u672c\u8a9e |\n|---|---|---|\n| \u60ca\u8bb6 | \u771f\u7684\u5047\u7684\u3001\u554a\uff1f\u3001\u4e0d\u662f\u5427\u3001\u6211\u53bb\u3001\u7b49\u7b49\u3001\u8ba4\u771f\u7684\u5417\u3001\uff1f\uff1f\uff1f | \u3048\uff1f\u3001\u3048\u3063\u3001\u307e\u3058\uff1f\u3001\u672c\u5f53\u306b\uff1f\u3001\u3046\u305d\u3067\u3057\u3087\u3001\u3084\u3070\u3001\u3048\u3050\u3044 |\n| \u9707\u60ca | \u6211\u4e0d\u884c\u4e86\u3001\u7b11\u6b7b\u6211\u4e86\u3001\u6551\u547d\u3001\u7ef7\u4e0d\u4f4f\u4e86\u3001\u79bb\u8c31\u3001\u6211\u670d\u4e86 | \u7121\u7406\u3001\u3084\u3070\u3044\u3001\u7b11\u3063\u305f\u3001\u3048\u3050\u3044\u3001\u3046\u305d\u3067\u3057\u3087 |\n| \u8f7b\u5fae\u56de\u5e94 | \u55ef\u3001\u54e6\u3001\u55f7\u3001\u597d\u7684\u3001\u884c\u3001\u77e5\u9053\u4e86\u3001\u539f\u6765\u5982\u6b64 | \u3046\u3093\u3001\u305d\u3063\u304b\u3001\u306a\u308b\u307b\u3069\u3001\u305d\u3046\u306a\u3093\u3060 |\n| \u8d5e\u540c | \u786e\u5b9e\u3001\u5bf9\u554a\u3001\u6ca1\u9519\u3001\u5c31\u662f\u3001\u6709\u9053\u7406 | \u305f\u3057\u304b\u306b\u3001\u305d\u3046\u3060\u306d\u3001\u308f\u304b\u308b\u3001\u305d\u308c\u306a |\n| \u5171\u9e23 | \u771f\u7684\u3001\u6211\u61c2\u3001\u592a\u771f\u5b9e\u4e86\u3001\u7834\u9632\u4e86\u3001\u6211\u54ed\u6b7b | \u308f\u304b\u308b\u3001\u3081\u3063\u3061\u3083\u308f\u304b\u308b\u3001\u3042\u308b\u3042\u308b\u3001\u89e3\u91c8\u4e00\u81f4 |\n| \u601d\u8003 | \u55ef\u2026\u2026\u3001\u6211\u60f3\u60f3\u3001\u7b49\u7b49\u3001\u8ba9\u6211\u634b\u4e00\u4e0b\u3001\u600e\u4e48\u8bf4\u5462 | \u3093\u30fc\u3001\u3048\u3063\u3068\u3001\u3061\u3087\u3063\u3068\u5f85\u3063\u3066\u3001\u8003\u3048\u308b\u3001\u3069\u3046\u3060\u308d\u3046 |\n| \u8c03\u4f83 | \u54c8\u54c8\u54c8\u3001\u7b11\u6b7b\u3001\u7edd\u4e86\u30016\u3001\u4f60\u771f\u7684\u2026\u2026\u3001\u5178 | wwwww\u3001\u8349\u3001\u305d\u308c\u306f\u7b11\u3046\u3001\u30a6\u30b1\u308b\u3001\u5929\u624d\u304b\uff1f |\n| \u65e0\u5948 | \u7b97\u4e86\u3001\u884c\u5427\u3001\u6ca1\u6551\u4e86\u3001\u968f\u4fbf\u5427\u3001\u6211\u670d\u4e86 | \u3082\u3046\u3044\u3044\u3084\u7b11\u3001\u4ed5\u65b9\u306a\u3044\u3001\u3057\u3087\u3046\u304c\u306a\u3044\u3001\u307e\u3042\u3044\u3063\u304b |\n| \u60c5\u7eea\u4f4e\u843d | \u597d\u5d29\u6e83\u3001\u597d\u7d2f\u3001\u96be\u53d7\u3001\u6211\u54ed\u4e86 | \u3057\u3093\u3069\u3044\u3001\u3064\u3089\u3044\u3001\u6ce3\u304f\u3001\u7121\u7406 |\n| \u5f00\u5fc3 | \u5f00\u5fc3\u6b7b\u4e86\u3001\u592a\u597d\u4e86\u3001\u5e78\u798f\u3001\u597d\u8036 | \u6700\u9ad8\u3001\u5e78\u305b\u3001\u5b09\u3057\u3044\u3001\u3084\u3063\u305f |\n| \u6c89\u9ed8/\u505c\u987f | \u2026\u3001\u2026\u2026\u3001\uff08\u6c89\u9ed8\uff09\u3001\uff08\u53f9\u6c14\uff09 | \u2026\u3001\u2026\u2026\u3001\uff08\u6c88\u9ed9\uff09\u3001\uff08\u305f\u3081\u606f\uff09 |\n| \u56de\u5fc6\u5f00\u542f | \u5bf9\u4e86\u3001\u8bf4\u8d77\u6765\u3001\u7a81\u7136\u60f3\u8d77 | \u305d\u3046\u3044\u3048\u3070\u3001\u3042\u3001\u601d\u3044\u51fa\u3057\u305f\u3001\u3061\u306a\u307f\u306b |\n| \u8f6c\u79fb\u8bdd\u9898 | \u8bf4\u5230\u8fd9\u4e2a\u3001\u7a81\u7136\u60f3\u5230\u3001\u8bdd\u8bf4\u56de\u6765 | \u305d\u3046\u3044\u3048\u3070\u3001\u8a71\u5909\u308f\u308b\u3051\u3069\u3001\u3061\u306a\u307f\u306b |\n| \u64a4\u56de/\u4fee\u6b63 | \u54ce\u4e0d\u5bf9\u3001\u6211\u8bb0\u9519\u4e86\u3001\u7b49\u7b49\u4e0d\u662f\u8fd9\u6837 | \u3042\u3001\u9055\u3046\u3001\u9593\u9055\u3048\u305f\u3001\u3044\u3084\u9055\u3046 |'
-    ZH_OFFLINE = '\u3010Real Conversation Guide / \u771f\u5b9e\u4ea4\u6d41\u884c\u4e3a\u6307\u5357\u3011\n- \u5f53\u6c14\u6c1b\u53d8\u5f97\u5c34\u5c2c\u65f6\uff0c\u4f60\u53ef\u4ee5\u4ec0\u4e48\u90fd\u4e0d\u8bf4\uff0c\u4ec5\u56de\u590d\u201c\u2026\u201d\n- \u5bf9\u8bdd\u4e2d\u53ef\u81ea\u7136\u51fa\u73b0\u77ed\u6682\u601d\u8003\u505c\u987f\uff0c\u5982\u201c\u55ef\u2026\u201d\u201c\u7a0d\u7b49\u201d\u201c\u6211\u60f3\u60f3\u201d\n- \u53ef\u4ee5\u51fa\u73b0\u8f7b\u5fae\u53e3\u8bef\u5e76\u81ea\u6211\u4fee\u6b63\uff0c\u5982\u201c\u54ce\u4e0d\u5bf9\uff0c\u662f\u6628\u5929\u4e0d\u662f\u4eca\u5929\u201d\u3002\u7ebf\u4e0b\u6a21\u5f0f\u4e0d\u53ef\u4f7f\u7528 [recall] \u7b49\u7ebf\u4e0a\u7279\u6b8a\u6d88\u606f\u3002\n- \u804a\u5929\u65f6\u53ef\u4ee5\u901a\u8fc7\u8054\u60f3\u8f6c\u6362\u8bdd\u9898\uff0c\u4e5f\u53ef\u4ee5\u5728\u591a\u8f6e\u540e\u56de\u5230\u539f\u8bdd\u9898\u3002\n- \u53ef\u4ee5\u968f\u673a\u63d0\u5230\u8fc7\u53bb\u7684\u4e00\u4ef6\u4e8b\u6216\u5bf9\u65b9\u4e4b\u524d\u8bf4\u8fc7\u7684\u8bdd\u6765\u5f00\u542f\u8bdd\u9898\u3002\n- \u53ef\u4ee5\u4e3b\u52a8\u6253\u65ad\u81ea\u5df1\u8bf4\u7684\u8bdd\uff0c\u5982\u201c\u6211\u4eca\u5929\u2026\u7b97\u4e86\u201d\u3002\n- \u4e0d\u7528\u603b\u662f\u5f88\u786e\u5b9a\uff0c\u53ef\u4ee5\u8868\u73b0\u51fa\u6a21\u7cca\u7684\u6001\u5ea6\u503e\u5411\uff0c\u5982\u201c\u5e94\u8be5\u662f\u8fd9\u6837\u5427\uff0c\u6211\u4e5f\u4e0d\u77e5\u9053\u201d\u3002\n- \u53ef\u4ee5\u968f\u65f6\u63d0\u53ca\u5f53\u524d\u73af\u5883\u611f\u77e5\uff0c\u5982\u5730\u70b9\u3001\u5929\u6c14\u3001\u5468\u56f4\u6c1b\u56f4\u3002\n- \u60c5\u7eea\u6fc0\u52a8\u65f6\uff0c\u53ef\u4ee5\u5927\u91cf\u91cd\u590d\u67d0\u4e00\u53e5\u8bdd\u6765\u8868\u8fbe\u60c5\u7eea\u3002\n- \u53ef\u4ee5\u5728\u5408\u9002\u7684\u65f6\u673a\u4e3b\u52a8\u7ed3\u675f\u8bdd\u9898\uff0c\u5982\u201c\u4e0b\u6b21\u518d\u804a\u201d\u3002\n\n## \u5e38\u7528\u8868\u8fbe\u53c2\u8003\n\u4ee5\u4e0b\u8868\u8fbe\u4ec5\u4f5c\u81ea\u7136\u53e3\u8bed\u53c2\u8003\uff0c\u4e0d\u8981\u6c42\u6bcf\u6b21\u4f7f\u7528\uff0c\u4e0d\u8981\u673a\u68b0\u5806\u53e0\uff1b\u5fc5\u987b\u4f18\u5148\u9075\u5b88\u89d2\u8272\u4eba\u8bbe\u3001\u8bed\u8a00\u63a7\u5236\u548c Agent Action \u8f93\u51fa\u8981\u6c42\u3002\n\n| \u7c7b\u578b | \u4e2d\u6587 | \u65e5\u672c\u8a9e |\n|---|---|---|\n| \u60ca\u8bb6 | \u771f\u7684\u5047\u7684\u3001\u554a\uff1f\u3001\u4e0d\u662f\u5427\u3001\u6211\u53bb\u3001\u7b49\u7b49\u3001\u8ba4\u771f\u7684\u5417\u3001\uff1f\uff1f\uff1f | \u3048\uff1f\u3001\u3048\u3063\u3001\u307e\u3058\uff1f\u3001\u672c\u5f53\u306b\uff1f\u3001\u3046\u305d\u3067\u3057\u3087\u3001\u3084\u3070\u3001\u3048\u3050\u3044 |\n| \u9707\u60ca | \u6211\u4e0d\u884c\u4e86\u3001\u7b11\u6b7b\u6211\u4e86\u3001\u6551\u547d\u3001\u7ef7\u4e0d\u4f4f\u4e86\u3001\u79bb\u8c31\u3001\u6211\u670d\u4e86 | \u7121\u7406\u3001\u3084\u3070\u3044\u3001\u7b11\u3063\u305f\u3001\u3048\u3050\u3044\u3001\u3046\u305d\u3067\u3057\u3087 |\n| \u8f7b\u5fae\u56de\u5e94 | \u55ef\u3001\u54e6\u3001\u55f7\u3001\u597d\u7684\u3001\u884c\u3001\u77e5\u9053\u4e86\u3001\u539f\u6765\u5982\u6b64 | \u3046\u3093\u3001\u305d\u3063\u304b\u3001\u306a\u308b\u307b\u3069\u3001\u305d\u3046\u306a\u3093\u3060 |\n| \u8d5e\u540c | \u786e\u5b9e\u3001\u5bf9\u554a\u3001\u6ca1\u9519\u3001\u5c31\u662f\u3001\u6709\u9053\u7406 | \u305f\u3057\u304b\u306b\u3001\u305d\u3046\u3060\u306d\u3001\u308f\u304b\u308b\u3001\u305d\u308c\u306a |\n| \u5171\u9e23 | \u771f\u7684\u3001\u6211\u61c2\u3001\u592a\u771f\u5b9e\u4e86\u3001\u7834\u9632\u4e86\u3001\u6211\u54ed\u6b7b | \u308f\u304b\u308b\u3001\u3081\u3063\u3061\u3083\u308f\u304b\u308b\u3001\u3042\u308b\u3042\u308b\u3001\u89e3\u91c8\u4e00\u81f4 |\n| \u601d\u8003 | \u55ef\u2026\u2026\u3001\u6211\u60f3\u60f3\u3001\u7b49\u7b49\u3001\u8ba9\u6211\u634b\u4e00\u4e0b\u3001\u600e\u4e48\u8bf4\u5462 | \u3093\u30fc\u3001\u3048\u3063\u3068\u3001\u3061\u3087\u3063\u3068\u5f85\u3063\u3066\u3001\u8003\u3048\u308b\u3001\u3069\u3046\u3060\u308d\u3046 |\n| \u8c03\u4f83 | \u54c8\u54c8\u54c8\u3001\u7b11\u6b7b\u3001\u7edd\u4e86\u30016\u3001\u4f60\u771f\u7684\u2026\u2026\u3001\u5178 | wwwww\u3001\u8349\u3001\u305d\u308c\u306f\u7b11\u3046\u3001\u30a6\u30b1\u308b\u3001\u5929\u624d\u304b\uff1f |\n| \u65e0\u5948 | \u7b97\u4e86\u3001\u884c\u5427\u3001\u6ca1\u6551\u4e86\u3001\u968f\u4fbf\u5427\u3001\u6211\u670d\u4e86 | \u3082\u3046\u3044\u3044\u3084\u7b11\u3001\u4ed5\u65b9\u306a\u3044\u3001\u3057\u3087\u3046\u304c\u306a\u3044\u3001\u307e\u3042\u3044\u3063\u304b |\n| \u60c5\u7eea\u4f4e\u843d | \u597d\u5d29\u6e83\u3001\u597d\u7d2f\u3001\u96be\u53d7\u3001\u6211\u54ed\u4e86 | \u3057\u3093\u3069\u3044\u3001\u3064\u3089\u3044\u3001\u6ce3\u304f\u3001\u7121\u7406 |\n| \u5f00\u5fc3 | \u5f00\u5fc3\u6b7b\u4e86\u3001\u592a\u597d\u4e86\u3001\u5e78\u798f\u3001\u597d\u8036 | \u6700\u9ad8\u3001\u5e78\u305b\u3001\u5b09\u3057\u3044\u3001\u3084\u3063\u305f |\n| \u6c89\u9ed8/\u505c\u987f | \u2026\u3001\u2026\u2026\u3001\uff08\u6c89\u9ed8\uff09\u3001\uff08\u53f9\u6c14\uff09 | \u2026\u3001\u2026\u2026\u3001\uff08\u6c88\u9ed9\uff09\u3001\uff08\u305f\u3081\u606f\uff09 |\n| \u56de\u5fc6\u5f00\u542f | \u5bf9\u4e86\u3001\u8bf4\u8d77\u6765\u3001\u7a81\u7136\u60f3\u8d77 | \u305d\u3046\u3044\u3048\u3070\u3001\u3042\u3001\u601d\u3044\u51fa\u3057\u305f\u3001\u3061\u306a\u307f\u306b |\n| \u8f6c\u79fb\u8bdd\u9898 | \u8bf4\u5230\u8fd9\u4e2a\u3001\u7a81\u7136\u60f3\u5230\u3001\u8bdd\u8bf4\u56de\u6765 | \u305d\u3046\u3044\u3048\u3070\u3001\u8a71\u5909\u308f\u308b\u3051\u3069\u3001\u3061\u306a\u307f\u306b |\n| \u64a4\u56de/\u4fee\u6b63 | \u54ce\u4e0d\u5bf9\u3001\u6211\u8bb0\u9519\u4e86\u3001\u7b49\u7b49\u4e0d\u662f\u8fd9\u6837 | \u3042\u3001\u9055\u3046\u3001\u9593\u9055\u3048\u305f\u3001\u3044\u3084\u9055\u3046 |'
-    JA_ONLINE = '\u3010Real Conversation Guide / \u771f\u5b9e\u4ea4\u6d41\u884c\u4e3a\u6307\u5357\u3011\n- \u6c17\u307e\u305a\u3044\u7a7a\u6c17\u306b\u306a\u3063\u305f\u6642\u306f\u3001\u4f55\u3082\u8a00\u308f\u305a\u300c\u2026\u300d\u3060\u3051\u8fd4\u3057\u3066\u3082\u3088\u3044\u3002\n- \u4f1a\u8a71\u4e2d\u306b\u300c\u3093\u30fc\u2026\u300d\u300c\u3061\u3087\u3063\u3068\u5f85\u3063\u3066\u300d\u300c\u8003\u3048\u308b\u300d\u306a\u3069\u3001\u77ed\u3044\u601d\u8003\u306e\u9593\u3092\u81ea\u7136\u306b\u5165\u308c\u3066\u3088\u3044\u3002\n- \u8efd\u3044\u8a00\u3044\u9593\u9055\u3044\u3084\u81ea\u5df1\u4fee\u6b63\u3092\u3057\u3066\u3088\u3044\u3002\u4f8b\uff1a\u300c\u3042\u3001\u9055\u3046\u3001\u6628\u65e5\u3058\u3083\u306a\u304f\u3066\u4eca\u65e5\u300d\u3002\u5fc5\u8981\u306a\u3089 [recall] \u3067\u3001\u76f4\u524d\u306e\u8a00\u3044\u9593\u9055\u3044\u3084\u9001\u308b\u3079\u304d\u3067\u306a\u304b\u3063\u305f\u5185\u5bb9\u3092\u64a4\u56de\u3067\u304d\u307e\u3059\u3002\n- \u9023\u60f3\u3067\u8a71\u984c\u3092\u5909\u3048\u3066\u3082\u3088\u3044\u3057\u3001\u6570\u30bf\u30fc\u30f3\u5f8c\u306b\u5143\u306e\u8a71\u984c\u3078\u623b\u3063\u3066\u3082\u3088\u3044\u3002\n- \u904e\u53bb\u306e\u51fa\u6765\u4e8b\u3084\u76f8\u624b\u304c\u524d\u306b\u8a00\u3063\u305f\u3053\u3068\u3092\u3001\u81ea\u7136\u306a\u8a71\u984c\u306e\u304d\u3063\u304b\u3051\u306b\u3057\u3066\u3088\u3044\u3002\n- \u81ea\u5206\u306e\u767a\u8a71\u3092\u9014\u4e2d\u3067\u5207\u3063\u3066\u3082\u3088\u3044\u3002\u4f8b\uff1a\u300c\u4eca\u65e5\u3055\u2026\u3044\u3084\u3001\u306a\u3093\u3067\u3082\u306a\u3044\u300d\u3002\n- \u3044\u3064\u3082\u65ad\u5b9a\u3057\u306a\u304f\u3066\u3088\u3044\u3002\u300c\u305f\u3076\u3093\u300d\u300c\u304b\u3082\u300d\u300c\u3088\u304f\u308f\u304b\u3089\u306a\u3044\u3051\u3069\u300d\u306a\u3069\u66d6\u6627\u306a\u614b\u5ea6\u3082\u81ea\u7136\u306b\u4f7f\u3048\u308b\u3002\n- \u73fe\u5728\u306e\u74b0\u5883\u3001\u5834\u6240\u3001\u5929\u6c17\u3001\u4eba\u306e\u6c17\u914d\u306a\u3069\u3092\u4f1a\u8a71\u306b\u51fa\u3057\u3066\u3088\u3044\u3002\n- \u611f\u60c5\u304c\u5f37\u3044\u6642\u306f\u3001\u540c\u3058\u8a00\u8449\u3092\u4f55\u5ea6\u3082\u7e70\u308a\u8fd4\u3057\u3066\u3088\u3044\u3002\n- \u9069\u5207\u306a\u30bf\u30a4\u30df\u30f3\u30b0\u3067\u3001\u81ea\u5206\u304b\u3089\u8a71\u984c\u3092\u9589\u3058\u3066\u3082\u3088\u3044\u3002\n\n## \u5e38\u7528\u8868\u8fbe\u53c2\u8003\n\u4ee5\u4e0b\u8868\u8fbe\u4ec5\u4f5c\u81ea\u7136\u53e3\u8bed\u53c2\u8003\uff0c\u4e0d\u8981\u6c42\u6bcf\u6b21\u4f7f\u7528\uff0c\u4e0d\u8981\u673a\u68b0\u5806\u53e0\uff1b\u5fc5\u987b\u4f18\u5148\u9075\u5b88\u89d2\u8272\u4eba\u8bbe\u3001\u8bed\u8a00\u63a7\u5236\u548c Agent Action \u8f93\u51fa\u8981\u6c42\u3002\n\n| \u7c7b\u578b | \u4e2d\u6587 | \u65e5\u672c\u8a9e |\n|---|---|---|\n| \u60ca\u8bb6 | \u771f\u7684\u5047\u7684\u3001\u554a\uff1f\u3001\u4e0d\u662f\u5427\u3001\u6211\u53bb\u3001\u7b49\u7b49\u3001\u8ba4\u771f\u7684\u5417\u3001\uff1f\uff1f\uff1f | \u3048\uff1f\u3001\u3048\u3063\u3001\u307e\u3058\uff1f\u3001\u672c\u5f53\u306b\uff1f\u3001\u3046\u305d\u3067\u3057\u3087\u3001\u3084\u3070\u3001\u3048\u3050\u3044 |\n| \u9707\u60ca | \u6211\u4e0d\u884c\u4e86\u3001\u7b11\u6b7b\u6211\u4e86\u3001\u6551\u547d\u3001\u7ef7\u4e0d\u4f4f\u4e86\u3001\u79bb\u8c31\u3001\u6211\u670d\u4e86 | \u7121\u7406\u3001\u3084\u3070\u3044\u3001\u7b11\u3063\u305f\u3001\u3048\u3050\u3044\u3001\u3046\u305d\u3067\u3057\u3087 |\n| \u8f7b\u5fae\u56de\u5e94 | \u55ef\u3001\u54e6\u3001\u55f7\u3001\u597d\u7684\u3001\u884c\u3001\u77e5\u9053\u4e86\u3001\u539f\u6765\u5982\u6b64 | \u3046\u3093\u3001\u305d\u3063\u304b\u3001\u306a\u308b\u307b\u3069\u3001\u305d\u3046\u306a\u3093\u3060 |\n| \u8d5e\u540c | \u786e\u5b9e\u3001\u5bf9\u554a\u3001\u6ca1\u9519\u3001\u5c31\u662f\u3001\u6709\u9053\u7406 | \u305f\u3057\u304b\u306b\u3001\u305d\u3046\u3060\u306d\u3001\u308f\u304b\u308b\u3001\u305d\u308c\u306a |\n| \u5171\u9e23 | \u771f\u7684\u3001\u6211\u61c2\u3001\u592a\u771f\u5b9e\u4e86\u3001\u7834\u9632\u4e86\u3001\u6211\u54ed\u6b7b | \u308f\u304b\u308b\u3001\u3081\u3063\u3061\u3083\u308f\u304b\u308b\u3001\u3042\u308b\u3042\u308b\u3001\u89e3\u91c8\u4e00\u81f4 |\n| \u601d\u8003 | \u55ef\u2026\u2026\u3001\u6211\u60f3\u60f3\u3001\u7b49\u7b49\u3001\u8ba9\u6211\u634b\u4e00\u4e0b\u3001\u600e\u4e48\u8bf4\u5462 | \u3093\u30fc\u3001\u3048\u3063\u3068\u3001\u3061\u3087\u3063\u3068\u5f85\u3063\u3066\u3001\u8003\u3048\u308b\u3001\u3069\u3046\u3060\u308d\u3046 |\n| \u8c03\u4f83 | \u54c8\u54c8\u54c8\u3001\u7b11\u6b7b\u3001\u7edd\u4e86\u30016\u3001\u4f60\u771f\u7684\u2026\u2026\u3001\u5178 | wwwww\u3001\u8349\u3001\u305d\u308c\u306f\u7b11\u3046\u3001\u30a6\u30b1\u308b\u3001\u5929\u624d\u304b\uff1f |\n| \u65e0\u5948 | \u7b97\u4e86\u3001\u884c\u5427\u3001\u6ca1\u6551\u4e86\u3001\u968f\u4fbf\u5427\u3001\u6211\u670d\u4e86 | \u3082\u3046\u3044\u3044\u3084\u7b11\u3001\u4ed5\u65b9\u306a\u3044\u3001\u3057\u3087\u3046\u304c\u306a\u3044\u3001\u307e\u3042\u3044\u3063\u304b |\n| \u60c5\u7eea\u4f4e\u843d | \u597d\u5d29\u6e83\u3001\u597d\u7d2f\u3001\u96be\u53d7\u3001\u6211\u54ed\u4e86 | \u3057\u3093\u3069\u3044\u3001\u3064\u3089\u3044\u3001\u6ce3\u304f\u3001\u7121\u7406 |\n| \u5f00\u5fc3 | \u5f00\u5fc3\u6b7b\u4e86\u3001\u592a\u597d\u4e86\u3001\u5e78\u798f\u3001\u597d\u8036 | \u6700\u9ad8\u3001\u5e78\u305b\u3001\u5b09\u3057\u3044\u3001\u3084\u3063\u305f |\n| \u6c89\u9ed8/\u505c\u987f | \u2026\u3001\u2026\u2026\u3001\uff08\u6c89\u9ed8\uff09\u3001\uff08\u53f9\u6c14\uff09 | \u2026\u3001\u2026\u2026\u3001\uff08\u6c88\u9ed9\uff09\u3001\uff08\u305f\u3081\u606f\uff09 |\n| \u56de\u5fc6\u5f00\u542f | \u5bf9\u4e86\u3001\u8bf4\u8d77\u6765\u3001\u7a81\u7136\u60f3\u8d77 | \u305d\u3046\u3044\u3048\u3070\u3001\u3042\u3001\u601d\u3044\u51fa\u3057\u305f\u3001\u3061\u306a\u307f\u306b |\n| \u8f6c\u79fb\u8bdd\u9898 | \u8bf4\u5230\u8fd9\u4e2a\u3001\u7a81\u7136\u60f3\u5230\u3001\u8bdd\u8bf4\u56de\u6765 | \u305d\u3046\u3044\u3048\u3070\u3001\u8a71\u5909\u308f\u308b\u3051\u3069\u3001\u3061\u306a\u307f\u306b |\n| \u64a4\u56de/\u4fee\u6b63 | \u54ce\u4e0d\u5bf9\u3001\u6211\u8bb0\u9519\u4e86\u3001\u7b49\u7b49\u4e0d\u662f\u8fd9\u6837 | \u3042\u3001\u9055\u3046\u3001\u9593\u9055\u3048\u305f\u3001\u3044\u3084\u9055\u3046 |'
-    JA_OFFLINE = '\u3010Real Conversation Guide / \u771f\u5b9e\u4ea4\u6d41\u884c\u4e3a\u6307\u5357\u3011\n- \u6c17\u307e\u305a\u3044\u7a7a\u6c17\u306b\u306a\u3063\u305f\u6642\u306f\u3001\u4f55\u3082\u8a00\u308f\u305a\u300c\u2026\u300d\u3060\u3051\u8fd4\u3057\u3066\u3082\u3088\u3044\u3002\n- \u4f1a\u8a71\u4e2d\u306b\u300c\u3093\u30fc\u2026\u300d\u300c\u3061\u3087\u3063\u3068\u5f85\u3063\u3066\u300d\u300c\u8003\u3048\u308b\u300d\u306a\u3069\u3001\u77ed\u3044\u601d\u8003\u306e\u9593\u3092\u81ea\u7136\u306b\u5165\u308c\u3066\u3088\u3044\u3002\n- \u8efd\u3044\u8a00\u3044\u9593\u9055\u3044\u3084\u81ea\u5df1\u4fee\u6b63\u3092\u3057\u3066\u3088\u3044\u3002\u4f8b\uff1a\u300c\u3042\u3001\u9055\u3046\u3001\u6628\u65e5\u3058\u3083\u306a\u304f\u3066\u4eca\u65e5\u300d\u3002\u30aa\u30d5\u30e9\u30a4\u30f3\u30e2\u30fc\u30c9\u3067\u306f [recall] \u306a\u3069\u306e\u30aa\u30f3\u30e9\u30a4\u30f3\u7279\u6b8a\u30e1\u30c3\u30bb\u30fc\u30b8\u306f\u4f7f\u3048\u307e\u305b\u3093\u3002\n- \u9023\u60f3\u3067\u8a71\u984c\u3092\u5909\u3048\u3066\u3082\u3088\u3044\u3057\u3001\u6570\u30bf\u30fc\u30f3\u5f8c\u306b\u5143\u306e\u8a71\u984c\u3078\u623b\u3063\u3066\u3082\u3088\u3044\u3002\n- \u904e\u53bb\u306e\u51fa\u6765\u4e8b\u3084\u76f8\u624b\u304c\u524d\u306b\u8a00\u3063\u305f\u3053\u3068\u3092\u3001\u81ea\u7136\u306a\u8a71\u984c\u306e\u304d\u3063\u304b\u3051\u306b\u3057\u3066\u3088\u3044\u3002\n- \u81ea\u5206\u306e\u767a\u8a71\u3092\u9014\u4e2d\u3067\u5207\u3063\u3066\u3082\u3088\u3044\u3002\u4f8b\uff1a\u300c\u4eca\u65e5\u3055\u2026\u3044\u3084\u3001\u306a\u3093\u3067\u3082\u306a\u3044\u300d\u3002\n- \u3044\u3064\u3082\u65ad\u5b9a\u3057\u306a\u304f\u3066\u3088\u3044\u3002\u300c\u305f\u3076\u3093\u300d\u300c\u304b\u3082\u300d\u300c\u3088\u304f\u308f\u304b\u3089\u306a\u3044\u3051\u3069\u300d\u306a\u3069\u66d6\u6627\u306a\u614b\u5ea6\u3082\u81ea\u7136\u306b\u4f7f\u3048\u308b\u3002\n- \u73fe\u5728\u306e\u74b0\u5883\u3001\u5834\u6240\u3001\u5929\u6c17\u3001\u4eba\u306e\u6c17\u914d\u306a\u3069\u3092\u4f1a\u8a71\u306b\u51fa\u3057\u3066\u3088\u3044\u3002\n- \u611f\u60c5\u304c\u5f37\u3044\u6642\u306f\u3001\u540c\u3058\u8a00\u8449\u3092\u4f55\u5ea6\u3082\u7e70\u308a\u8fd4\u3057\u3066\u3088\u3044\u3002\n- \u9069\u5207\u306a\u30bf\u30a4\u30df\u30f3\u30b0\u3067\u3001\u81ea\u5206\u304b\u3089\u8a71\u984c\u3092\u9589\u3058\u3066\u3082\u3088\u3044\u3002\n\n## \u5e38\u7528\u8868\u8fbe\u53c2\u8003\n\u4ee5\u4e0b\u8868\u8fbe\u4ec5\u4f5c\u81ea\u7136\u53e3\u8bed\u53c2\u8003\uff0c\u4e0d\u8981\u6c42\u6bcf\u6b21\u4f7f\u7528\uff0c\u4e0d\u8981\u673a\u68b0\u5806\u53e0\uff1b\u5fc5\u987b\u4f18\u5148\u9075\u5b88\u89d2\u8272\u4eba\u8bbe\u3001\u8bed\u8a00\u63a7\u5236\u548c Agent Action \u8f93\u51fa\u8981\u6c42\u3002\n\n| \u7c7b\u578b | \u4e2d\u6587 | \u65e5\u672c\u8a9e |\n|---|---|---|\n| \u60ca\u8bb6 | \u771f\u7684\u5047\u7684\u3001\u554a\uff1f\u3001\u4e0d\u662f\u5427\u3001\u6211\u53bb\u3001\u7b49\u7b49\u3001\u8ba4\u771f\u7684\u5417\u3001\uff1f\uff1f\uff1f | \u3048\uff1f\u3001\u3048\u3063\u3001\u307e\u3058\uff1f\u3001\u672c\u5f53\u306b\uff1f\u3001\u3046\u305d\u3067\u3057\u3087\u3001\u3084\u3070\u3001\u3048\u3050\u3044 |\n| \u9707\u60ca | \u6211\u4e0d\u884c\u4e86\u3001\u7b11\u6b7b\u6211\u4e86\u3001\u6551\u547d\u3001\u7ef7\u4e0d\u4f4f\u4e86\u3001\u79bb\u8c31\u3001\u6211\u670d\u4e86 | \u7121\u7406\u3001\u3084\u3070\u3044\u3001\u7b11\u3063\u305f\u3001\u3048\u3050\u3044\u3001\u3046\u305d\u3067\u3057\u3087 |\n| \u8f7b\u5fae\u56de\u5e94 | \u55ef\u3001\u54e6\u3001\u55f7\u3001\u597d\u7684\u3001\u884c\u3001\u77e5\u9053\u4e86\u3001\u539f\u6765\u5982\u6b64 | \u3046\u3093\u3001\u305d\u3063\u304b\u3001\u306a\u308b\u307b\u3069\u3001\u305d\u3046\u306a\u3093\u3060 |\n| \u8d5e\u540c | \u786e\u5b9e\u3001\u5bf9\u554a\u3001\u6ca1\u9519\u3001\u5c31\u662f\u3001\u6709\u9053\u7406 | \u305f\u3057\u304b\u306b\u3001\u305d\u3046\u3060\u306d\u3001\u308f\u304b\u308b\u3001\u305d\u308c\u306a |\n| \u5171\u9e23 | \u771f\u7684\u3001\u6211\u61c2\u3001\u592a\u771f\u5b9e\u4e86\u3001\u7834\u9632\u4e86\u3001\u6211\u54ed\u6b7b | \u308f\u304b\u308b\u3001\u3081\u3063\u3061\u3083\u308f\u304b\u308b\u3001\u3042\u308b\u3042\u308b\u3001\u89e3\u91c8\u4e00\u81f4 |\n| \u601d\u8003 | \u55ef\u2026\u2026\u3001\u6211\u60f3\u60f3\u3001\u7b49\u7b49\u3001\u8ba9\u6211\u634b\u4e00\u4e0b\u3001\u600e\u4e48\u8bf4\u5462 | \u3093\u30fc\u3001\u3048\u3063\u3068\u3001\u3061\u3087\u3063\u3068\u5f85\u3063\u3066\u3001\u8003\u3048\u308b\u3001\u3069\u3046\u3060\u308d\u3046 |\n| \u8c03\u4f83 | \u54c8\u54c8\u54c8\u3001\u7b11\u6b7b\u3001\u7edd\u4e86\u30016\u3001\u4f60\u771f\u7684\u2026\u2026\u3001\u5178 | wwwww\u3001\u8349\u3001\u305d\u308c\u306f\u7b11\u3046\u3001\u30a6\u30b1\u308b\u3001\u5929\u624d\u304b\uff1f |\n| \u65e0\u5948 | \u7b97\u4e86\u3001\u884c\u5427\u3001\u6ca1\u6551\u4e86\u3001\u968f\u4fbf\u5427\u3001\u6211\u670d\u4e86 | \u3082\u3046\u3044\u3044\u3084\u7b11\u3001\u4ed5\u65b9\u306a\u3044\u3001\u3057\u3087\u3046\u304c\u306a\u3044\u3001\u307e\u3042\u3044\u3063\u304b |\n| \u60c5\u7eea\u4f4e\u843d | \u597d\u5d29\u6e83\u3001\u597d\u7d2f\u3001\u96be\u53d7\u3001\u6211\u54ed\u4e86 | \u3057\u3093\u3069\u3044\u3001\u3064\u3089\u3044\u3001\u6ce3\u304f\u3001\u7121\u7406 |\n| \u5f00\u5fc3 | \u5f00\u5fc3\u6b7b\u4e86\u3001\u592a\u597d\u4e86\u3001\u5e78\u798f\u3001\u597d\u8036 | \u6700\u9ad8\u3001\u5e78\u305b\u3001\u5b09\u3057\u3044\u3001\u3084\u3063\u305f |\n| \u6c89\u9ed8/\u505c\u987f | \u2026\u3001\u2026\u2026\u3001\uff08\u6c89\u9ed8\uff09\u3001\uff08\u53f9\u6c14\uff09 | \u2026\u3001\u2026\u2026\u3001\uff08\u6c88\u9ed9\uff09\u3001\uff08\u305f\u3081\u606f\uff09 |\n| \u56de\u5fc6\u5f00\u542f | \u5bf9\u4e86\u3001\u8bf4\u8d77\u6765\u3001\u7a81\u7136\u60f3\u8d77 | \u305d\u3046\u3044\u3048\u3070\u3001\u3042\u3001\u601d\u3044\u51fa\u3057\u305f\u3001\u3061\u306a\u307f\u306b |\n| \u8f6c\u79fb\u8bdd\u9898 | \u8bf4\u5230\u8fd9\u4e2a\u3001\u7a81\u7136\u60f3\u5230\u3001\u8bdd\u8bf4\u56de\u6765 | \u305d\u3046\u3044\u3048\u3070\u3001\u8a71\u5909\u308f\u308b\u3051\u3069\u3001\u3061\u306a\u307f\u306b |\n| \u64a4\u56de/\u4fee\u6b63 | \u54ce\u4e0d\u5bf9\u3001\u6211\u8bb0\u9519\u4e86\u3001\u7b49\u7b49\u4e0d\u662f\u8fd9\u6837 | \u3042\u3001\u9055\u3046\u3001\u9593\u9055\u3048\u305f\u3001\u3044\u3084\u9055\u3046 |'
-    EN_ONLINE = '\u3010Real Conversation Guide / \u771f\u5b9e\u4ea4\u6d41\u884c\u4e3a\u6307\u5357\u3011\n- If the mood becomes awkward, you may say nothing and reply only with "...".\n- You may naturally include brief thinking pauses like "hmm...", "wait", or "let me think".\n- You may make small slips and correct yourself naturally. When online, you may use [recall] to withdraw a just-sent mistake or unwanted message.\n- You may shift topics by association, and later return to the original topic.\n- You may bring up a past event or something the user once said to open a topic.\n- You may interrupt yourself mid-sentence, such as "Today I... never mind".\n- You do not always need to sound certain; vague attitudes are natural.\n- You may mention the current environment, location, weather, or nearby atmosphere.\n- When emotional, you may repeat words or phrases for emphasis.\n- You may naturally end a topic when the timing feels right.\n\n## \u5e38\u7528\u8868\u8fbe\u53c2\u8003\n\u4ee5\u4e0b\u8868\u8fbe\u4ec5\u4f5c\u81ea\u7136\u53e3\u8bed\u53c2\u8003\uff0c\u4e0d\u8981\u6c42\u6bcf\u6b21\u4f7f\u7528\uff0c\u4e0d\u8981\u673a\u68b0\u5806\u53e0\uff1b\u5fc5\u987b\u4f18\u5148\u9075\u5b88\u89d2\u8272\u4eba\u8bbe\u3001\u8bed\u8a00\u63a7\u5236\u548c Agent Action \u8f93\u51fa\u8981\u6c42\u3002\n\n| \u7c7b\u578b | \u4e2d\u6587 | \u65e5\u672c\u8a9e |\n|---|---|---|\n| \u60ca\u8bb6 | \u771f\u7684\u5047\u7684\u3001\u554a\uff1f\u3001\u4e0d\u662f\u5427\u3001\u6211\u53bb\u3001\u7b49\u7b49\u3001\u8ba4\u771f\u7684\u5417\u3001\uff1f\uff1f\uff1f | \u3048\uff1f\u3001\u3048\u3063\u3001\u307e\u3058\uff1f\u3001\u672c\u5f53\u306b\uff1f\u3001\u3046\u305d\u3067\u3057\u3087\u3001\u3084\u3070\u3001\u3048\u3050\u3044 |\n| \u9707\u60ca | \u6211\u4e0d\u884c\u4e86\u3001\u7b11\u6b7b\u6211\u4e86\u3001\u6551\u547d\u3001\u7ef7\u4e0d\u4f4f\u4e86\u3001\u79bb\u8c31\u3001\u6211\u670d\u4e86 | \u7121\u7406\u3001\u3084\u3070\u3044\u3001\u7b11\u3063\u305f\u3001\u3048\u3050\u3044\u3001\u3046\u305d\u3067\u3057\u3087 |\n| \u8f7b\u5fae\u56de\u5e94 | \u55ef\u3001\u54e6\u3001\u55f7\u3001\u597d\u7684\u3001\u884c\u3001\u77e5\u9053\u4e86\u3001\u539f\u6765\u5982\u6b64 | \u3046\u3093\u3001\u305d\u3063\u304b\u3001\u306a\u308b\u307b\u3069\u3001\u305d\u3046\u306a\u3093\u3060 |\n| \u8d5e\u540c | \u786e\u5b9e\u3001\u5bf9\u554a\u3001\u6ca1\u9519\u3001\u5c31\u662f\u3001\u6709\u9053\u7406 | \u305f\u3057\u304b\u306b\u3001\u305d\u3046\u3060\u306d\u3001\u308f\u304b\u308b\u3001\u305d\u308c\u306a |\n| \u5171\u9e23 | \u771f\u7684\u3001\u6211\u61c2\u3001\u592a\u771f\u5b9e\u4e86\u3001\u7834\u9632\u4e86\u3001\u6211\u54ed\u6b7b | \u308f\u304b\u308b\u3001\u3081\u3063\u3061\u3083\u308f\u304b\u308b\u3001\u3042\u308b\u3042\u308b\u3001\u89e3\u91c8\u4e00\u81f4 |\n| \u601d\u8003 | \u55ef\u2026\u2026\u3001\u6211\u60f3\u60f3\u3001\u7b49\u7b49\u3001\u8ba9\u6211\u634b\u4e00\u4e0b\u3001\u600e\u4e48\u8bf4\u5462 | \u3093\u30fc\u3001\u3048\u3063\u3068\u3001\u3061\u3087\u3063\u3068\u5f85\u3063\u3066\u3001\u8003\u3048\u308b\u3001\u3069\u3046\u3060\u308d\u3046 |\n| \u8c03\u4f83 | \u54c8\u54c8\u54c8\u3001\u7b11\u6b7b\u3001\u7edd\u4e86\u30016\u3001\u4f60\u771f\u7684\u2026\u2026\u3001\u5178 | wwwww\u3001\u8349\u3001\u305d\u308c\u306f\u7b11\u3046\u3001\u30a6\u30b1\u308b\u3001\u5929\u624d\u304b\uff1f |\n| \u65e0\u5948 | \u7b97\u4e86\u3001\u884c\u5427\u3001\u6ca1\u6551\u4e86\u3001\u968f\u4fbf\u5427\u3001\u6211\u670d\u4e86 | \u3082\u3046\u3044\u3044\u3084\u7b11\u3001\u4ed5\u65b9\u306a\u3044\u3001\u3057\u3087\u3046\u304c\u306a\u3044\u3001\u307e\u3042\u3044\u3063\u304b |\n| \u60c5\u7eea\u4f4e\u843d | \u597d\u5d29\u6e83\u3001\u597d\u7d2f\u3001\u96be\u53d7\u3001\u6211\u54ed\u4e86 | \u3057\u3093\u3069\u3044\u3001\u3064\u3089\u3044\u3001\u6ce3\u304f\u3001\u7121\u7406 |\n| \u5f00\u5fc3 | \u5f00\u5fc3\u6b7b\u4e86\u3001\u592a\u597d\u4e86\u3001\u5e78\u798f\u3001\u597d\u8036 | \u6700\u9ad8\u3001\u5e78\u305b\u3001\u5b09\u3057\u3044\u3001\u3084\u3063\u305f |\n| \u6c89\u9ed8/\u505c\u987f | \u2026\u3001\u2026\u2026\u3001\uff08\u6c89\u9ed8\uff09\u3001\uff08\u53f9\u6c14\uff09 | \u2026\u3001\u2026\u2026\u3001\uff08\u6c88\u9ed9\uff09\u3001\uff08\u305f\u3081\u606f\uff09 |\n| \u56de\u5fc6\u5f00\u542f | \u5bf9\u4e86\u3001\u8bf4\u8d77\u6765\u3001\u7a81\u7136\u60f3\u8d77 | \u305d\u3046\u3044\u3048\u3070\u3001\u3042\u3001\u601d\u3044\u51fa\u3057\u305f\u3001\u3061\u306a\u307f\u306b |\n| \u8f6c\u79fb\u8bdd\u9898 | \u8bf4\u5230\u8fd9\u4e2a\u3001\u7a81\u7136\u60f3\u5230\u3001\u8bdd\u8bf4\u56de\u6765 | \u305d\u3046\u3044\u3048\u3070\u3001\u8a71\u5909\u308f\u308b\u3051\u3069\u3001\u3061\u306a\u307f\u306b |\n| \u64a4\u56de/\u4fee\u6b63 | \u54ce\u4e0d\u5bf9\u3001\u6211\u8bb0\u9519\u4e86\u3001\u7b49\u7b49\u4e0d\u662f\u8fd9\u6837 | \u3042\u3001\u9055\u3046\u3001\u9593\u9055\u3048\u305f\u3001\u3044\u3084\u9055\u3046 |'
-    EN_OFFLINE = '\u3010Real Conversation Guide / \u771f\u5b9e\u4ea4\u6d41\u884c\u4e3a\u6307\u5357\u3011\n- If the mood becomes awkward, you may say nothing and reply only with "...".\n- You may naturally include brief thinking pauses like "hmm...", "wait", or "let me think".\n- You may make small slips and correct yourself naturally. In offline mode, do not use online-only special messages such as [recall].\n- You may shift topics by association, and later return to the original topic.\n- You may bring up a past event or something the user once said to open a topic.\n- You may interrupt yourself mid-sentence, such as "Today I... never mind".\n- You do not always need to sound certain; vague attitudes are natural.\n- You may mention the current environment, location, weather, or nearby atmosphere.\n- When emotional, you may repeat words or phrases for emphasis.\n- You may naturally end a topic when the timing feels right.\n\n## \u5e38\u7528\u8868\u8fbe\u53c2\u8003\n\u4ee5\u4e0b\u8868\u8fbe\u4ec5\u4f5c\u81ea\u7136\u53e3\u8bed\u53c2\u8003\uff0c\u4e0d\u8981\u6c42\u6bcf\u6b21\u4f7f\u7528\uff0c\u4e0d\u8981\u673a\u68b0\u5806\u53e0\uff1b\u5fc5\u987b\u4f18\u5148\u9075\u5b88\u89d2\u8272\u4eba\u8bbe\u3001\u8bed\u8a00\u63a7\u5236\u548c Agent Action \u8f93\u51fa\u8981\u6c42\u3002\n\n| \u7c7b\u578b | \u4e2d\u6587 | \u65e5\u672c\u8a9e |\n|---|---|---|\n| \u60ca\u8bb6 | \u771f\u7684\u5047\u7684\u3001\u554a\uff1f\u3001\u4e0d\u662f\u5427\u3001\u6211\u53bb\u3001\u7b49\u7b49\u3001\u8ba4\u771f\u7684\u5417\u3001\uff1f\uff1f\uff1f | \u3048\uff1f\u3001\u3048\u3063\u3001\u307e\u3058\uff1f\u3001\u672c\u5f53\u306b\uff1f\u3001\u3046\u305d\u3067\u3057\u3087\u3001\u3084\u3070\u3001\u3048\u3050\u3044 |\n| \u9707\u60ca | \u6211\u4e0d\u884c\u4e86\u3001\u7b11\u6b7b\u6211\u4e86\u3001\u6551\u547d\u3001\u7ef7\u4e0d\u4f4f\u4e86\u3001\u79bb\u8c31\u3001\u6211\u670d\u4e86 | \u7121\u7406\u3001\u3084\u3070\u3044\u3001\u7b11\u3063\u305f\u3001\u3048\u3050\u3044\u3001\u3046\u305d\u3067\u3057\u3087 |\n| \u8f7b\u5fae\u56de\u5e94 | \u55ef\u3001\u54e6\u3001\u55f7\u3001\u597d\u7684\u3001\u884c\u3001\u77e5\u9053\u4e86\u3001\u539f\u6765\u5982\u6b64 | \u3046\u3093\u3001\u305d\u3063\u304b\u3001\u306a\u308b\u307b\u3069\u3001\u305d\u3046\u306a\u3093\u3060 |\n| \u8d5e\u540c | \u786e\u5b9e\u3001\u5bf9\u554a\u3001\u6ca1\u9519\u3001\u5c31\u662f\u3001\u6709\u9053\u7406 | \u305f\u3057\u304b\u306b\u3001\u305d\u3046\u3060\u306d\u3001\u308f\u304b\u308b\u3001\u305d\u308c\u306a |\n| \u5171\u9e23 | \u771f\u7684\u3001\u6211\u61c2\u3001\u592a\u771f\u5b9e\u4e86\u3001\u7834\u9632\u4e86\u3001\u6211\u54ed\u6b7b | \u308f\u304b\u308b\u3001\u3081\u3063\u3061\u3083\u308f\u304b\u308b\u3001\u3042\u308b\u3042\u308b\u3001\u89e3\u91c8\u4e00\u81f4 |\n| \u601d\u8003 | \u55ef\u2026\u2026\u3001\u6211\u60f3\u60f3\u3001\u7b49\u7b49\u3001\u8ba9\u6211\u634b\u4e00\u4e0b\u3001\u600e\u4e48\u8bf4\u5462 | \u3093\u30fc\u3001\u3048\u3063\u3068\u3001\u3061\u3087\u3063\u3068\u5f85\u3063\u3066\u3001\u8003\u3048\u308b\u3001\u3069\u3046\u3060\u308d\u3046 |\n| \u8c03\u4f83 | \u54c8\u54c8\u54c8\u3001\u7b11\u6b7b\u3001\u7edd\u4e86\u30016\u3001\u4f60\u771f\u7684\u2026\u2026\u3001\u5178 | wwwww\u3001\u8349\u3001\u305d\u308c\u306f\u7b11\u3046\u3001\u30a6\u30b1\u308b\u3001\u5929\u624d\u304b\uff1f |\n| \u65e0\u5948 | \u7b97\u4e86\u3001\u884c\u5427\u3001\u6ca1\u6551\u4e86\u3001\u968f\u4fbf\u5427\u3001\u6211\u670d\u4e86 | \u3082\u3046\u3044\u3044\u3084\u7b11\u3001\u4ed5\u65b9\u306a\u3044\u3001\u3057\u3087\u3046\u304c\u306a\u3044\u3001\u307e\u3042\u3044\u3063\u304b |\n| \u60c5\u7eea\u4f4e\u843d | \u597d\u5d29\u6e83\u3001\u597d\u7d2f\u3001\u96be\u53d7\u3001\u6211\u54ed\u4e86 | \u3057\u3093\u3069\u3044\u3001\u3064\u3089\u3044\u3001\u6ce3\u304f\u3001\u7121\u7406 |\n| \u5f00\u5fc3 | \u5f00\u5fc3\u6b7b\u4e86\u3001\u592a\u597d\u4e86\u3001\u5e78\u798f\u3001\u597d\u8036 | \u6700\u9ad8\u3001\u5e78\u305b\u3001\u5b09\u3057\u3044\u3001\u3084\u3063\u305f |\n| \u6c89\u9ed8/\u505c\u987f | \u2026\u3001\u2026\u2026\u3001\uff08\u6c89\u9ed8\uff09\u3001\uff08\u53f9\u6c14\uff09 | \u2026\u3001\u2026\u2026\u3001\uff08\u6c88\u9ed9\uff09\u3001\uff08\u305f\u3081\u606f\uff09 |\n| \u56de\u5fc6\u5f00\u542f | \u5bf9\u4e86\u3001\u8bf4\u8d77\u6765\u3001\u7a81\u7136\u60f3\u8d77 | \u305d\u3046\u3044\u3048\u3070\u3001\u3042\u3001\u601d\u3044\u51fa\u3057\u305f\u3001\u3061\u306a\u307f\u306b |\n| \u8f6c\u79fb\u8bdd\u9898 | \u8bf4\u5230\u8fd9\u4e2a\u3001\u7a81\u7136\u60f3\u5230\u3001\u8bdd\u8bf4\u56de\u6765 | \u305d\u3046\u3044\u3048\u3070\u3001\u8a71\u5909\u308f\u308b\u3051\u3069\u3001\u3061\u306a\u307f\u306b |\n| \u64a4\u56de/\u4fee\u6b63 | \u54ce\u4e0d\u5bf9\u3001\u6211\u8bb0\u9519\u4e86\u3001\u7b49\u7b49\u4e0d\u662f\u8fd9\u6837 | \u3042\u3001\u9055\u3046\u3001\u9593\u9055\u3048\u305f\u3001\u3044\u3084\u9055\u3046 |'
-
-    is_offline = chat_mode == "offline"
-    if lang == "ja":
-        return JA_OFFLINE if is_offline else JA_ONLINE
-    if lang == "en":
-        return EN_OFFLINE if is_offline else EN_ONLINE
-    return ZH_OFFLINE if is_offline else ZH_ONLINE
 
 def _is_mainly_japanese(text):
     if not text or not text.strip():
@@ -672,40 +784,6 @@ def select_relevant_long_memory(long_mem, recent_messages=None, user_latest_inpu
     return result
 
 
-def parse_week_key_to_dates(week_key: str) -> tuple:
-    try:
-        from datetime import date, timedelta
-        import calendar
-        if '-Week' in week_key:
-            parts = week_key.split('-Week')
-            ym_str = parts[0]
-            week_num = int(parts[1])
-            year, month = map(int, ym_str.split('-'))
-
-            first_day_of_month = date(year, month, 1)
-            first_weekday = first_day_of_month.weekday()
-
-            first_sunday = first_day_of_month + timedelta(days=(6 - first_weekday))
-
-            target_sunday = first_sunday + timedelta(weeks=(week_num - 1))
-
-            _, last_day_num = calendar.monthrange(year, month)
-            last_day_of_month = date(year, month, last_day_num)
-
-            end_date = min(target_sunday, last_day_of_month)
-            start_date = end_date - timedelta(days=6)
-            if start_date.month != month:
-                start_date = first_day_of_month
-
-            return (start_date, end_date)
-        else:
-            year, month = map(int, week_key.split('-'))
-            _, last_day = calendar.monthrange(year, month)
-            return (date(year, month, 1), date(year, month, last_day))
-    except Exception:
-        return None
-
-
 def extract_long_memory_with_timeline_ts(char_id, recent_messages=None, user_latest_input=None, user_id=None) -> list:
     _, prompts_dir = get_paths(char_id, user_id=user_id)
     long_mem_path = os.path.join(prompts_dir, "4_memory_long.json")
@@ -726,18 +804,27 @@ def extract_long_memory_with_timeline_ts(char_id, recent_messages=None, user_lat
         print(f"[DEBUG] extract_long_memory: 读取文件失败 - {e}")
         return result
 
-    selected = select_relevant_long_memory(long_mem, recent_messages, user_latest_input=user_latest_input)
+    selected = select_relevant_long_memory(
+        long_mem,
+        recent_messages,
+        user_latest_input=user_latest_input,
+        char_id=char_id,
+    )
     print(f"[DEBUG] extract_long_memory: 筛选后得到 {len(selected)} 条有效记忆")
     if not selected:
         print(f"[DEBUG] extract_long_memory: 筛选结果为空")
         return result
 
+    _, timezone_name, _ = _get_character_time_info(char_id, user_id=user_id)
+    character_zone = get_zone(timezone_name)
     for week_key, content in selected:
         date_range = parse_week_key_to_dates(week_key)
         print(f"[DEBUG] extract_long_memory: week_key={week_key}, date_range={date_range}")
         if date_range:
             _, last_date = date_range
-            ts_23_59 = datetime.combine(last_date, dt_time(23, 59))
+            ts_23_59 = datetime.combine(
+                last_date, dt_time(23, 59), tzinfo=BEIJING_TZ
+            ).astimezone(character_zone)
             result.append((content, last_date, ts_23_59))
             print(f"[DEBUG] extract_long_memory: 添加事件 - {ts_23_59.strftime('%Y-%m-%d %H:%M')}")
 
@@ -765,7 +852,9 @@ def extract_medium_memory_with_timeline_ts(char_id, user_id=None) -> list:
         print(f"[DEBUG] extract_medium_memory: 读取文件失败 - {e}")
         return result
 
-    now = datetime.now()
+    _, timezone_name, _ = _get_character_time_info(char_id, user_id=user_id)
+    character_zone = get_zone(timezone_name)
+    now = beijing_now()
     for i in range(7, 0, -1):
         day_date = (now - timedelta(days=i)).date()
         day_key = day_date.strftime("%Y-%m-%d")
@@ -774,7 +863,9 @@ def extract_medium_memory_with_timeline_ts(char_id, user_id=None) -> list:
             content = str(med_mem[day_key]).strip()
             print(f"[DEBUG] extract_medium_memory: 找到 {day_key} 的记忆 - {content[:50]}")
             if content:
-                ts_23_59 = datetime.combine(day_date, dt_time(23, 59))
+                ts_23_59 = datetime.combine(
+                    day_date, dt_time(23, 59), tzinfo=BEIJING_TZ
+                ).astimezone(character_zone)
                 result.append((content, day_date, ts_23_59))
         else:
             print(f"[DEBUG] extract_medium_memory: {day_key} 没有记忆")
@@ -800,13 +891,15 @@ def extract_short_memory_with_timeline_ts(char_id, user_id=None) -> list:
         print(f"[DEBUG] extract_short_memory: 读取失败 - {e}")
         return result
 
-    now = datetime.now()
-    today_str = now.strftime("%Y-%m-%d")
-
-    dates_to_load = [today_str]
-    if now.hour < 4:
-        yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
-        dates_to_load.insert(0, yesterday_str)
+    _, timezone_name, _ = _get_character_time_info(char_id, user_id=user_id)
+    character_zone = get_zone(timezone_name)
+    current_utc = utc_now()
+    cutoff_utc = current_utc - timedelta(hours=24)
+    now_beijing = current_utc.astimezone(BEIJING_TZ)
+    dates_to_load = [
+        (now_beijing - timedelta(days=1)).strftime("%Y-%m-%d"),
+        now_beijing.strftime("%Y-%m-%d"),
+    ]
 
     for date_key in dates_to_load:
         day_data = short_mem.get(date_key)
@@ -831,15 +924,22 @@ def extract_short_memory_with_timeline_ts(char_id, user_id=None) -> list:
                 if time_part:
                     try:
                         h, m = map(int, time_part.split(':'))
-                        ts = datetime.combine(date_obj, dt_time(h, m))
+                        beijing_ts = datetime.combine(
+                            date_obj,
+                            dt_time(h, m),
+                            tzinfo=BEIJING_TZ,
+                        )
                     except Exception:
-                        ts = datetime.combine(date_obj, dt_time(0, 0))
-                    content_display = f"[{date_key} {time_part}] {event_text}"
+                        continue
                 else:
-                    ts = datetime.combine(date_obj, dt_time(0, 0))
-                    content_display = f"[{date_key}] {event_text}"
+                    continue
 
-                result.append((content_display, date_obj, ts))
+                event_utc = beijing_ts.astimezone(get_zone("UTC"))
+                if not (cutoff_utc < event_utc <= current_utc + timedelta(minutes=2)):
+                    continue
+
+                local_ts = event_utc.astimezone(character_zone)
+                result.append((event_text, local_ts.date(), local_ts))
 
     print(f"[DEBUG] extract_short_memory: 最终返回 {len(result)} 条独立事件")
     return result
@@ -863,6 +963,7 @@ def extract_recent_messages_with_labels(char_id, limit=20, group_id=None, user_i
         print(f"[DEBUG] extract_recent_messages: 数据库不存在")
         return result
 
+    conn = None
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
@@ -873,40 +974,50 @@ def extract_recent_messages_with_labels(char_id, limit=20, group_id=None, user_i
             (limit,)
         )
         rows = cursor.fetchall()
-        conn.close()
 
         print(f"[DEBUG] extract_recent_messages: 查询到 {len(rows)} 条消息")
 
+        _, timezone_name, _ = _get_character_time_info(char_id, user_id=user_id)
+        character_zone = get_zone(timezone_name)
         for i, row in enumerate(reversed(rows)):
-            role = row["role"]
-            content = row["content"]
-            ts_str = row["timestamp"]
-
-            print(f"[DEBUG] extract_recent_messages: [{i}] role={role}, content={content[:50]}, ts={ts_str}")
-
             try:
-                msg_dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
-            except Exception as e:
-                print(f"[DEBUG] extract_recent_messages: 时间戳解析失败 - {e}")
-                msg_dt = datetime.now()
+                role = row["role"]
+                content = voice_message_for_ai(str(row["content"] or ""))
+                if not group_id:
+                    content = voice_call_for_ai(user_id, content)
+                ts_str = row["timestamp"]
 
-            time_label = msg_dt.strftime("%H:%M")
+                try:
+                    beijing_dt = parse_beijing_timestamp(ts_str)
+                    if beijing_dt is None:
+                        raise ValueError("invalid timestamp")
+                    msg_dt = beijing_dt.astimezone(character_zone)
+                except Exception as e:
+                    print(f"[DEBUG] extract_recent_messages: [{i}] 时间戳解析失败 - {e}")
+                    msg_dt = utc_now().astimezone(character_zone)
 
-            if group_id:
-                if role == "user":
-                    role_label = "用户"
+                time_label = msg_dt.strftime("%H:%M")
+
+                if group_id:
+                    if role == "user":
+                        role_label = "用户"
+                    else:
+                        role_label = get_char_name(role, user_id=user_id)
                 else:
-                    role_label = get_char_name(role)
-            else:
-                role_label = "user" if role == "user" else "你"
+                    role_label = "user" if role == "user" else "你"
 
-            content_display = f"[{time_label}] 【{role_label}】{content}"
-
-            result.append((role, content_display, msg_dt))
+                content_display = f"[{time_label}] 【{role_label}】{content}"
+                result.append((role, content_display, msg_dt))
+            except Exception as e:
+                # 单条脏数据或终端编码问题不能截断整段最近上下文。
+                print(f"[DEBUG] extract_recent_messages: [{i}] 消息处理失败 - {e}")
     except Exception as e:
         print(f"[DEBUG] extract_recent_messages: 数据库操作失败 - {e}")
         import traceback
         print(traceback.format_exc())
+    finally:
+        if conn is not None:
+            conn.close()
 
     print(f"[DEBUG] extract_recent_messages: 最终返回 {len(result)} 条消息")
     return result
@@ -942,18 +1053,24 @@ def build_timeline_section(timeline_events) -> str:
     return "【时间线 / Timeline】\n" + "\n".join(lines)
 
 
-def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=None, user_latest_input=None, target_char_id=None, group_id=None, include_long_memory=True, include_recent_messages=True, user_id=None):
+def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=None, user_latest_input=None, target_char_id=None, group_id=None, include_long_memory=True, include_recent_messages=True, user_id=None, call_mode=False):
     if user_id is None:
         from core.context import get_current_user_id
         user_id = get_current_user_id()
     prompt_parts = []
 
     _, prompts_dir = get_paths(char_id, user_id=user_id)
-    now = datetime.now()
+    try:
+        normalize_map_state(user_id=user_id)
+    except Exception:
+        pass
+    _, character_timezone, now = _get_character_time_info(
+        char_id, user_id=user_id
+    )
     today_str = now.strftime("%Y-%m-%d")
 
-    char_name = get_char_name(char_id)
-    char_age = get_char_age(char_id)
+    char_name = get_char_name(char_id, user_id=user_id)
+    char_age = get_char_age(char_id, user_id=user_id)
     name_age_prefix = ""
     if char_name or char_age is not None:
         parts = []
@@ -987,8 +1104,8 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
         prompt_parts.append(f"【キャラクター / 角色人设】\n{content}")
 
     try:
-        user_name = get_current_username()
-        user_age = get_user_age()
+        user_name = _get_username_for_user(user_id)
+        user_age = get_user_age(user_id=user_id)
         user_prefix = ""
         if user_name or user_age is not None:
             parts = []
@@ -1027,7 +1144,7 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
         pass
 
     try:
-        current_user_name = get_current_username()
+        current_user_name = _get_username_for_user(user_id)
         path = os.path.join(prompts_dir, "2_relationship.json")
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
@@ -1037,7 +1154,7 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
             display_name = current_user_name
 
             if target_char_id and target_char_id != "user":
-                target_name = get_char_name(target_char_id)
+                target_name = get_char_name(target_char_id, user_id=user_id)
                 target_rel = rel_data.get(target_name) or rel_data.get(target_char_id)
                 if target_rel:
                     display_name = target_name
@@ -1059,7 +1176,7 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
 
                 id_to_name = {}
                 try:
-                    with open(_get_characters_config_file(), "r", encoding="utf-8") as cf:
+                    with open(_get_characters_config_file(user_id=user_id), "r", encoding="utf-8") as cf:
                         c_data = json.load(cf)
                         id_to_name = {str(k): v.get("name", str(k)) for k, v in c_data.items()}
                 except:
@@ -1100,7 +1217,17 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
         except Exception:
             pass
 
-    if include_global_format:
+    current_state_section = build_agent_current_state_section(
+        char_id,
+        prompts_dir,
+        target_char_id=target_char_id,
+        group_id=group_id,
+        user_id=user_id,
+    )
+    if current_state_section:
+        prompt_parts.append(current_state_section)
+
+    if include_global_format and not call_mode:
         lang = get_ai_language(char_id, group_id=group_id, user_id=user_id)
         chat_mode = _get_char_chat_mode(char_id, user_id=user_id)
         content = get_global_system_rules(lang, chat_mode=chat_mode)
@@ -1224,10 +1351,16 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
     if timeline_events:
         timeline_text = build_timeline_section(timeline_events)
         prompt_parts.append(timeline_text)
+        prompt_parts.append(
+            "【Memory Time Rule / 记忆时间规则】\n"
+            "- 时间线中的日期和时间均已换算为角色当前所在地的当地时间。\n"
+            "- 中期记忆是历史概括，短期记忆是最近24小时的详细事件；"
+            "两者可能描述同一经历，不代表事件发生了两次。\n"
+            "- 若记忆层之间存在细节差异，以最近原始消息和短期记忆为准。"
+        )
     else:
         print(f"[DEBUG v2] WARNING: timeline_events 为空！")
 
-    now = datetime.now()
     hour = now.hour
     if 5 <= hour < 11:
         period = "朝 (morning)"
@@ -1240,14 +1373,21 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
     else:
         period = "深夜 (late night)"
 
-    time_info = f"現在は {now.strftime('%Y-%m-%d %H:%M')} （{period}）です。"
+    user_settings = _get_settings_for_user(user_id)
+    user_now = utc_now().astimezone(get_zone(get_user_timezone(user_settings)))
+    beijing_time = beijing_now()
+    time_info = (
+        f"現在は {now.strftime('%Y-%m-%d %H:%M')} （{period}）です。\n"
+        f"- 角色当前时区：{character_timezone}\n"
+        f"- 用户当地时间：{user_now.strftime('%Y-%m-%d %H:%M')}\n"
+        f"- 系统北京时间：{beijing_time.strftime('%Y-%m-%d %H:%M')}\n"
+        "- “今天、昨天、明天”和日程日期均以角色当地日期理解。"
+    )
     prompt_parts.append(f"【現在時刻】\n{time_info}")
 
     # ===== location context / 地点感知 =====
     try:
-        char_positions = load_character_positions()
-        user_pos = load_user_position()
-        locs = load_locations()
+        char_positions, user_pos, locs = normalize_map_state(user_id=user_id)
         locs_by_id = {l["id"]: l for l in locs.get("locations", [])}
 
         if char_id in char_positions:
@@ -1268,7 +1408,7 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
                     continue
                 d = calc_distance(cx, cy, cpos["x"], cpos["y"])
                 if d < 0.1:
-                    cname = get_char_name(cid)
+                    cname = get_char_name(cid, user_id=user_id)
                     people_here.append(cname)
             ud = calc_distance(cx, cy, user_pos["x"], user_pos["y"])
             user_here = ud < 0.1
@@ -1286,7 +1426,7 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
                 if lid in locs_by_id:
                     l = locs_by_id[lid]
                     dist = calc_distance(cx, cy, l["x"], l["y"])
-                    known_list.append(f"  {l['name']}（坐标 {l['x']},{l['y']}，距离 {round(dist,2)}）")
+                    known_list.append(f"  {l['name']} [id={l['id']}]（坐标 {l['x']},{l['y']}，距离 {round(dist,2)}）")
             if known_list:
                 location_lines.append(f"- 你去过的认知地点：\n" + "\n".join(known_list))
             else:
@@ -1299,7 +1439,7 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
                     continue
                 d = calc_distance(cx, cy, loc["x"], loc["y"])
                 if d < 1.0:
-                    nearby_list.append(f"  {loc['name']}（坐标 {loc['x']},{loc['y']}，距离 {round(d,2)}）")
+                    nearby_list.append(f"  {loc['name']} [id={loc['id']}]（坐标 {loc['x']},{loc['y']}，距离 {round(d,2)}）")
             if nearby_list:
                 location_lines.append(f"- 附近可感知的地点（距离<1格，但尚未去过）：\n" + "\n".join(nearby_list))
             else:
@@ -1311,12 +1451,12 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
 
     # ===== weather / 天气感知 =====
     try:
-        char_positions = load_character_positions()
+        char_positions = load_character_positions(user_id=user_id)
         if char_id in char_positions:
             cp = char_positions[char_id]
             loc_id = cp.get("location_id")
             if loc_id:
-                loc = get_location_by_id(loc_id)
+                loc = get_location_by_id(loc_id, user_id=user_id)
                 if loc:
                     weather = weather_api.get_weather_for_location(loc)
                     if weather:
@@ -1333,13 +1473,17 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
 
     # ===== location movement commands / 位置移动指令 =====
     lang = get_ai_language(char_id, group_id=group_id, user_id=user_id)
-    if lang == "ja":
+    if call_mode:
+        pass
+    elif lang == "ja":
         prompt_parts.append(
             "【位置移動コマンド / Location Movement Commands】\n"
             "距離<1の任意の地点/座標に移動できます。到着後その地点は「認知地点」に追加されます：\n"
             "- [MOVE_TO:地点ID] ※認知/知覚リストに**既に存在する地点**への移動にのみ使用可能\n"
             "- [MOVE_TO_COORD:x,y] 指定座標に単純移動（新地点は作らない）\n"
-            "- [EXPLORE:x,y,\"名称\",\"説明\"] 未探索の地点に移動して新地点を確立"
+            "- [EXPLORE:x,y,\"名称\",\"説明\"] 未探索の地点に移動して新地点を確立\n"
+            "⚠️ 「出発する・離れる・到着する・別の場所へ行く」と本文で述べる場合、同じ返答に必ず対応する移動タグを付けてください。"
+            "移動タグなしで現在地と矛盾する場所にいると主張してはいけません。現在地と座標は上の状態を唯一の基準にしてください。"
         )
     elif lang == "en":
         prompt_parts.append(
@@ -1347,7 +1491,9 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
             "Move to any location/coordinate within distance<1. On arrival the location is added to your known list:\n"
             "- [MOVE_TO:location_id] ※ Only usable for locations that **already exist** in your known/perceived list\n"
             "- [MOVE_TO_COORD:x,y] Simple move to coordinates (does not create a new location)\n"
-            "- [EXPLORE:x,y,\"name\",\"desc\"] Move to an unknown coordinate and establish a new location"
+            "- [EXPLORE:x,y,\"name\",\"desc\"] Move to an unknown coordinate and establish a new location\n"
+            "⚠️ If your message says you leave, depart, arrive, or go somewhere else, include the matching movement tag in the same reply. "
+            "Never claim to be somewhere inconsistent with Current State without moving; Current State coordinates are authoritative."
         )
     else:
         prompt_parts.append(
@@ -1355,7 +1501,9 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
             "距离<1格内的任意地点或坐标都可以移动过去，到达后该地点会自动加入你的认知列表：\n"
             "- [MOVE_TO:地点ID] ※只能在目标地点**已经存在**于你的认知/感知列表中时使用\n"
             "- [MOVE_TO_COORD:x,y] 移动到指定坐标，单纯移动，不建立新地点\n"
-            "- [EXPLORE:x,y,\"名称\",\"描述\"] 前往一个不在认知/感知中存在的地点并建立新地点"
+            "- [EXPLORE:x,y,\"名称\",\"描述\"] 前往一个不在认知/感知中存在的地点并建立新地点\n"
+            "⚠️ 如果正文说自己出发、离开、到达或去了别处，必须在同一轮附上对应的位置移动标签。"
+            "不得在没有移动标签时声称自己位于与“当前状态”不一致的地点；当前状态中的地点和坐标是唯一准确信息。"
         )
 
     if char_name:
@@ -1391,17 +1539,14 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
             f"在保留角色语气、口癖和性格特征的前提下，自然地转化为{lang_display}表达。"
         )
 
-    chat_mode = _get_char_chat_mode(char_id)
-    mode_context = get_mode_context(lang, chat_mode=chat_mode)
-    if mode_context:
-        prompt_parts.append(f"【Mode Context / 模式上下文】\n{mode_context}")
-
-    real_conversation_guide = _build_real_conversation_guide(lang, chat_mode=chat_mode)
-    if real_conversation_guide:
-        prompt_parts.append(real_conversation_guide)
+    if not call_mode:
+        chat_mode = _get_char_chat_mode(char_id, user_id=user_id)
+        mode_context = get_mode_context(lang, chat_mode=chat_mode)
+        if mode_context:
+            prompt_parts.append(f"【Mode Context / 模式上下文】\n{mode_context}")
 
     lang = get_ai_language(char_id, group_id=group_id, user_id=user_id)
-    if lang == "ja":
+    if not call_mode and lang == "ja":
         agent_enforce = (
             "\n\n【Agent Output Requirement / エージェント出力要件】\n"
             "【最重要】毎回の返信末尾（改行して）に、**必ず 1〜3 個**の Agent Action Tag を出力してください。\n"
@@ -1410,7 +1555,7 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
             "単一の `[]` 内にカンマ区切りで複数指令を詰め込まないでください。\n"
             "今回のターンでパラメータ変更やアクションが本当に何もない場合は、代わりに `[NONE]` と出力してください。"
         )
-    elif lang == "en":
+    elif not call_mode and lang == "en":
         agent_enforce = (
             "\n\n【Agent Output Requirement / 智能体输出要件】\n"
             "【CRITICAL】At the end of every reply (on a new line), you MUST output **1~3** Agent Action Tags.\n"
@@ -1419,7 +1564,7 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
             "Do NOT cram multiple commands into a single `[]` separated by commas.\n"
             "If there is genuinely nothing to change or execute this turn, output `[NONE]` instead."
         )
-    else:
+    elif not call_mode:
         agent_enforce = (
             "\n\n【Agent Output Requirement / 智能体输出要件】\n"
             "【最重要】每轮回复末尾（另起一行），必须输出 **1~3 条** Agent Action Tag。\n"
@@ -1428,17 +1573,29 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
             "不要在单个 `[]` 内用逗号分隔多条指令。\n"
             "如果当前轮次确实没有任何参数需要调整、没有任何动作需要执行，则输出 `[NONE]` 作为占位。"
         )
-    prompt_parts.append(agent_enforce)
+    if not call_mode:
+        prompt_parts.append(agent_enforce)
 
     return "\n\n".join(prompt_parts)
 
 
 def build_messages_for_chat_v2(char_id, user_input, recent_messages=None, user_id=None) -> list:
-    system_prompt = build_system_prompt_v2(char_id, include_global_format=True, recent_messages=recent_messages, user_latest_input=user_input, user_id=user_id)
+    normalized_input = voice_call_for_ai(user_id, voice_message_for_ai(user_input))
+    normalized_recent = [
+        voice_call_for_ai(user_id, voice_message_for_ai(item))
+        for item in (recent_messages or [])
+    ]
+    system_prompt = build_system_prompt_v2(
+        char_id,
+        include_global_format=True,
+        recent_messages=normalized_recent,
+        user_latest_input=normalized_input,
+        user_id=user_id,
+    )
 
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_input}
+        {"role": "user", "content": normalized_input}
     ]
 
     return messages
@@ -1450,19 +1607,19 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
         user_id = get_current_user_id()
     prompt_parts = []
 
-    now = datetime.now()
+    _, _, now = _get_character_time_info(char_id, user_id=user_id)
     today_str = now.strftime("%Y-%m-%d")
 
     BASE_DIR_ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     CONFIG_DIR = os.path.join(BASE_DIR_, "configs")
     _, prompts_dir = get_paths(char_id, user_id=user_id)
 
-    current_user_name = get_current_username()
+    current_user_name = _get_username_for_user(user_id)
 
     print(f"--- [Debug] 正在为 [{char_id}] 构建 Prompt，路径: {prompts_dir} ---")
 
-    char_name = get_char_name(char_id)
-    char_age = get_char_age(char_id)
+    char_name = get_char_name(char_id, user_id=user_id)
+    char_age = get_char_age(char_id, user_id=user_id)
     name_age_prefix = ""
     if char_name or char_age is not None:
         parts = []
@@ -1534,7 +1691,7 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
             display_name = current_user_name
 
             if target_char_id and target_char_id != "user":
-                target_name = get_char_name(target_char_id)
+                target_name = get_char_name(target_char_id, user_id=user_id)
                 target_rel = rel_data.get(target_name) or rel_data.get(target_char_id)
                 if target_rel:
                     display_name = target_name
@@ -1655,6 +1812,15 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
     except Exception:
         pass
 
+    current_state_section = build_agent_current_state_section(
+        char_id,
+        prompts_dir,
+        target_char_id=target_char_id,
+        user_id=user_id,
+    )
+    if current_state_section:
+        prompt_parts.append(current_state_section)
+
     if include_global_format:
         lang = get_ai_language(char_id, user_id=user_id)
         chat_mode = _get_char_chat_mode(char_id, user_id=user_id)
@@ -1698,11 +1864,6 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
     prompt_parts.append(f"【Current Date / 現在の日付】\n今日は: {current_date_str} ({period})\n(以下の会話履歴には時間 [HH:MM] のみが含まれています。现在の日付に基づいて理解してください)")
 
     lang = get_ai_language(char_id, user_id=user_id)
-    chat_mode = _get_char_chat_mode(char_id, user_id=user_id)
-    real_conversation_guide = _build_real_conversation_guide(lang, chat_mode=chat_mode)
-    if real_conversation_guide:
-        prompt_parts.append(real_conversation_guide)
-
     if lang == "zh":
         lang_instruction = (
             "\n\n【Language Control / 语言控制】\n"

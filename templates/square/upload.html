@@ -215,7 +215,8 @@
         </div>
         
         <div style="margin-bottom: 20px;" id="import-section">
-            <button type="button" class="btn btn-secondary" onclick="openImportModal()">从私有角色快速导入</button>
+            <button type="button" class="btn btn-secondary" id="import-local-btn" onclick="openImportModal()">从私有角色快速导入</button>
+            <div id="import-source-status" style="font-size:12px; color:var(--text-muted); margin-top:8px;"></div>
         </div>
 
         <form id="upload-form">
@@ -281,12 +282,26 @@
                     <button type="button" class="btn btn-secondary" style="flex: 1; margin-top: 0;" onclick="addRelRow()">+ 添加角色关系</button>
                     <button type="button" class="btn btn-secondary" style="flex: 1; margin-top: 0;" id="ai-gen-rel-btn" onclick="aiCompleteGraph()">AI 补全关系</button>
                 </div>
+                <details style="margin-top:10px; background:#f6fff7; border:1px solid #c8e6c9; border-radius:10px; padding:10px;">
+                    <summary style="cursor:pointer; font-size:12px; font-weight:bold; color:#256029;">&#123;&#125; 粘贴 JSON 自动解析</summary>
+                    <select id="square-relation-json-mode" style="margin-top:8px; padding:5px; font-size:12px;">
+                        <option value="merge">合并现有关系</option>
+                        <option value="replace">覆盖现有关系</option>
+                    </select>
+                    <textarea id="square-relation-json-input" rows="5" style="margin-top:8px;" placeholder='{"角色名":{"role":"队友","score":4,"description":"关系说明"}}' oninput="scheduleSquareRelationJsonParse()"></textarea>
+                    <div id="square-relation-json-status" style="font-size:11px; color:var(--text-muted); margin-top:4px;">等待输入</div>
+                </details>
                 <textarea name="relationship_graph" id="rel-graph-hidden" style="display:none"></textarea>
             </div>
 
             <div class="form-group">
                 <label>角色人设 (Base Persona)</label>
                 <textarea name="base_persona" id="base-persona" rows="8" placeholder="详细的角色性格、背景、说话习惯等设定..." required></textarea>
+                <label style="display:flex; align-items:center; gap:6px; margin-top:8px; font-size:12px; font-weight:normal;">
+                    <input type="checkbox" id="persona-web-search" checked style="width:auto; margin:0;">
+                    联网搜索原作资料
+                </label>
+                <div id="persona-search-status" style="font-size:11px; color:var(--text-muted); margin-top:4px;"></div>
                 <button type="button" class="btn btn-secondary" id="ai-gen-persona-btn" onclick="aiGeneratePersona()">AI 自动编写人设</button>
             </div>
 
@@ -331,24 +346,36 @@
             const list = document.getElementById('private-char-list');
             list.innerHTML = '<div style="padding:20px; text-align:center;">加载中...</div>';
             try {
-                const res = await fetch('/api/contacts');
+                const res = await fetch('/api/square/local_characters');
                 const data = await res.json();
-                const chars = data.filter(c => c.type !== 'group');
+                if (!res.ok) throw new Error(data.error || '加载失败');
+                const chars = Array.isArray(data) ? data : [];
                 if (chars.length === 0) {
                     list.innerHTML = '<div style="padding:20px; text-align:center; color:#999;">暂无私有角色</div>';
                     return;
                 }
-                list.innerHTML = chars.map(c => `
-                    <div style="display:flex; align-items:center; padding:10px; border-bottom:1px solid #eee; cursor:pointer;" onclick="importCharacter('${c.id}', '${c.name}', '${c.avatar}')">
-                        <img src="${c.avatar}" style="width:40px; height:40px; border-radius:50%; margin-right:10px;">
-                        <div>
-                            <div style="font-weight:600;">${c.name}</div>
-                            <div style="font-size:12px; color:#999;">ID: ${c.id}</div>
-                        </div>
-                    </div>
-                `).join('');
+                list.innerHTML = '';
+                chars.forEach(c => {
+                    const row = document.createElement('div');
+                    row.style.cssText = 'display:flex; align-items:center; padding:10px; border-bottom:1px solid #eee; cursor:pointer;';
+                    const img = document.createElement('img');
+                    img.src = c.avatar || '/static/default_avatar.png';
+                    img.style.cssText = 'width:40px; height:40px; border-radius:50%; margin-right:10px; object-fit:cover;';
+                    const text = document.createElement('div');
+                    const name = document.createElement('div');
+                    name.style.fontWeight = '600';
+                    name.textContent = c.name || c.id;
+                    const meta = document.createElement('div');
+                    meta.style.cssText = 'font-size:12px; color:#999;';
+                    meta.textContent = `ID: ${c.id}${c.linked_square_id ? ` · 已发布为 ${c.linked_square_id}` : ''}`;
+                    text.append(name, meta);
+                    row.append(img, text);
+                    row.addEventListener('click', () => importCharacter(c.id));
+                    list.appendChild(row);
+                });
             } catch(e) {
-                list.innerHTML = '<div style="padding:20px; text-align:center; color:red;">加载失败</div>';
+                list.textContent = `加载失败：${e.message || ''}`;
+                list.style.cssText = 'padding:20px; text-align:center; color:red;';
             }
         }
 
@@ -356,16 +383,94 @@
             const container = document.getElementById('rel-graph-container');
             const card = document.createElement('div');
             card.className = 'rel-edit-card';
-            card.innerHTML = `
-                <button type="button" class="btn-del-rel" onclick="this.parentElement.remove()">×</button>
-                <div class="rel-edit-row">
-                    <input type="text" class="rel-name" value="${name}" placeholder="对方姓名">
-                    <input type="text" class="rel-role" value="${role}" placeholder="关系(如: 队友)">
-                    <input type="number" class="rel-score" value="${score}" step="0.1" placeholder="指数" title="关系指数">
-                </div>
-                <textarea class="rel-desc" placeholder="详细关系描述...">${desc}</textarea>
-            `;
+            const deleteButton = document.createElement('button');
+            deleteButton.type = 'button';
+            deleteButton.className = 'btn-del-rel';
+            deleteButton.textContent = '×';
+            deleteButton.onclick = () => card.remove();
+            const row = document.createElement('div');
+            row.className = 'rel-edit-row';
+            const nameInput = document.createElement('input');
+            nameInput.type = 'text';
+            nameInput.className = 'rel-name';
+            nameInput.placeholder = '对方姓名';
+            nameInput.value = name || '';
+            const roleInput = document.createElement('input');
+            roleInput.type = 'text';
+            roleInput.className = 'rel-role';
+            roleInput.placeholder = '关系(如: 队友)';
+            roleInput.value = role || '';
+            const scoreInput = document.createElement('input');
+            scoreInput.type = 'number';
+            scoreInput.className = 'rel-score';
+            scoreInput.min = '0';
+            scoreInput.max = '5';
+            scoreInput.step = '0.1';
+            scoreInput.placeholder = '指数';
+            scoreInput.title = '关系指数';
+            scoreInput.value = score ?? 1;
+            row.append(nameInput, roleInput, scoreInput);
+            const description = document.createElement('textarea');
+            description.className = 'rel-desc';
+            description.placeholder = '详细关系描述...';
+            description.value = desc || '';
+            card.append(deleteButton, row, description);
             container.appendChild(card);
+        }
+
+        let squareRelationJsonTimer = null;
+
+        function scheduleSquareRelationJsonParse() {
+            if (squareRelationJsonTimer) clearTimeout(squareRelationJsonTimer);
+            const status = document.getElementById('square-relation-json-status');
+            status.textContent = '正在等待输入完成…';
+            status.style.color = 'var(--text-muted)';
+            squareRelationJsonTimer = setTimeout(parseSquareRelationJson, 450);
+        }
+
+        async function parseSquareRelationJson() {
+            const textarea = document.getElementById('square-relation-json-input');
+            const status = document.getElementById('square-relation-json-status');
+            const content = textarea.value.trim();
+            if (!content) {
+                status.textContent = '等待输入';
+                return;
+            }
+            status.textContent = '正在解析…';
+            try {
+                const response = await fetch('/api/relationship/parse', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({content})
+                });
+                const result = await response.json();
+                if (!response.ok || result.status !== 'success') {
+                    throw new Error(result.message || 'JSON 格式错误');
+                }
+                const mode = document.getElementById('square-relation-json-mode').value;
+                const container = document.getElementById('rel-graph-container');
+                if (mode === 'replace') container.innerHTML = '';
+                const existing = new Map();
+                container.querySelectorAll('.rel-edit-card').forEach(card => {
+                    const name = card.querySelector('.rel-name')?.value.trim();
+                    if (name) existing.set(name, card);
+                });
+                Object.entries(result.graph).forEach(([name, info]) => {
+                    const card = existing.get(name);
+                    if (card) {
+                        card.querySelector('.rel-role').value = info.role || '';
+                        card.querySelector('.rel-score').value = info.score ?? 1;
+                        card.querySelector('.rel-desc').value = info.description || '';
+                    } else {
+                        addRelRow(name, info.role, info.score, info.description);
+                    }
+                });
+                status.textContent = `✓ 已自动解析 ${Object.keys(result.graph).length} 条关系（${mode === 'replace' ? '覆盖' : '合并'}模式）`;
+                status.style.color = '#2e7d32';
+            } catch (error) {
+                status.textContent = `解析失败：${error.message}`;
+                status.style.color = '#c62828';
+            }
         }
 
         function serializeRelGraph() {
@@ -382,43 +487,30 @@
             document.getElementById('rel-graph-hidden').value = JSON.stringify(graph);
         }
 
-        async function importCharacter(id, name, avatar) {
-            document.querySelector('[name="id"]').value = id;
-            document.querySelector('[name="name"]').value = name;
-            window.importedAvatarUrl = avatar; // 保存导入的头像URL
-            
-            // 头像预览
-            const preview = document.getElementById('avatar-preview');
-            preview.src = avatar;
-            preview.style.display = 'block';
-            document.getElementById('upload-placeholder').style.display = 'none';
-            
-            closeImportModal();
-            
-            // 1. 获取基础配置信息 (年龄等)
+        async function importCharacter(id) {
             try {
-                const res = await fetch(`/api/${id}/config`);
-                const config = await res.json();
-                if (config.age) {
-                    document.querySelector('[name="age"]').value = config.age;
-                }
-                if (config.no_age_increase) {
-                    document.getElementById('no_age_increase').checked = true;
-                }
-            } catch(e) {
-                console.error("获取基础配置失败", e);
-            }
+                const res = await fetch(`/api/square/local_character/${encodeURIComponent(id)}/preview`);
+                const payload = await res.json();
+                if (!res.ok || payload.status !== 'success') throw new Error(payload.error || '读取失败');
+                const data = payload.character;
+                const isEdit = new URLSearchParams(window.location.search).get('mode') === 'edit';
 
-            // 2. 获取详情信息（关系图谱、人设等）
-            try {
-                const res = await fetch(`/api/${id}/prompts_data`);
-                const data = await res.json();
-                
-                // 清空现有关系
+                // 编辑已有作品时绝不改变广场 ID；仅记录本地来源 ID。
+                if (!isEdit) document.querySelector('[name="id"]').value = data.id;
+                document.querySelector('[name="name"]').value = data.name || data.id;
+                document.querySelector('[name="age"]').value = data.age ?? '';
+                document.getElementById('no_age_increase').checked = !!data.no_age_increase;
+                window.importedLocalCharacterId = data.id;
+                window.importedAvatarUrl = data.avatar;
+
+                const preview = document.getElementById('avatar-preview');
+                preview.src = data.avatar || '/static/default_avatar.png';
+                preview.style.display = 'block';
+                document.getElementById('upload-placeholder').style.display = 'none';
+
                 document.getElementById('rel-graph-container').innerHTML = '';
-                
-                if (data.relation) {
-                    const relData = typeof data.relation === 'string' ? JSON.parse(data.relation) : data.relation;
+                if (data.relationship_graph) {
+                    const relData = typeof data.relationship_graph === 'string' ? JSON.parse(data.relationship_graph) : data.relationship_graph;
                     for (let n in relData) {
                         const info = relData[n];
                         if (typeof info === 'object') {
@@ -428,21 +520,19 @@
                         }
                     }
                 }
-                
-                // 导入角色人设
-                if (data.base) {
-                    const personaText = typeof data.base === 'string' ? data.base : (data.base.system_prompt || JSON.stringify(data.base, null, 2));
-                    document.getElementById('base-persona').value = personaText;
-                    
-                    // 尝试从 persona 文本中提取 IP、标签 (作为兜底)
-                    const ipMatch = personaText.match(/(?:来自作品|作品|IP)[:：]\s*(.+)/i);
-                    if (ipMatch) document.getElementById('ip-input').value = ipMatch[1].trim();
-                    
-                    const tagMatch = personaText.match(/(?:标签|Tag)[:：]\s*(.+)/i);
-                    if (tagMatch) document.querySelector('[name="tags"]').value = tagMatch[1].trim();
+                document.getElementById('base-persona').value = data.base_persona || '';
+
+                // 新发布可采用本地元数据；更新时保留广场专用的 IP 和标签。
+                if (!isEdit) {
+                    if (data.ip) document.getElementById('ip-input').value = data.ip;
+                    if (data.tags) document.querySelector('[name="tags"]').value = Array.isArray(data.tags) ? data.tags.join(',') : data.tags;
                 }
+                document.getElementById('import-source-status').textContent = isEdit
+                    ? `已选择本地角色「${data.name || data.id}」。保存后将覆盖人设、头像、年龄和关系图谱；广场 ID、点赞、收藏和评论保持不变。`
+                    : `已导入本地角色「${data.name || data.id}」。`;
+                closeImportModal();
             } catch(e) {
-                console.error("获取详情失败", e);
+                alert(`导入失败：${e.message || '未知错误'}`);
             }
         }
 
@@ -611,10 +701,37 @@
                 const res = await fetchWithTimeout('/api/generate_persona', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ char_name: name, source_ip: ip })
+                    body: JSON.stringify({
+                        char_name: name,
+                        source_ip: ip,
+                        web_search: document.getElementById('persona-web-search').checked
+                    })
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
+                    const sourceCount = Array.isArray(data.sources) ? data.sources.length : 0;
+                    const statusLabels = {
+                        success: `已联网检索，使用 ${sourceCount} 条参考资料`,
+                        no_results: '联网检索未找到资料，已按模型已有知识生成',
+                        unavailable: '未配置 SERPER_API_KEY，本次未联网',
+                        error: '联网检索失败，已降级生成',
+                        disabled: '本次未启用联网检索'
+                    };
+                    const searchStatus = document.getElementById('persona-search-status');
+                    searchStatus.textContent = statusLabels[data.search_status] || '';
+                    if (Array.isArray(data.sources) && data.sources.length) {
+                        const sourceList = document.createElement('div');
+                        data.sources.slice(0, 5).forEach((source, index) => {
+                            const link = document.createElement('a');
+                            link.href = source.url;
+                            link.target = '_blank';
+                            link.rel = 'noopener noreferrer';
+                            link.textContent = source.title || `来源 ${index + 1}`;
+                            link.style.marginRight = '8px';
+                            sourceList.appendChild(link);
+                        });
+                        searchStatus.appendChild(sourceList);
+                    }
                     const content = data.content;
                     if (typeof content === 'string') {
                         document.getElementById('base-persona').value = content;
@@ -636,6 +753,8 @@
 
         document.getElementById('upload-form').onsubmit = async (e) => {
             e.preventDefault();
+            const params = new URLSearchParams(window.location.search);
+            const isEdit = params.get('mode') === 'edit';
             
             serializeRelGraph(); // 提交前序列化关系图谱
             
@@ -650,13 +769,14 @@
             } else if (window.importedAvatarUrl) {
                 formData.append('avatar_url', window.importedAvatarUrl);
             }
+            if (window.importedLocalCharacterId) {
+                formData.set('source_character_id', window.importedLocalCharacterId);
+            }
             
             // 处理 checkbox
             formData.set('no_age_increase', document.getElementById('no_age_increase').checked);
             
             try {
-                const params = new URLSearchParams(window.location.search);
-                const isEdit = params.get('mode') === 'edit';
                 const apiUrl = isEdit ? '/api/square/update' : '/api/square/upload';
                 
                 const res = await fetch(apiUrl, {
@@ -668,6 +788,10 @@
                     alert(isEdit ? "修改成功！" : "上传成功！");
                     if (isEdit) localStorage.removeItem('edit_square_char');
                     location.href = isEdit ? `/square/character/${formData.get('id')}` : '/square';
+                } else if (data.status === 'already_published' && data.square_id) {
+                    if (confirm('该本地角色已经发布。是否前往原作品进行更新？')) {
+                        location.href = `/square/character/${encodeURIComponent(data.square_id)}`;
+                    }
                 } else {
                     alert("操作失败: " + data.error);
                 }
@@ -693,7 +817,7 @@
                     const data = JSON.parse(dataStr);
                     document.getElementById('page-title').innerText = '编辑作品';
                     document.getElementById('page-desc').innerText = '修改已发布在广场的作品';
-                    document.getElementById('import-section').style.display = 'none';
+                    document.getElementById('import-local-btn').innerText = '从本地角色重新同步';
                     document.getElementById('submit-btn').innerText = '保存修改';
                     
                     // 填充数据
@@ -703,7 +827,7 @@
                     idInput.style.background = '#f1f3f5';
                     
                     document.querySelector('[name="name"]').value = data.name;
-                    document.querySelector('[name="age"]').value = data.age || '';
+                    document.querySelector('[name="age"]').value = data.age ?? '';
                     document.getElementById('no_age_increase').checked = !!data.no_age_increase;
                     document.getElementById('ip-input').value = data.ip || '';
                     
@@ -723,6 +847,9 @@
                     
                     // 人设
                     document.getElementById('base-persona').value = data.base_persona || '';
+                    if (data.source_character_id) {
+                        document.getElementById('import-source-status').textContent = `当前关联本地角色：${data.source_character_id}`;
+                    }
                     
                     // 关系图谱
                     if (data.relationship_graph) {
@@ -736,6 +863,9 @@
                                 addRelRow(n, '', 1, info);
                             }
                         }
+                    }
+                    if (params.get('sync') === 'local') {
+                        setTimeout(openImportModal, 0);
                     }
                 }
             }

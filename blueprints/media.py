@@ -13,15 +13,38 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify, send_from_directory, send_file, render_template, session, redirect, url_for
 from urllib.parse import quote as url_quote, urlparse
 from PIL import Image, ImageOps
+from werkzeug.utils import secure_filename
 
 import core.config
+from core.credentials import (
+    CredentialConfigurationError,
+    CredentialError,
+    get_user_credential,
+)
 from core.context import get_current_user_id, set_background_user
+from core.time_utils import beijing_now
 from core.utils import (
     _add_furigana_to_japanese, get_paths, get_current_username,
     _get_characters_config_file, get_effective_gemini_key,
 )
 from cos_utils import upload_to_cos, get_cos_list
 from agent_utils import parse_music_tags
+from services.elevenlabs import (
+    ElevenLabsAPIError,
+    create_realtime_scribe_token,
+    create_ivc_voice,
+    synthesize_speech,
+    transcribe_speech,
+)
+from services.voice_messages import (
+    build_voice_message_tag,
+    consume_voice_stt_quota,
+    get_local_voice_path,
+    get_voice_message,
+    new_voice_filename,
+    save_voice_message,
+)
+from services.image_tags import normalize_image_description
 import music_api
 import music_manager
 
@@ -301,6 +324,48 @@ def _search_stickers(q):
     return out
 
 
+def _find_sticker_by_path(path):
+    """Return sticker metadata for a canonical path from local storage or COS."""
+    if not path:
+        return None
+
+    ab = _stickers_path_to_abs(path)
+    if ab and os.path.isfile(ab):
+        return {
+            "path": path,
+            "name": _sticker_path_to_name(path),
+            "url": _stickers_relative_to_url(path),
+        }
+
+    try:
+        if path.startswith("user:"):
+            uid = get_current_user_id()
+            filename = path[5:].lstrip(":")
+            if not uid or not filename or ".." in filename or "/" in filename or "\\" in filename:
+                return None
+            for sticker in get_cos_list(f"users/{uid}/sticker_uploads/"):
+                if sticker.get("name") == filename:
+                    return {
+                        "path": path,
+                        "name": os.path.splitext(filename)[0],
+                        "url": sticker.get("url") or _stickers_relative_to_url(path),
+                        "pack_name": "个人上传",
+                    }
+
+        if path.startswith("official:"):
+            parts = path.split(":", 2)
+            if len(parts) != 3:
+                return None
+            return next(
+                (sticker for sticker in _list_pack_stickers(parts[1]) if sticker.get("path") == path),
+                None,
+            )
+    except Exception as e:
+        print(f"   [COS Error] Failed to resolve sticker {path}: {e}")
+
+    return None
+
+
 def _load_favorites():
     path = _get_stickers_favorites_file()
     if not path or not os.path.exists(path):
@@ -398,21 +463,10 @@ def api_stickers_search():
 def api_stickers_favorites_get():
     paths = _load_favorites()
     out = []
-    uid = get_current_user_id()
     for path in paths:
-        if path.startswith("user:") and uid:
-            filename = path[5:].lstrip(":")
-            found = _search_stickers(filename)
-            match = next((item for item in found if item["path"] == path), None)
-            if match:
-                out.append(match)
-            continue
-
-        ab = _stickers_path_to_abs(path)
-        if not ab or not os.path.isfile(ab):
-            continue
-        name = os.path.splitext(os.path.basename(ab))[0]
-        out.append({"path": path, "name": name, "url": _stickers_relative_to_url(path)})
+        sticker = _find_sticker_by_path(path)
+        if sticker:
+            out.append(sticker)
     return jsonify(out)
 
 
@@ -426,8 +480,7 @@ def api_stickers_favorites_add():
         resolved = _resolve_sticker_name_to_path_deterministic(path)
         if resolved:
             path = resolved
-    ab = _stickers_path_to_abs(path)
-    if not ab or not os.path.isfile(ab):
+    if not _find_sticker_by_path(path):
         return jsonify({"status": "error", "message": "invalid path or 未找到匹配表情"}), 400
     paths = _load_favorites()
     if path in paths:
@@ -982,7 +1035,7 @@ def _start_music_auto_continue(char_id, user_id, result_content):
             if db_path:
                 conn = sqlite3.connect(db_path)
                 cur = conn.cursor()
-                now_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                now_ts = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
                 cur.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
                            ("assistant", cleaned_reply, now_ts))
                 conn.commit()
@@ -1038,7 +1091,7 @@ def _handle_music_tag_in_chat(char_id, user_id, tag):
                 conn = sqlite3.connect(db_path)
                 cur = conn.cursor()
                 cur.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
-                           ("system", result, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                           ("system", result, beijing_now().strftime('%Y-%m-%d %H:%M:%S')))
                 conn.commit()
                 conn.close()
 
@@ -1052,7 +1105,7 @@ def _handle_music_tag_in_chat(char_id, user_id, tag):
             conn = sqlite3.connect(db_path)
             cur = conn.cursor()
             cur.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
-                       ("system", result, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                       ("system", result, beijing_now().strftime('%Y-%m-%d %H:%M:%S')))
             conn.commit()
             conn.close()
 
@@ -1073,7 +1126,7 @@ def _start_music_search_and_continue(char_id, user_id, music_tags):
             if not db_path:
                 return
 
-            now = datetime.now()
+            now = beijing_now()
 
             for tag in music_tags:
                 if tag["type"] != "search":
@@ -1113,41 +1166,269 @@ def _start_music_search_and_continue(char_id, user_id, music_tags):
     threading.Thread(target=_run, daemon=True).start()
 
 
-# ==================== TTS 语音合成 ====================
+# ==================== 用户语音消息 / ElevenLabs STT ====================
 
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
-TTS_DAILY_LIMIT = 15
+VOICE_MESSAGE_MAX_BYTES = 10 * 1024 * 1024
+VOICE_MESSAGE_MAX_DURATION_MS = 60_000
+VOICE_MESSAGE_MIN_DURATION_MS = 300
+VOICE_STT_MAX_REQUESTS_PER_HOUR = max(
+    0, int(os.getenv("VOICE_STT_MAX_REQUESTS_PER_HOUR", "60") or 60)
+)
+VOICE_STT_MAX_REALTIME_SESSIONS_PER_HOUR = max(
+    0, int(os.getenv("VOICE_STT_MAX_REALTIME_SESSIONS_PER_HOUR", "60") or 60)
+)
+VOICE_MESSAGE_MIME_EXTENSIONS = {
+    "audio/webm": "webm",
+    "audio/mp4": "m4a",
+    "audio/m4a": "m4a",
+    "audio/x-m4a": "m4a",
+    "audio/ogg": "ogg",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+}
 
 
-def _check_tts_quota(uid):
-    if uid is None:
-        return False, "无法识别用户"
-    if str(uid) == "1":
-        return True, None
-    usage_file = os.path.join(core.config.USERS_ROOT, str(uid), "configs", "tts_usage.json")
-    today = datetime.now().strftime("%Y-%m-%d")
-    os.makedirs(os.path.dirname(usage_file), exist_ok=True)
-    usage = {}
-    if os.path.exists(usage_file):
-        try:
-            with open(usage_file, "r", encoding="utf-8") as f:
-                usage = json.load(f)
-        except Exception:
-            usage = {}
-    if usage.get("date") != today:
-        usage = {"date": today, "count": 0}
-    if usage["count"] >= TTS_DAILY_LIMIT:
-        return False, f"今日TTS次数已用完（{TTS_DAILY_LIMIT}次/天）"
-    usage["count"] += 1
+def _voice_message_mime_and_extension(uploaded):
+    content_type = str(uploaded.mimetype or "").lower().split(";", 1)[0].strip()
+    extension = VOICE_MESSAGE_MIME_EXTENSIONS.get(content_type)
+    if extension:
+        return content_type, extension
+    original = str(uploaded.filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+    suffix = os.path.splitext(original)[1].lower().lstrip(".")
+    fallback_types = {
+        "webm": "audio/webm",
+        "m4a": "audio/mp4",
+        "mp4": "audio/mp4",
+        "ogg": "audio/ogg",
+        "wav": "audio/wav",
+    }
+    return (fallback_types.get(suffix), suffix) if suffix in fallback_types else (None, None)
+
+
+@media_bp.route("/api/voice-messages", methods=["POST"])
+def upload_voice_message():
+    if request.headers.get("X-Requested-With") != "XMLHttpRequest":
+        return jsonify({
+            "error": "请求来源校验失败",
+            "code": "request_origin_invalid",
+        }), 403
+    uid = get_current_user_id()
+    if not uid:
+        return jsonify({"error": "请先登录", "code": "auth_required"}), 401
+    api_key = str(core.config.ELEVENLABS_API_KEY or "").strip()
+    if not api_key:
+        return jsonify({
+            "error": "服务器尚未配置 ElevenLabs Speech-to-Text Key",
+            "code": "elevenlabs_stt_not_configured",
+        }), 503
+
+    uploaded = request.files.get("file")
+    if not uploaded or not uploaded.filename:
+        return jsonify({"error": "没有收到录音文件", "code": "voice_file_missing"}), 400
+    mime_type, extension = _voice_message_mime_and_extension(uploaded)
+    if not mime_type or not extension:
+        return jsonify({
+            "error": "当前录音格式不受支持",
+            "code": "voice_file_type_invalid",
+        }), 400
+
     try:
-        with open(usage_file, "w", encoding="utf-8") as f:
-            json.dump(usage, f)
-    except Exception as e:
-        print(f"[TTS_QUOTA] 写入失败: {e}")
-    return True, None
+        duration_ms = int(float(request.form.get("duration_ms") or 0))
+    except (TypeError, ValueError):
+        duration_ms = 0
+    if duration_ms < VOICE_MESSAGE_MIN_DURATION_MS:
+        return jsonify({"error": "录音时间太短", "code": "voice_too_short"}), 400
+    if duration_ms > VOICE_MESSAGE_MAX_DURATION_MS + 1000:
+        return jsonify({"error": "单条语音最长 60 秒", "code": "voice_too_long"}), 413
+
+    scope_type = str(request.form.get("scope_type") or "").strip().lower()
+    scope_id = str(request.form.get("scope_id") or "").strip()
+    if (
+        scope_type not in {"chat", "group"}
+        or not scope_id
+        or len(scope_id) > 128
+        or any(ch in scope_id for ch in "/\\\r\n\x00")
+    ):
+        return jsonify({"error": "会话信息无效", "code": "voice_scope_invalid"}), 400
+
+    audio_bytes = uploaded.read(VOICE_MESSAGE_MAX_BYTES + 1)
+    if not audio_bytes:
+        return jsonify({"error": "录音文件为空", "code": "voice_file_empty"}), 400
+    if len(audio_bytes) > VOICE_MESSAGE_MAX_BYTES:
+        return jsonify({"error": "录音文件不能超过 10MB", "code": "voice_file_too_large"}), 413
+    if not consume_voice_stt_quota(
+        uid, limit=VOICE_STT_MAX_REQUESTS_PER_HOUR, window_seconds=3600
+    ):
+        return jsonify({
+            "error": "语音识别请求过于频繁，请稍后再试",
+            "code": "voice_stt_rate_limited",
+        }), 429
+
+    filename = new_voice_filename(extension)
+    try:
+        transcript = transcribe_speech(
+            api_key,
+            filename=filename,
+            audio_bytes=audio_bytes,
+            content_type=mime_type,
+        )
+        record = save_voice_message(
+            uid,
+            filename=filename,
+            audio_bytes=audio_bytes,
+            mime_type=mime_type,
+            duration_ms=min(duration_ms, VOICE_MESSAGE_MAX_DURATION_MS),
+            transcript=transcript,
+            scope_type=scope_type,
+            scope_id=scope_id,
+        )
+    except ElevenLabsAPIError as exc:
+        return _elevenlabs_error_response(exc)
+    except requests.RequestException:
+        return jsonify({
+            "error": "无法连接 ElevenLabs，请稍后重试",
+            "code": "elevenlabs_unreachable",
+        }), 502
+    except Exception as exc:
+        print(f"[VoiceMessage] 保存失败: {exc}")
+        return jsonify({
+            "error": "语音消息保存失败，请稍后重试",
+            "code": "voice_message_save_failed",
+        }), 500
+
+    return jsonify({
+        "status": "success",
+        "filename": filename,
+        "transcript": transcript,
+        "duration_ms": record["duration_ms"],
+        "tag": build_voice_message_tag(filename, transcript),
+        "playback_url": f"/api/voice-media/{filename}",
+    })
+
+
+@media_bp.route("/api/voice-messages/realtime-token", methods=["POST"])
+def create_voice_message_realtime_token():
+    if request.headers.get("X-Requested-With") != "XMLHttpRequest":
+        return jsonify({
+            "error": "请求来源校验失败",
+            "code": "request_origin_invalid",
+        }), 403
+    uid = get_current_user_id()
+    if not uid:
+        return jsonify({"error": "请先登录", "code": "auth_required"}), 401
+    api_key = str(core.config.ELEVENLABS_API_KEY or "").strip()
+    if not api_key:
+        return jsonify({
+            "error": "服务器尚未配置 ElevenLabs Speech-to-Text Key",
+            "code": "elevenlabs_stt_not_configured",
+        }), 503
+    if not consume_voice_stt_quota(
+        uid,
+        limit=VOICE_STT_MAX_REALTIME_SESSIONS_PER_HOUR,
+        window_seconds=3600,
+        bucket="realtime",
+    ):
+        return jsonify({
+            "error": "实时语音识别请求过于频繁，请稍后再试",
+            "code": "voice_stt_realtime_rate_limited",
+        }), 429
+    try:
+        token = create_realtime_scribe_token(api_key)
+    except ElevenLabsAPIError as exc:
+        return _elevenlabs_error_response(exc)
+    except requests.RequestException:
+        return jsonify({
+            "error": "无法连接 ElevenLabs，请稍后重试",
+            "code": "elevenlabs_unreachable",
+        }), 502
+    response = jsonify({
+        "token": token,
+        "model_id": "scribe_v2_realtime",
+        "audio_format": "pcm_16000",
+    })
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@media_bp.route("/api/voice-media/<filename>", methods=["GET"])
+def play_voice_message(filename):
+    uid = get_current_user_id()
+    if not uid:
+        return jsonify({"error": "请先登录", "code": "auth_required"}), 401
+    record = get_voice_message(uid, filename)
+    if not record:
+        return jsonify({"error": "语音文件不存在或已失效", "code": "voice_not_found"}), 404
+    local_path = get_local_voice_path(uid, filename)
+    if local_path:
+        return send_file(
+            local_path,
+            mimetype=record["mime_type"],
+            conditional=True,
+            as_attachment=False,
+        )
+    if record["storage_backend"] == "cos" and core.config.COS_BASE_URL:
+        return redirect(
+            f"{core.config.COS_BASE_URL}/{url_quote(record['object_key'], safe='/')}",
+            code=302,
+        )
+    return jsonify({"error": "语音文件暂时不可用", "code": "voice_unavailable"}), 404
+
+
+# ==================== ElevenLabs 用户私有音色 / TTS ====================
+
+VOICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
+VOICE_CLONE_MAX_BYTES = 20 * 1024 * 1024
+VOICE_CLONE_EXTENSIONS = {
+    ".aac", ".flac", ".m4a", ".mp3", ".mp4", ".mpeg", ".mpga",
+    ".ogg", ".wav", ".webm",
+}
+TTS_MAX_TEXT_CHARS = 10000
+
+
+def _get_private_elevenlabs_key():
+    """Return only the logged-in user's encrypted key for TTS and cloning."""
+    uid = get_current_user_id()
+    if not uid:
+        return None, (
+            jsonify({"error": "请先登录", "code": "auth_required"}),
+            401,
+        )
+    try:
+        api_key = get_user_credential(uid, "elevenlabs", allow_legacy=False)
+    except CredentialConfigurationError:
+        return None, (
+            jsonify({
+                "error": "服务器凭证加密尚未配置，请联系管理员",
+                "code": "credential_encryption_unavailable",
+            }),
+            503,
+        )
+    except CredentialError:
+        return None, (
+            jsonify({
+                "error": "ElevenLabs API Key 暂时无法读取，请稍后重试",
+                "code": "credential_read_failed",
+            }),
+            500,
+        )
+    if not api_key:
+        return None, (
+            jsonify({
+                "error": "请先在个人主页配置自己的 ElevenLabs API Key",
+                "code": "elevenlabs_key_missing",
+                "settings_url": "/profile",
+            }),
+            400,
+        )
+    return api_key, None
+
+
+def _elevenlabs_error_response(error: ElevenLabsAPIError):
+    return jsonify({"error": error.user_message, "code": error.code}), error.http_status
 
 
 def _resolve_voice_config(char_id, key, default=""):
+    """Resolve voice settings only from the current user's private character."""
     cfg_file = _get_characters_config_file()
     if os.path.exists(cfg_file):
         try:
@@ -1158,206 +1439,271 @@ def _resolve_voice_config(char_id, key, default=""):
                 return val
         except Exception:
             pass
-    global_cfg = os.path.join(core.config.BASE_DIR, "configs", "characters.json")
-    if os.path.exists(global_cfg):
-        try:
-            with open(global_cfg, "r", encoding="utf-8") as f:
-                all_config = json.load(f)
-            val = (all_config.get(char_id, {}).get(key) or "").strip()
-            if val:
-                return val
-        except Exception:
-            pass
     return default
+
+
+def _validated_voice_id(value):
+    voice_id = str(value or "").strip()
+    return voice_id if VOICE_ID_PATTERN.fullmatch(voice_id) else ""
+
+
+def _prepare_tts_text(value):
+    text = str(value or "").strip()
+    text = re.sub(r'<ruby>([^<]*)<rt>[^<]*</rt></ruby>', r'\1', text)
+    text = re.sub(r'<[^>]+>', '', text)
+    text = text.replace('/', '。').strip()
+    return text
+
+
+def _voice_settings_for_emotion(voice_emotion):
+    stability, similarity_boost, style = 0.5, 0.75, 0.0
+    if voice_emotion:
+        e = voice_emotion.strip()
+        if e == "开心":
+            stability, similarity_boost, style = 0.2, 0.7, 0.8
+        elif e == "愤怒":
+            stability, similarity_boost, style = 0.15, 0.6, 0.95
+        elif e == "悲伤":
+            stability, similarity_boost, style = 0.3, 0.8, 0.5
+        elif e == "温柔":
+            stability, similarity_boost, style = 0.35, 0.8, 0.35
+        elif e == "害羞":
+            stability, similarity_boost, style = 0.3, 0.75, 0.4
+        elif e == "冷淡":
+            stability, similarity_boost, style = 0.6, 0.6, 0.0
+        elif e == "兴奋":
+            stability, similarity_boost, style = 0.15, 0.65, 0.9
+        elif e == "平静":
+            stability, similarity_boost, style = 0.5, 0.75, 0.0
+        elif "开心" in e or "笑" in e:
+            stability, similarity_boost, style = 0.2, 0.7, 0.8
+        elif "愤怒" in e or "怒" in e or "激动" in e:
+            stability, similarity_boost, style = 0.15, 0.6, 0.95
+        elif "悲伤" in e or "难过" in e or "泣" in e:
+            stability, similarity_boost, style = 0.3, 0.8, 0.5
+        elif "温柔" in e or "優" in e or "暖" in e:
+            stability, similarity_boost, style = 0.35, 0.8, 0.35
+        elif "害羞" in e or "紧张" in e or "照" in e:
+            stability, similarity_boost, style = 0.3, 0.75, 0.4
+        elif "冷淡" in e or "冷" in e or "酷" in e:
+            stability, similarity_boost, style = 0.6, 0.6, 0.0
+        elif "兴奋" in e:
+            stability, similarity_boost, style = 0.15, 0.65, 0.9
+        else:
+            stability, similarity_boost, style = 0.3, 0.72, 0.5
+    return {
+        "stability": stability,
+        "similarity_boost": similarity_boost,
+        "style": style,
+    }
+
+
+def _character_tts_response(char_id, *, model_id, use_emotion):
+    api_key, key_error = _get_private_elevenlabs_key()
+    if key_error:
+        return key_error
+
+    data = request.get_json(silent=True) or {}
+    voice_id = _validated_voice_id(
+        data.get("voice_id") or _resolve_voice_config(char_id, "voice_id")
+    )
+    if not voice_id:
+        return jsonify({
+            "error": "请先为角色填写有效的 Voice ID",
+            "code": "voice_id_missing_or_invalid",
+        }), 400
+
+    text = _prepare_tts_text(data.get("text"))
+    if not text:
+        return jsonify({"error": "没有可生成语音的文本", "code": "tts_text_empty"}), 400
+    if len(text) > TTS_MAX_TEXT_CHARS:
+        return jsonify({
+            "error": f"单次语音文本不能超过 {TTS_MAX_TEXT_CHARS} 个字符",
+            "code": "tts_text_too_long",
+        }), 413
+
+    voice_emotion = ""
+    if use_emotion:
+        voice_emotion = str(
+            data.get("voice_emotion") or _resolve_voice_config(char_id, "voice_emotion")
+        ).strip()
+    settings = _voice_settings_for_emotion(voice_emotion)
+    print(f"[TTS] char={char_id} model={model_id} emotion={voice_emotion!r}")
+    try:
+        audio = synthesize_speech(
+            api_key,
+            voice_id=voice_id,
+            text=text,
+            model_id=model_id,
+            voice_settings=settings,
+        )
+    except ElevenLabsAPIError as exc:
+        return _elevenlabs_error_response(exc)
+    except requests.RequestException:
+        return jsonify({
+            "error": "无法连接 ElevenLabs，请稍后重试",
+            "code": "elevenlabs_unreachable",
+        }), 502
+    except Exception:
+        return jsonify({
+            "error": "语音生成发生内部错误，请稍后重试",
+            "code": "tts_internal_error",
+        }), 500
+    return send_file(io.BytesIO(audio), mimetype="audio/mpeg", as_attachment=False)
 
 
 @media_bp.route("/api/<char_id>/tts", methods=["POST"])
 def char_tts(char_id):
-    uid = get_current_user_id()
-    allowed, err_msg = _check_tts_quota(uid)
-    if not allowed:
-        return jsonify({"error": err_msg}), 429
-    voice_id = _resolve_voice_config(char_id, "voice_id")
-    voice_emotion = _resolve_voice_config(char_id, "voice_emotion")
-
-    data = request.get_json(silent=True) or {}
-    override_voice = (data.get("voice_id") or "").strip()
-    if override_voice:
-        voice_id = override_voice
-
-    override_emotion = (data.get("voice_emotion") or "").strip()
-    if override_emotion:
-        voice_emotion = override_emotion
-
-    if not voice_id:
-        return jsonify({"error": "No voice_id configured for this character"}), 400
-
-    text = (data.get("text") or "").strip()
-    if not text:
-        return jsonify({"error": "No text provided"}), 400
-
-    text = re.sub(r'<ruby>([^<]*)<rt>[^<]*</rt></ruby>', r'\1', text)
-    text = re.sub(r'<[^>]+>', '', text)
-    text = text.replace('/', '。')
-    text = text.strip()
-    if not text:
-        return jsonify({"error": "Text is empty after stripping tags"}), 400
-
-    stability = 0.5
-    similarity_boost = 0.75
-    style = 0.0
-    if voice_emotion:
-        e = voice_emotion.strip()
-        if e == "开心":
-            stability = 0.2; similarity_boost = 0.7; style = 0.8
-        elif e == "愤怒":
-            stability = 0.15; similarity_boost = 0.6; style = 0.95
-        elif e == "悲伤":
-            stability = 0.3; similarity_boost = 0.8; style = 0.5
-        elif e == "温柔":
-            stability = 0.35; similarity_boost = 0.8; style = 0.35
-        elif e == "害羞":
-            stability = 0.3; similarity_boost = 0.75; style = 0.4
-        elif e == "冷淡":
-            stability = 0.6; similarity_boost = 0.6; style = 0.0
-        elif e == "兴奋":
-            stability = 0.15; similarity_boost = 0.65; style = 0.9
-        elif e == "平静":
-            stability = 0.5; similarity_boost = 0.75; style = 0.0
-        elif "开心" in e or "笑" in e:
-            stability = 0.2; similarity_boost = 0.7; style = 0.8
-        elif "愤怒" in e or "怒" in e or "激动" in e:
-            stability = 0.15; similarity_boost = 0.6; style = 0.95
-        elif "悲伤" in e or "难过" in e or "泣" in e:
-            stability = 0.3; similarity_boost = 0.8; style = 0.5
-        elif "温柔" in e or "優" in e or "暖" in e:
-            stability = 0.35; similarity_boost = 0.8; style = 0.35
-        elif "害羞" in e or "紧张" in e or "照" in e:
-            stability = 0.3; similarity_boost = 0.75; style = 0.4
-        elif "冷淡" in e or "冷" in e or "酷" in e:
-            stability = 0.6; similarity_boost = 0.6; style = 0.0
-        elif "兴奋" in e:
-            stability = 0.15; similarity_boost = 0.65; style = 0.9
-        else:
-            stability = 0.3; similarity_boost = 0.72; style = 0.5
-    print(f"[TTS] char={char_id} emotion={voice_emotion!r} stability={stability} similarity={similarity_boost} style={style}")
-
-    try:
-        resp = requests.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-            headers={
-                "xi-api-key": ELEVENLABS_API_KEY,
-                "Content-Type": "application/json"
-            },
-            json={
-                "text": text,
-                "model_id": "eleven_turbo_v2_5",
-                "voice_settings": {
-                    "stability": stability,
-                    "similarity_boost": similarity_boost,
-                    "style": style
-                }
-            },
-            timeout=30
-        )
-        if resp.status_code != 200:
-            return jsonify({"error": f"ElevenLabs TTS failed: {resp.text}"}), resp.status_code
-
-        return send_file(
-            io.BytesIO(resp.content),
-            mimetype="audio/mpeg",
-            as_attachment=False
-        )
-    except Exception as e:
-        print(f"TTS Error: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _character_tts_response(
+        char_id, model_id="eleven_turbo_v2_5", use_emotion=True
+    )
 
 
 @media_bp.route("/api/<char_id>/tts_voice", methods=["POST"])
 def char_tts_voice(char_id):
-    uid = get_current_user_id()
-    allowed, err_msg = _check_tts_quota(uid)
-    if not allowed:
-        return jsonify({"error": err_msg}), 429
-    voice_id = _resolve_voice_config(char_id, "voice_id")
-
-    data = request.get_json(silent=True) or {}
-    override_voice = (data.get("voice_id") or "").strip()
-    if override_voice:
-        voice_id = override_voice
-
-    if not voice_id:
-        return jsonify({"error": "No voice_id configured for this character"}), 400
-
-    text = (data.get("text") or "").strip()
-    if not text:
-        return jsonify({"error": "No text provided"}), 400
-
-    text = re.sub(r'<ruby>([^<]*)<rt>[^<]*</rt></ruby>', r'\1', text)
-    text = re.sub(r'<[^>]+>', '', text)
-    text = text.replace('/', '。')
-    text = text.strip()
-    if not text:
-        return jsonify({"error": "Text is empty after stripping tags"}), 400
-
-    print(f"[TTS_VOICE] char={char_id} text={text[:50]}...")
-
-    try:
-        resp = requests.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-            headers={
-                "xi-api-key": ELEVENLABS_API_KEY,
-                "Content-Type": "application/json"
-            },
-            json={
-                "text": text,
-                "model_id": "eleven_v3",
-                "voice_settings": {
-                    "stability": 0.5,
-                    "similarity_boost": 0.75,
-                    "style": 0.0
-                }
-            },
-            timeout=30
-        )
-        if resp.status_code != 200:
-            return jsonify({"error": f"ElevenLabs TTS failed: {resp.text}"}), resp.status_code
-
-        return send_file(
-            io.BytesIO(resp.content),
-            mimetype="audio/mpeg",
-            as_attachment=False
-        )
-    except Exception as e:
-        print(f"TTS Voice Error: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _character_tts_response(char_id, model_id="eleven_v3", use_emotion=False)
 
 
 @media_bp.route("/api/voice_clone", methods=["POST"])
 def voice_clone():
-    if "file" not in request.files:
-        return jsonify({"error": "没有上传文件"}), 400
-    file = request.files["file"]
-    if file.filename == "":
-        return jsonify({"error": "文件名为空"}), 400
+    if request.headers.get("X-Requested-With") != "XMLHttpRequest":
+        return jsonify({"error": "请求来源校验失败", "code": "request_origin_invalid"}), 403
+
+    api_key, key_error = _get_private_elevenlabs_key()
+    if key_error:
+        return key_error
+    if str(request.form.get("consent") or "").strip().lower() not in {
+        "1", "true", "yes", "on",
+    }:
+        return jsonify({
+            "error": "请确认你拥有该声音的使用权或已获得声音本人明确授权",
+            "code": "voice_consent_required",
+        }), 400
+
+    uploaded = request.files.get("file")
+    if not uploaded or not uploaded.filename:
+        return jsonify({"error": "请选择音频文件", "code": "voice_file_missing"}), 400
+    original_filename = str(uploaded.filename).replace("\\", "/").rsplit("/", 1)[-1]
+    extension = os.path.splitext(original_filename)[1].lower()
+    filename = secure_filename(original_filename) or f"voice{extension}"
+    if extension not in VOICE_CLONE_EXTENSIONS:
+        return jsonify({
+            "error": "不支持该文件格式，请上传 MP3、WAV、M4A、FLAC、OGG 或 WebM 音频",
+            "code": "voice_file_type_invalid",
+        }), 400
+
+    audio_bytes = uploaded.read(VOICE_CLONE_MAX_BYTES + 1)
+    if not audio_bytes:
+        return jsonify({"error": "音频文件为空", "code": "voice_file_empty"}), 400
+    if len(audio_bytes) > VOICE_CLONE_MAX_BYTES:
+        return jsonify({
+            "error": "音频文件不能超过 20 MB",
+            "code": "voice_file_too_large",
+        }), 413
+
+    name = re.sub(r"[\x00-\x1f\x7f]+", " ", str(request.form.get("name") or "")).strip()
+    name = name[:100] or "Sakura Voice"
+    content_type = str(uploaded.mimetype or "application/octet-stream")
     try:
-        resp = requests.post(
-            "https://api.elevenlabs.io/v1/voices/add",
-            headers={"xi-api-key": ELEVENLABS_API_KEY},
-            files={"files": (file.filename, file.read(), file.content_type)},
-            data={"name": request.form.get("name", "kunigami_voice")}
+        result = create_ivc_voice(
+            api_key,
+            name=name,
+            filename=filename,
+            audio_bytes=audio_bytes,
+            content_type=content_type,
         )
-        if resp.status_code != 200:
-            return jsonify({"error": f"ElevenLabs clone failed: {resp.text}"}), resp.status_code
-        result = resp.json()
-        voice_id = result.get("voice_id", "")
-        return jsonify({"status": "success", "voice_id": voice_id})
-    except Exception as e:
-        print(f"Voice Clone Error: {e}")
-        return jsonify({"error": str(e)}), 500
+    except ElevenLabsAPIError as exc:
+        return _elevenlabs_error_response(exc)
+    except requests.RequestException:
+        return jsonify({
+            "error": "无法连接 ElevenLabs，请稍后重试",
+            "code": "elevenlabs_unreachable",
+        }), 502
+    except Exception:
+        return jsonify({
+            "error": "音色创建发生内部错误，请稍后重试",
+            "code": "voice_clone_internal_error",
+        }), 500
+    return jsonify({"status": "success", **result})
 
 
 # ==================== 视觉 / 图片 ====================
+
+VISION_DESCRIPTION_PROMPT = "请用中文简要描述这张图片的内容，直接描述你看到了什么，不用过多主观判断。"
+
+
+def _public_base_url() -> str:
+    configured = (os.getenv("PUBLIC_BASE_URL", "") or os.getenv("SITE_URL", "")).strip()
+    if configured:
+        parsed = urlparse(configured)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+        return configured.rstrip("/")
+
+    forwarded_proto = (request.headers.get("X-Forwarded-Proto") or request.scheme or "https").split(",")[0].strip()
+    forwarded_host = (request.headers.get("X-Forwarded-Host") or request.headers.get("Host") or "").split(",")[0].strip()
+    if forwarded_host:
+        return f"{forwarded_proto}://{forwarded_host}"
+    return request.host_url.rstrip("/")
+
+
+def _generate_image_description(public_image_url: str) -> str:
+    """Describe one public image with the configured vision model."""
+    from app import get_model_config, call_openrouter
+
+    route, current_model = get_model_config("vision")
+    print(f"--- [Vision] Route: {route}, Model: {current_model} ---")
+    if route == "relay":
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": VISION_DESCRIPTION_PROMPT},
+                {"type": "image_url", "image_url": {"url": public_image_url}},
+            ],
+        }]
+        description = call_openrouter(messages, char_id=None, model_name=current_model)
+    else:
+        base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
+        gemini_key = get_effective_gemini_key()
+        url = f"{base_url}/v1beta/models/{current_model}:generateContent"
+        payload = {
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    {"text": VISION_DESCRIPTION_PROMPT},
+                    {"file_data": {"mime_type": "image/jpeg", "file_uri": public_image_url}},
+                ],
+            }],
+            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 4096},
+            "safetySettings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+            ],
+        }
+        response = requests.post(url, json=payload, headers={"x-goog-api-key": gemini_key}, timeout=100)
+        if response.status_code != 200:
+            raise RuntimeError(f"[Gemini Vision Error {response.status_code}] {response.text}")
+        result = response.json()
+        finish_reason = (result.get("candidates") or [{}])[0].get("finishReason")
+        if finish_reason and finish_reason != "STOP":
+            print(f"   [Vision] Gemini finishReason={finish_reason} (可能被截断)")
+        parts = (((result.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+        description = "".join(part.get("text", "") for part in parts).strip()
+
+    if not str(description or "").strip():
+        raise RuntimeError("视觉模型没有返回图片描述")
+    return normalize_image_description(description)
+
+
+def _get_description_request(form):
+    mode = (form.get("description_mode") or "ai").strip().lower()
+    if mode not in {"ai", "manual"}:
+        raise ValueError("图片描述方式无效")
+    if mode == "manual":
+        return mode, normalize_image_description(form.get("description"))
+    return mode, ""
 
 def _compress_chat_image_to_jpg(src_path: str, dst_path: str, max_edge: int = 1024, max_bytes: int = 500 * 1024):
     with Image.open(src_path) as img:
@@ -1408,6 +1754,11 @@ def vision_upload():
     if file.filename == "":
         return jsonify({"error": "Empty filename"}), 400
 
+    try:
+        description_mode, description = _get_description_request(request.form)
+    except ValueError as exc:
+        return jsonify({"error": str(exc), "code": "invalid_image_description"}), 400
+
     img_dir = os.path.join(core.config.USERS_ROOT, str(user_id), "chat_images")
     os.makedirs(img_dir, exist_ok=True)
 
@@ -1438,87 +1789,31 @@ def vision_upload():
     except Exception:
         pass
 
-    static_upload_dir = os.path.join(core.config.BASE_DIR, "static", "uploads")
-    os.makedirs(static_upload_dir, exist_ok=True)
-    public_filename = filename
-    public_file_path = os.path.join(static_upload_dir, public_filename)
-    m = 0
-    while os.path.exists(public_file_path):
-        m += 1
-        public_filename = f"{base_name}_{m}.jpg"
+    public_file_path = None
+    if description_mode == "ai":
+        static_upload_dir = os.path.join(core.config.BASE_DIR, "static", "uploads")
+        os.makedirs(static_upload_dir, exist_ok=True)
+        public_filename = filename
         public_file_path = os.path.join(static_upload_dir, public_filename)
-    shutil.copy2(filepath, public_file_path)
-
-    def _public_base_url() -> str:
-        configured = (os.getenv("PUBLIC_BASE_URL", "") or os.getenv("SITE_URL", "")).strip()
-        if configured:
-            parsed = urlparse(configured)
-            if parsed.scheme and parsed.netloc:
-                return f"{parsed.scheme}://{parsed.netloc}"
-            return configured.rstrip("/")
-
-        forwarded_proto = (request.headers.get("X-Forwarded-Proto") or request.scheme or "https").split(",")[0].strip()
-        forwarded_host = (request.headers.get("X-Forwarded-Host") or request.headers.get("Host") or "").split(",")[0].strip()
-        if forwarded_host:
-            return f"{forwarded_proto}://{forwarded_host}"
-        return request.host_url.rstrip("/")
-
-    public_image_url = f"{_public_base_url()}/static/uploads/{public_filename}"
-
-    from app import get_model_config, call_openrouter
-
-    route, current_model = get_model_config("vision")
-    print(f"--- [Vision] Route: {route}, Model: {current_model} ---")
-
-    prompt = "请用中文简要描述这张图片的内容，直接描述你看到了什么，不用过多主观判断。"
-    description = ""
-    try:
-        if route == "relay":
-            messages = [{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": public_image_url}}
-                ]
-            }]
-            description = call_openrouter(messages, char_id=None, model_name=current_model)
-        else:
-            base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
-            url = f"{base_url}/v1beta/models/{current_model}:generateContent?key={get_effective_gemini_key()}"
-            payload = {
-                "contents": [{
-                    "role": "user",
-                    "parts": [
-                        {"text": prompt},
-                        {"file_data": {"mime_type": "image/jpeg", "file_uri": public_image_url}}
-                    ]
-                }],
-                "generationConfig": {"temperature": 0.4, "maxOutputTokens": 4096},
-                "safetySettings": [
-                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-                ]
-            }
-            r = requests.post(url, json=payload, timeout=100)
-            if r.status_code != 200:
-                raise RuntimeError(f"[Gemini Vision Error {r.status_code}] {r.text}")
-            result = r.json()
-            finish_reason = (result.get("candidates") or [{}])[0].get("finishReason")
-            if finish_reason and finish_reason != "STOP":
-                print(f"   [Vision] Gemini finishReason={finish_reason} (可能被截断)")
-            parts = (((result.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
-            description = ""
-            for p in parts:
-                t = p.get("text")
-                if t:
-                    description += t
-            description = description.strip()
-
-    except Exception as e:
-        print(f"   [Vision] Error: {e}")
-        description = "图片解析失败"
+        m = 0
+        while os.path.exists(public_file_path):
+            m += 1
+            public_filename = f"{base_name}_{m}.jpg"
+            public_file_path = os.path.join(static_upload_dir, public_filename)
+        shutil.copy2(filepath, public_file_path)
+        public_image_url = f"{_public_base_url()}/static/uploads/{public_filename}"
+        try:
+            description = _generate_image_description(public_image_url)
+        except Exception as exc:
+            print(f"   [Vision] Error: {exc}")
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            if public_file_path and os.path.exists(public_file_path):
+                os.remove(public_file_path)
+            return jsonify({
+                "error": "AI识图失败，请改用手动描述",
+                "code": "vision_failed",
+            }), 502
 
     try:
         cos_path = f"users/{user_id}/chat_images/{filename}"
@@ -1528,7 +1823,7 @@ def vision_upload():
     except Exception as e:
         print(f"   [COS Upload Error] {e}")
     finally:
-        if os.path.exists(public_file_path):
+        if public_file_path and os.path.exists(public_file_path):
             os.remove(public_file_path)
 
     url = f"/api/user/image/{filename}"
@@ -1536,7 +1831,8 @@ def vision_upload():
         "status": "success",
         "url": url,
         "path": filename,
-        "description": (description or "").strip()
+        "description": description,
+        "description_mode": description_mode,
     })
 
 

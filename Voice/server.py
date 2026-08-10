@@ -1,13 +1,8 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
+import io
 import requests
-import os
-from dotenv import load_dotenv
-from pathlib import Path
-
-load_dotenv(Path(__file__).parent.parent / '.env')
 
 app = FastAPI()
 
@@ -19,49 +14,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY")
-
 @app.get("/")
 async def read_index():
     return FileResponse("index.html")
 
-@app.post("/clone_voice")
-async def clone_voice(file: UploadFile = File(...)):
-
-    audio_data = await file.read()
-
-    response = requests.post(
-        "https://api.elevenlabs.io/v1/voices/add",
-        headers={
-            "xi-api-key": ELEVEN_API_KEY
-        },
-        files={
-            "files": (
-                file.filename,
-                audio_data,
-                file.content_type
-            )
-        },
-        data={
-            "name": "rensuke_voice"
-        }
-    )
-
-    return response.json()
-
-from fastapi.responses import StreamingResponse
-import io
-
 @app.post("/tts")
 async def tts(data: dict):
-
-    text = data["text"]
-    voice_id = data["voice_id"]
+    api_key = str(data.get("api_key") or "").strip()
+    text = str(data.get("text") or "").strip()
+    voice_id = str(data.get("voice_id") or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="请填写你自己的 ElevenLabs API Key")
+    if not text or not voice_id:
+        raise HTTPException(status_code=400, detail="请填写 Voice ID 和文本")
 
     response = requests.post(
         f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
         headers={
-            "xi-api-key": ELEVEN_API_KEY,
+            "xi-api-key": api_key,
             "Content-Type": "application/json"
         },
         json={
@@ -69,6 +39,9 @@ async def tts(data: dict):
             "model_id": "eleven_multilingual_v2"
         }
     )
+
+    if response.status_code != 200:
+        raise HTTPException(status_code=response.status_code, detail="ElevenLabs TTS 请求失败")
 
     return StreamingResponse(
         io.BytesIO(response.content),
