@@ -54,7 +54,8 @@ def init_users_db():
             display_name TEXT,
             created_at TEXT,
             provider TEXT,
-            provider_user_id TEXT
+            provider_user_id TEXT,
+            auth_version INTEGER DEFAULT 1
         )
         """
     )
@@ -62,6 +63,12 @@ def init_users_db():
         cur.execute("ALTER TABLE users ADD COLUMN is_frozen INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
         pass
+    try:
+        cur.execute("ALTER TABLE users ADD COLUMN auth_version INTEGER DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass
+    from core.legal import init_legal_consents_table
+    init_legal_consents_table(conn)
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS circuit_breaker (

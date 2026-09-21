@@ -13,3 +13,6 @@ pillow
 werkzeug
 cos-python-sdk-v5
 gevent
+tzdata
+timezonefinder
+cryptography

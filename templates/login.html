@@ -87,7 +87,13 @@
       const result = await res.json();
 
       if(result.status === 'success') {
-        window.location.href = '/'; // 登录成功，跳回首页
+        let returnTo = '/';
+        try {
+          const saved = sessionStorage.getItem('post_login_return_to');
+          if (saved && saved.startsWith('/') && !saved.startsWith('//')) returnTo = saved;
+          sessionStorage.removeItem('post_login_return_to');
+        } catch (e) {}
+        window.location.href = returnTo;
       } else {
         errorEl.textContent = result.message;
         errorEl.style.display = 'block';

@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Sakura樱语 · 蓝锁 Ego 角色图鉴</title>
+  <link rel="stylesheet" href="./assets/style.css" />
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+  <main class="app-shell" id="app">
+    <header class="topbar">
+      <button class="brand-button" type="button" data-action="go-home" aria-label="返回首页">
+        <img class="brand-logo" src="./assets/images/logo.webp" alt="Sakura樱语" />
+        <span><strong>Sakura樱语</strong><small>EGO ARCHIVE</small></span>
+      </button>
+      <button class="topbar-link" type="button" data-action="open-gallery">角色图鉴</button>
+    </header>
+
+    <section class="view is-active" id="home-view" aria-labelledby="home-title">
+      <div class="hero-card">
+        <div class="eyebrow"><span></span> BLUE LOCK · EGO TEST</div>
+        <div class="hero-logo-wrap">
+          <img src="./assets/images/logo.webp" alt="Sakura樱语樱花标志" />
+        </div>
+        <h1 id="home-title">你的 Ego<br /><em>更像谁？</em></h1>
+        <p class="hero-copy">36 道情境题，解析八种行动驱动力，并从 33 位角色的真实作答轨迹中找出与你距离最近的三个人。</p>
+        <div class="stat-strip" aria-label="测评信息">
+          <span><b>36</b><small>情境题</small></span>
+          <i></i>
+          <span><b>8</b><small>核心维度</small></span>
+          <i></i>
+          <span><b>33</b><small>角色样本</small></span>
+        </div>
+        <button class="primary-button" type="button" data-action="start-test">开始测评 <span>→</span></button>
+        <button class="secondary-button is-hidden" id="continue-button" type="button" data-action="continue-test">继续上次进度</button>
+        <button class="text-button" type="button" data-action="open-gallery">先看看角色们怎么选</button>
+      </div>
+
+      <div class="system-note">
+        <span class="system-dot"></span>
+        <div>
+          <strong>系统提示</strong>
+          <p>现在将进行一项共 36 题的 Ego 倾向测试。请按照你真实的第一反应作答；每题只能选择一项，没有合适答案时可选择“以上皆非”。</p>
+        </div>
+      </div>
+
+      <div class="feature-grid">
+        <article><span>01</span><h2>不只给一个名字</h2><p>结果包含前三角色、相似指数、距离说明和八维雷达图。</p></article>
+        <article><span>02</span><h2>完整角色心路</h2><p>随时查看 33 位角色每一题的选择、日文碎碎念与中文译文。</p></article>
+        <article><span>03</span><h2>三套判型标签</h2><p>每位角色附 MBTI、九型翼型与 Tritype，方便继续观察。</p></article>
+      </div>
+      <div class="brand-card brand-card-home"></div>
+      <p class="disclaimer">本工具为同人娱乐与自我观察用途，不代表作品官方设定，也不构成专业心理测评。</p>
+    </section>
+
+    <section class="view test-view" id="test-view" aria-labelledby="question-title">
+      <div class="test-header">
+        <button class="icon-button" type="button" data-action="test-back" aria-label="返回">←</button>
+        <div class="test-progress-copy"><span id="progress-module">第一模块</span><b id="progress-count">1 / 36</b></div>
+        <button class="exit-button" type="button" data-action="save-exit">保存退出</button>
+      </div>
+      <div class="progress-track"><span id="progress-bar"></span></div>
+      <div class="question-card" id="question-card">
+        <div class="question-kicker" id="question-kicker">Q01 · 新领域</div>
+        <h1 id="question-title"></h1>
+        <div class="option-list" id="option-list" role="radiogroup" aria-labelledby="question-title"></div>
+      </div>
+      <div class="test-actions">
+        <button class="secondary-button compact" type="button" data-action="previous-question">上一题</button>
+        <button class="primary-button compact" id="next-button" type="button" data-action="next-question">下一题 <span>→</span></button>
+      </div>
+      <p class="test-hint" id="test-hint" aria-live="polite">选择后自动进入下一题，进度会保存在本机。</p>
+    </section>
+
+    <section class="view result-view" id="result-view" aria-labelledby="result-heading">
+      <div class="page-heading-row">
+        <button class="icon-button" type="button" data-action="go-home" aria-label="返回首页">←</button>
+        <span>你的 Ego 档案</span>
+        <button class="exit-button" type="button" data-action="restart-test">重测</button>
+      </div>
+      <div id="hidden-ending"></div>
+      <article class="result-hero" id="result-hero">
+        <div class="eyebrow light"><span></span> CLOSEST EGO</div>
+        <p class="result-overline">你最接近的角色是</p>
+        <div class="character-mark large" id="winner-mark"></div>
+        <h1 id="result-heading"></h1>
+        <p class="character-name-ja" id="winner-name-ja"></p>
+        <div class="type-badges" id="winner-types"></div>
+        <div class="similarity-orbit"><b id="winner-similarity">0</b><span>%</span><small>相似指数</small></div>
+        <p id="winner-summary"></p>
+        <button class="light-button" type="button" data-action="open-winner">查看 TA 的 36 题心路 →</button>
+      </article>
+
+      <section class="content-card radar-card">
+        <div class="section-title"><div><span>八维坐标</span><h2>你的 Ego 雷达</h2></div><small>按角色样本标准化</small></div>
+        <div class="radar-wrap"><canvas id="result-radar" width="640" height="640" aria-label="用户与最相似角色的八维雷达图"></canvas></div>
+        <div class="radar-legend"><span><i class="legend-user"></i>你</span><span><i class="legend-character"></i><b id="legend-character-name"></b></span></div>
+        <div class="dimension-grid" id="dimension-grid"></div>
+      </section>
+
+      <section class="content-card">
+        <div class="section-title"><div><span>TOP 3</span><h2>与你最近的三位角色</h2></div><small>距离越小越相似</small></div>
+        <div class="ranking-list" id="ranking-list"></div>
+      </section>
+
+      <details class="method-card">
+        <summary>这个“相似指数”是怎么算的？</summary>
+        <p>先按你的 36 个选择计算八维原始分，再用 33 位角色样本的均值与标准差统一量纲，计算八维标准化欧氏距离。排名只由距离决定；相似指数是把距离转换成更直观的 0～100 指标，它不是概率，也不代表官方结论。</p>
+      </details>
+
+      <div class="share-actions">
+        <button class="primary-button" type="button" data-action="post-note">发小红书</button>
+        <button class="secondary-button" type="button" data-action="save-result-image">保存图片</button>
+      </div>
+      <p class="share-tip">自动生成 3:4 结果卡 · 发布前仍可编辑或取消</p>
+      <div class="result-actions">
+        <button class="primary-button" type="button" data-action="review-answers">检查我的答案</button>
+        <button class="secondary-button" type="button" data-action="open-gallery">浏览全部角色</button>
+      </div>
+      <div class="brand-card"></div>
+      <p class="disclaimer">测评结果仅供娱乐与自我观察。MBTI、九型与 Tritype 为博主个人判型。</p>
+    </section>
+
+    <section class="view gallery-view" id="gallery-view" aria-labelledby="gallery-title">
+      <div class="page-heading-row sticky-heading">
+        <button class="icon-button" type="button" data-action="gallery-back" aria-label="返回">←</button>
+        <span>角色 Ego 图鉴</span>
+        <b>33</b>
+      </div>
+      <div class="gallery-intro">
+        <div class="eyebrow"><span></span> CHARACTER ARCHIVE</div>
+        <h1 id="gallery-title">看看他们<br />如何成为<em>自己</em></h1>
+        <p>选择角色，展开完整 36 题作答轨迹与中文碎碎念。</p>
+      </div>
+      <label class="search-box">
+        <span>⌕</span>
+        <input id="character-search" type="search" autocomplete="off" placeholder="搜索角色名、MBTI、九型或 Tritype" />
+      </label>
+      <div class="character-grid" id="character-grid"></div>
+      <div class="empty-state is-hidden" id="gallery-empty">没有找到匹配的角色。</div>
+      <div class="brand-card"></div>
+    </section>
+
+    <section class="view detail-view" id="detail-view" aria-labelledby="detail-name">
+      <div class="page-heading-row sticky-heading">
+        <button class="icon-button" type="button" data-action="detail-back" aria-label="返回角色图鉴">←</button>
+        <span>角色 Ego 档案</span>
+        <b id="detail-index"></b>
+      </div>
+      <article class="detail-profile">
+        <div class="character-mark xlarge" id="detail-mark"></div>
+        <div class="eyebrow light"><span></span> EGO PROFILE</div>
+        <h1 id="detail-name"></h1>
+        <p class="character-name-ja" id="detail-name-ja"></p>
+        <div class="type-badges" id="detail-types"></div>
+        <div class="detail-meta"><span id="detail-none-count"></span><span>36 题已完成</span></div>
+      </article>
+      <section class="content-card radar-card detail-radar-card">
+        <div class="section-title"><div><span>EIGHT AXES</span><h2>八维角色坐标</h2></div></div>
+        <div class="radar-wrap"><canvas id="detail-radar" width="640" height="640" aria-label="角色八维雷达图"></canvas></div>
+        <div class="dimension-grid" id="detail-dimensions"></div>
+      </section>
+      <section class="journey-section">
+        <div class="section-title"><div><span>INNER VOICE</span><h2>完整做题心路</h2></div><small>点击逐题展开</small></div>
+        <div class="journey-list" id="journey-list"></div>
+      </section>
+      <div class="brand-card"></div>
+      <p class="disclaimer">角色原文为测试时生成的原始内容，中文由 Gemini Flash Lite 辅助翻译。</p>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="./assets/data.js"></script>
+  <script src="./assets/main.js"></script>
+</body>
+</html>

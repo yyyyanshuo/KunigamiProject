@@ -12,6 +12,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>记忆核心 | Memory Core</title>
+    <script src="/static/auth-guard.js"></script>
     <!-- 【新增】主题加载脚本 -->
     <script src="/static/theme-loader.js"></script>
     <style>
@@ -388,6 +389,104 @@
         }
         .btn-clear-top:hover { background: #ffcdd2; }
 
+        /* 日程分区标题：标题与局部操作按钮保持清晰层级 */
+        .schedule-section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+            margin: 10px 0 12px;
+            padding: 10px 12px;
+            background: linear-gradient(135deg, #f7fbff 0%, #eef6ff 100%);
+            border: 1px solid #dbeafe;
+            border-radius: 10px;
+        }
+
+        .schedule-section-title {
+            min-width: 0;
+            color: #425466;
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+        }
+
+        .schedule-section-add {
+            flex: 0 0 auto;
+            padding: 6px 13px;
+            border: 1px solid #bfdbfe;
+            border-radius: 999px;
+            background: #fff;
+            color: #2563a6;
+            box-shadow: 0 1px 3px rgba(37, 99, 166, 0.08);
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 700;
+            line-height: 1.4;
+            white-space: nowrap;
+            transition: background 0.2s, border-color 0.2s, transform 0.2s;
+        }
+
+        .schedule-section-add:hover {
+            background: #eaf4ff;
+            border-color: #93c5fd;
+            transform: translateY(-1px);
+        }
+
+        .persona-lock-card {
+            margin: 10px 0;
+            padding: 13px 14px;
+            border: 1px solid #c9d8f2;
+            border-left: 4px solid #6f8fc9;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #f5f8ff 0%, #edf3ff 100%);
+            color: #34445f;
+        }
+
+        .persona-lock-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            margin-bottom: 8px;
+            padding: 3px 9px;
+            border-radius: 999px;
+            background: #dfe9fb;
+            color: #496a9f;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .persona-lock-help {
+            margin-bottom: 12px;
+            padding: 12px 13px;
+            border: 1px solid #dbe7fa;
+            border-radius: 10px;
+            background: #f7faff;
+            color: #52647f;
+            font-size: 12px;
+            line-height: 1.65;
+        }
+
+        .persona-lock-status {
+            min-height: 18px;
+            margin: 6px 2px 0;
+            color: #718096;
+            font-size: 11px;
+        }
+
+        .persona-lock-status.invalid { color: #c62828; font-weight: 600; }
+        .persona-lock-status.valid { color: #3f7b5a; }
+
+        @media (max-width: 600px) {
+            .schedule-section-header {
+                gap: 14px;
+                padding: 9px 10px;
+            }
+
+            .schedule-section-add {
+                padding: 6px 11px;
+            }
+        }
+
         /* JSON 编辑器模式 */
         .json-editor-container {
             display: none; /* 默认隐藏 */
@@ -633,39 +732,56 @@
             <summary>🔊 语音设置 (Voice Settings)</summary>
             <div class="content-box" style="padding: 15px 20px;">
 
-                <!-- 1. 上传音频 -->
+                <!-- 1. ElevenLabs 私有 Key 状态 -->
                 <div style="margin-bottom:20px; padding-bottom:15px; border-bottom:1px solid #eee;">
-                    <div style="font-size:13px; font-weight:bold; color:#555; margin-bottom:6px;">1. 上传音频 / Upload Audio</div>
-                    <div style="font-size:11px; color:#aaa; margin-bottom:8px;">请上传60s以内的音频文件</div>
-                    <input type="file" id="voice-clone-file" accept="audio/*" style="margin-bottom:8px; font-size:12px;">
-                    <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-                        <button class="btn btn-save" onclick="cloneVoice()" id="btn-clone-voice" style="display:inline-block;">生成 / Generate</button>
+                    <div style="font-size:13px; font-weight:bold; color:#555; margin-bottom:6px;">1. 个人 ElevenLabs API Key</div>
+                    <div id="elevenlabs-voice-key-status" style="font-size:11px; color:#999; line-height:1.7; text-align:center;">
+                        正在检查配置……
+                    </div>
+                    <div style="text-align:center; margin-top:8px; font-size:11px;">
+                        <a href="/profile" style="color:var(--primary-color);">前往个人主页配置 Key</a>
+                        <span style="color:#ccc; margin:0 6px;">·</span>
+                        <a href="https://try.elevenlabs.io/8f8ks0unlqsw" target="_blank" rel="noopener noreferrer sponsored" style="color:var(--primary-color);">打开 ElevenLabs</a>
+                    </div>
+                </div>
+
+                <!-- 2. 上传音频克隆 -->
+                <div style="margin-bottom:20px; padding-bottom:15px; border-bottom:1px solid #eee;">
+                    <div style="font-size:13px; font-weight:bold; color:#555; margin-bottom:6px;">2. 创建私有音色 / Instant Voice Clone</div>
+                    <div style="font-size:10px; color:#999; margin-bottom:8px; line-height:1.6;">
+                        上传清晰、只有一位说话人的音频（最大 20 MB）。音频只会转发给 ElevenLabs 创建你账户中的私有音色，Sakura 不会长期保存上传文件。
+                    </div>
+                    <input type="text" id="voice-clone-name" class="input-full" maxlength="100" placeholder="音色名称（例如：角色名 Voice）" style="margin-bottom:8px; text-align:center;">
+                    <input type="file" id="voice-clone-file" accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg,.webm" style="width:100%; margin-bottom:8px; font-size:12px;">
+                    <label style="display:flex; gap:7px; align-items:flex-start; font-size:10px; color:#777; line-height:1.5; margin-bottom:10px; cursor:pointer;">
+                        <input type="checkbox" id="voice-clone-consent" style="margin-top:2px;">
+                        <span>我确认拥有该声音的使用权，或已获得声音本人明确授权。</span>
+                    </label>
+                    <div style="display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap;">
+                        <button type="button" class="btn btn-save" onclick="cloneVoice()" id="btn-clone-voice" style="display:inline-block;">上传并创建音色</button>
                         <span id="clone-status" style="font-size:11px; color:#888;"></span>
                     </div>
-                    <div id="clone-result" style="display:none; margin-top:6px;">
+                    <div id="clone-result" style="display:none; margin-top:8px;">
                         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                            <input type="text" id="clone-voice-id-result" readonly style="flex:1; min-width:150px; text-align:center; font-size:12px; padding:6px 8px; border:1px solid #ddd; border-radius:6px; background:#f9f9f9;">
-                            <button class="btn" onclick="copyVoiceId('clone-voice-id-result')" style="font-size:11px; padding:4px 12px;">复制 / Copy</button>
+                            <input type="text" id="clone-voice-id-result" readonly class="input-full" style="flex:1; min-width:150px; text-align:center; font-size:12px;">
+                            <button type="button" class="btn" onclick="copyVoiceId('clone-voice-id-result')" style="font-size:11px; padding:4px 12px;">复制 ID</button>
                         </div>
                     </div>
                 </div>
 
-                <!-- 2. 填入音色ID -->
+                <!-- 3. 填入音色ID -->
                 <div style="margin-bottom:20px; padding-bottom:15px; border-bottom:1px solid #eee;">
-                    <div style="font-size:13px; font-weight:bold; color:#555; margin-bottom:6px;">2. 音色ID / Voice ID</div>
+                    <div style="font-size:13px; font-weight:bold; color:#555; margin-bottom:6px;">3. 音色ID / Voice ID</div>
                     <input type="text" id="voice-id-input" class="input-full" placeholder="fs5rJCTrpRvrfFP8YYoB" style="text-align:center;">
-                    <div style="font-size:10px; color:#aaa; margin-top:6px; text-align:center;">
-                        前往 <a href="https://elevenlabs.io/app/voice-library" target="_blank" style="color:var(--primary-color);">ElevenLabs</a> 寻找合适的音色，或填入上方生成的ID
-                        <span style="display:inline-flex; gap:4px; margin-left:6px;">
-                            <button onclick="copyText('https://elevenlabs.io/app/voice-library')" style="font-size:10px; padding:2px 8px; cursor:pointer; border:1px solid #ddd; border-radius:4px; background:#f5f5f5;">复制链接</button>
-                            <button onclick="window.open('https://elevenlabs.io/app/voice-library','_blank')" style="font-size:10px; padding:2px 8px; cursor:pointer; border:1px solid #ddd; border-radius:4px; background:#f5f5f5;">打开链接</button>
-                        </span>
+                    <div style="font-size:10px; color:#999; margin-top:6px; text-align:center; line-height:1.6;">
+                        也可以手动填写当前 ElevenLabs 账户可访问的 Voice ID。私有音色不能只靠 ID 跨账户使用。
                     </div>
+                    <button type="button" class="btn btn-cancel" id="btn-test-voice" onclick="testVoiceId()" style="display:block; margin:10px auto 0;">试听音色 / Test Voice</button>
                 </div>
 
-                <!-- 3. 当前情绪 -->
+                <!-- 4. 当前情绪 -->
                 <div style="margin-bottom:15px;">
-                    <div style="font-size:13px; font-weight:bold; color:#555; margin-bottom:6px;">3. 当前情绪 / Emotion</div>
+                    <div style="font-size:13px; font-weight:bold; color:#555; margin-bottom:6px;">4. 当前情绪 / Emotion</div>
                     <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
                         <span class="mood-chip" data-mood="平静" onclick="setMood(this)" style="cursor:pointer; background:#e8e8e8; padding:4px 12px; border-radius:12px; font-size:12px; transition:all 0.2s;">平静</span>
                         <span class="mood-chip" data-mood="开心" onclick="setMood(this)" style="cursor:pointer; background:#e8e8e8; padding:4px 12px; border-radius:12px; font-size:12px; transition:all 0.2s;">开心</span>
@@ -724,6 +840,10 @@
                                style="width:70px;"
                                oninput="syncEmotion('num'); triggerAutoSave()">
                     </div>
+                    <label class="status-desc" style="display:block; margin-top:6px; cursor:pointer;">
+                        <input type="checkbox" id="emotion-locked-chk" onchange="saveStatusDirect()">
+                        锁定情绪指数（禁止角色自动修改，你仍可手动调整）
+                    </label>
                 </div>
 
                 <!-- 1.5 性格指数 (朋友圈主动发送概率) -->
@@ -737,6 +857,10 @@
                                style="width:80px;"
                                oninput="triggerAutoSave()">
                     </div>
+                    <label class="status-desc" style="display:block; margin-top:6px; cursor:pointer;">
+                        <input type="checkbox" id="moments-index-locked-chk" onchange="saveStatusDirect()">
+                        锁定性格指数（禁止角色自动修改，你仍可手动调整）
+                    </label>
                 </div>
 
                 <!-- 1.6 亲密度 (用户发朋友圈后该角色点赞/评论概率) -->
@@ -782,17 +906,34 @@
                 </div>
 
                 <!-- 3. 深睡眠 (修复了排版) -->
-	                <div class="status-row" style="border-bottom: none;">
+                <div class="status-row" style="border-bottom: none;">
+                    <div style="width:100%;">
+                        <div class="status-label">🌐 角色时区 (Timezone)</div>
+                        <div class="status-desc" style="margin-top:6px;">
+                            <input id="character-timezone-input" class="time-input"
+                                   style="width:min(260px, 100%);"
+                                   list="character-timezone-options"
+                                   value="Asia/Shanghai"
+                                   onfocus="loadCharacterTimezones()"
+                                   onchange="saveCharacterTimezone()">
+                            <datalist id="character-timezone-options"></datalist>
+                            <div id="character-timezone-meta" style="margin-top:6px;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="status-row" style="border-bottom: none;">
 	                    <div>
 	                        <div class="status-label">💤 深睡眠 (Deep Sleep)</div>
                         <div class="status-desc" style="display: flex; align-items: center; flex-wrap: wrap; gap: 5px;">
-                            <span>自动入睡:</span>
+                            <span id="sleep-time-basis-label">按角色当地时间设置:</span>
                             <!-- 【修改】加了一个不换行的容器 time-group -->
                             <span class="time-group">
                                 <input type="time" id="ds-start" class="time-input" value="23:00" onchange="saveStatusDirect()">
                                 <span style="margin: 0 4px;">~</span>
                                 <input type="time" id="ds-end" class="time-input" value="07:00" onchange="saveStatusDirect()">
                             </span>
+                            <span id="sleep-time-preview" style="width:100%; margin-top:5px;"></span>
                         </div>
                     </div>
                     <label class="switch">
@@ -805,7 +946,7 @@
 	                <div class="status-row" style="border-bottom: none; padding-top: 4px;">
 	                    <div>
 	                        <div class="status-label">📝 睡前总结 (Bedtime Summary)</div>
-	                        <div class="status-desc">进入深睡眠时，若今天有短期记忆，则生成睡前日记</div>
+		                        <div class="status-desc">仅自动到点进入深睡眠时生成；用户手动开启不触发</div>
 	                    </div>
 	                    <label class="switch">
 	                        <input type="checkbox" id="bedtime-diary-chk" onchange="saveStatusDirect()">
@@ -910,7 +1051,7 @@
 <!-- 【新增】AI生成 - 输入弹窗 -->
 <div id="genInputModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:2000; align-items:center; justify-content:center;">
     <div style="background:#fff; padding:20px; border-radius:12px; width:80%; max-width:300px;">
-        <h3 style="margin-top:0; color:#444;">AI 自动撰写人设</h3>
+        <h3 id="gen-input-title" style="margin-top:0; color:#444;">AI 自动撰写人设</h3>
         <div style="margin-bottom:10px;">
             <label style="font-size:12px; color:#888;">角色名 (例如: 糸師 凛)</label>
             <input type="text" id="gen-char-name" class="input-full" style="margin-top:4px;">
@@ -919,10 +1060,14 @@
             <label style="font-size:12px; color:#888;">作品/IP名 (例如: Blue Lock)</label>
             <input type="text" id="gen-source-ip" class="input-full" style="margin-top:4px;">
         </div>
+        <label style="display:flex; align-items:center; gap:8px; margin-bottom:16px; font-size:12px; color:#555;">
+            <input type="checkbox" id="gen-web-search" checked style="width:auto;">
+            联网搜索原作资料
+        </label>
         <div style="display:flex; justify-content:flex-end; gap:10px;">
             <!-- 【关键修改】加上 style="display: inline-block;" -->
             <button class="btn btn-cancel" onclick="document.getElementById('genInputModal').style.display='none'" style="display: inline-block;">取消</button>
-            <button class="btn btn-save" onclick="submitGeneration()" style="display: inline-block;">开始生成</button>
+            <button id="gen-action-btn" class="btn btn-save" onclick="submitPersonaAction(this)" style="display: inline-block;">开始生成</button>
         </div>
     </div>
 </div>
@@ -930,6 +1075,7 @@
 <!-- 【新增】AI生成 - 预览确认弹窗 -->
 <div id="genPreviewModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:2100; align-items:center; justify-content:center;">
     <div style="background:#fff; padding:20px; border-radius:12px; width:90%; max-width:600px; height:80vh; display:flex; flex-direction:column;">
+        <div id="gen-search-status" style="font-size:11px; color:#777; margin-bottom:8px;"></div>
         <h3 style="margin-top:0; color:#444;">确认生成内容</h3>
         <p style="font-size:12px; color:#888; margin-bottom:10px;">请检查并编辑生成的人设，点击“应用”将覆盖当前编辑框。</p>
         <textarea id="gen-preview-text" style="flex:1; width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; resize:none; font-family:monospace; line-height:1.5; box-sizing:border-box;"></textarea>
@@ -956,6 +1102,7 @@
     // 【新增】用于缓存浅睡眠的原始状态
     let cachedLightSleep = true;
     let cachedDeepSleep = false;
+    let lastSleepStatus = { deep_sleep: false, ds_start: '23:00', ds_end: '07:00' };
 
     // ========================= 【新增】背景管理函数 =========================
     
@@ -965,14 +1112,17 @@
     // 初始化背景UI
     async function initChatBackground() {
         try {
-            const res = await fetch(`/api/${charId}/chat_background`);
-            if (res.ok) {
-                chatBgConfig = await res.json();
-                renderChatBackgroundUI();
-            }
+            const res = await fetchWithAuthGuard(`/api/${charId}/chat_background`, { cache: 'no-store' });
+            if (handleApiUnauthorized(res)) return false;
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            chatBgConfig = await res.json();
+            renderChatBackgroundUI();
+            return true;
         } catch(e) {
             console.warn('获取聊天背景配置失败:', e);
             chatBgConfig = { filename: null };
+            renderChatBackgroundUI();
+            return false;
         }
     }
 
@@ -1062,6 +1212,201 @@
 
     // 全局数据缓存 (存储完整的原始数据，确保保存时不丢失未显示的数据)
     let GLOBAL_DATA = {};
+    let relationDraft = null;
+    let relationDraftLoading = null;
+    let relationDraftOwner = 'unknown';
+    let relationJsonValidationTimer = null;
+    let relationPromptContacts = null;
+    let memoryToastTimer = null;
+
+    // Memory files and database timestamps use Beijing calendar dates.  Do
+    // not derive their keys with toISOString(), which silently switches to UTC.
+    function beijingDateString(value = new Date()) {
+        const parts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+        }).formatToParts(value);
+        const get = type => parts.find(p => p.type === type)?.value || '';
+        return `${get('year')}-${get('month')}-${get('day')}`;
+    }
+
+    function beijingHour(value = new Date()) {
+        return Number(new Intl.DateTimeFormat('en-US', {
+            timeZone: 'Asia/Shanghai', hour: '2-digit', hourCycle: 'h23'
+        }).format(value));
+    }
+
+    function shiftBeijingDate(dateString, days) {
+        const value = new Date(`${dateString}T12:00:00+08:00`);
+        value.setUTCDate(value.getUTCDate() + days);
+        return beijingDateString(value);
+    }
+
+    function showToast(message) {
+        let toast = document.getElementById('memory-page-toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'memory-page-toast';
+            toast.style.cssText = 'position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:9999;background:rgba(35,35,35,.92);color:#fff;padding:10px 16px;border-radius:999px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.2);opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(100vw - 40px);text-align:center;';
+            document.body.appendChild(toast);
+        }
+        toast.textContent = message;
+        toast.style.opacity = '1';
+        if (memoryToastTimer) clearTimeout(memoryToastTimer);
+        memoryToastTimer = setTimeout(() => {
+            toast.style.opacity = '0';
+        }, 1800);
+    }
+
+    async function writeTextToClipboard(text) {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text);
+            return;
+        }
+        const helper = document.createElement('textarea');
+        helper.value = text;
+        helper.style.position = 'fixed';
+        helper.style.opacity = '0';
+        document.body.appendChild(helper);
+        try {
+            helper.select();
+            if (!document.execCommand('copy')) throw new Error('浏览器不支持自动复制');
+        } finally {
+            helper.remove();
+        }
+    }
+
+    function relationDraftStorageKey() {
+        return `memory_relation_draft:${relationDraftOwner}:${charId}`;
+    }
+
+    function cloneJson(value) {
+        return JSON.parse(JSON.stringify(value || {}));
+    }
+
+    function relationshipGraphForEditor(graph) {
+        const editable = {};
+        Object.entries(graph || {}).forEach(([key, info]) => {
+            const value = (info && typeof info === 'object') ? info : {};
+            editable[key] = {
+                role: value.role || '',
+                score: value.score ?? 1,
+                description: value.description || value.desc || ''
+            };
+        });
+        return editable;
+    }
+
+    function stringifyRelationshipGraph(graph) {
+        return JSON.stringify(relationshipGraphForEditor(graph), null, 2);
+    }
+
+    function persistRelationDraft() {
+        if (!relationDraft) return;
+        try {
+            sessionStorage.setItem(relationDraftStorageKey(), JSON.stringify({
+                version: 2,
+                charId,
+                savedAt: Date.now(),
+                draft: relationDraft
+            }));
+        } catch (e) {
+            console.warn('关系草稿缓存失败', e);
+        }
+    }
+
+    function clearRelationDraftCache() {
+        sessionStorage.removeItem(relationDraftStorageKey());
+    }
+
+    function relationDraftIsDirty() {
+        return !!(relationDraft && (relationDraft.dirty.normal || relationDraft.dirty.reverse));
+    }
+
+    function updateRelationDraftIndicators() {
+        document.querySelectorAll('#module-relation .mode-btn[data-relation-mode]').forEach(btn => {
+            const mode = btn.dataset.relationMode;
+            const label = mode === 'normal' ? '我的视角' : '他人视角（他们如何看我）';
+            btn.textContent = `${label}${relationDraft?.dirty?.[mode] ? ' ●' : ''}`;
+        });
+        const saveBtn = document.querySelector('#module-relation .btn-save');
+        if (saveBtn) saveBtn.textContent = relationDraftIsDirty() ? '保存全部关系视角 ●' : '保存全部关系视角';
+    }
+
+    window.addEventListener('beforeunload', event => {
+        if (!relationDraft) return;
+        captureCurrentRelationDraft();
+        if (!relationDraftIsDirty()) return;
+        persistRelationDraft();
+        event.preventDefault();
+        event.returnValue = '';
+    });
+
+    async function ensureRelationDraft() {
+        if (relationDraft) return relationDraft;
+        if (relationDraftLoading) return relationDraftLoading;
+        relationDraftLoading = (async () => {
+            const response = await fetch(`/api/${charId}/relationship_reverse`);
+            relationDraftOwner = response.headers.get('X-Relation-Draft-Owner') || 'session';
+            const reverse = await response.json();
+            if (!response.ok || reverse.error) throw new Error(reverse.error || '他人视角加载失败');
+            const initial = {
+                normal: cloneJson(GLOBAL_DATA.relation || {}),
+                reverse: cloneJson(reverse),
+                deletedReverseIds: [],
+                dirty: {normal: false, reverse: false},
+                editorMode: {normal: 'cards', reverse: 'cards'},
+                jsonText: {
+                    normal: stringifyRelationshipGraph(GLOBAL_DATA.relation || {}),
+                    reverse: stringifyRelationshipGraph(reverse)
+                },
+                jsonValid: {normal: true, reverse: true}
+            };
+            try {
+                const cached = JSON.parse(sessionStorage.getItem(relationDraftStorageKey()) || 'null');
+                if ([1, 2].includes(cached?.version) && cached.charId === charId && cached.draft &&
+                    confirm('检测到尚未保存的关系图谱草稿，是否恢复？')) {
+                    relationDraft = cached.draft;
+                } else {
+                    relationDraft = initial;
+                    if (cached) clearRelationDraftCache();
+                }
+            } catch (e) {
+                relationDraft = initial;
+                clearRelationDraftCache();
+            }
+            relationDraft.normal = relationDraft.normal || {};
+            relationDraft.reverse = relationDraft.reverse || {};
+            relationDraft.deletedReverseIds = Array.isArray(relationDraft.deletedReverseIds)
+                ? relationDraft.deletedReverseIds : [];
+            relationDraft.dirty = {
+                normal: !!relationDraft.dirty?.normal,
+                reverse: !!relationDraft.dirty?.reverse
+            };
+            relationDraft.editorMode = {
+                normal: relationDraft.editorMode?.normal === 'json' ? 'json' : 'cards',
+                reverse: relationDraft.editorMode?.reverse === 'json' ? 'json' : 'cards'
+            };
+            relationDraft.jsonText = {
+                normal: typeof relationDraft.jsonText?.normal === 'string'
+                    ? relationDraft.jsonText.normal : stringifyRelationshipGraph(relationDraft.normal),
+                reverse: typeof relationDraft.jsonText?.reverse === 'string'
+                    ? relationDraft.jsonText.reverse : stringifyRelationshipGraph(relationDraft.reverse)
+            };
+            relationDraft.jsonValid = {
+                normal: relationDraft.jsonValid?.normal !== false,
+                reverse: relationDraft.jsonValid?.reverse !== false
+            };
+            const viewMode = document.querySelector('#module-relation .view-mode');
+            viewMode.dataset.reverseLoaded = 'true';
+            viewMode.dataset.reverseBody = JSON.stringify(reverse);
+            return relationDraft;
+        })();
+        try {
+            return await relationDraftLoading;
+        } finally {
+            relationDraftLoading = null;
+        }
+    }
 
     const CONFIG = {
         'short': { title: '短期记忆 (Short-term / Recent 1 Day)', method: 'renderShort' },
@@ -1098,12 +1443,14 @@
     // --- 【修正版】加载角色元数据 ---
     async function loadCharMeta() {
         try {
-            const res = await fetch(`/api/${charId}/config?t=${new Date().getTime()}`);
+            const res = await fetchWithAuthGuard(`/api/${charId}/config?t=${new Date().getTime()}`, { cache: 'no-store' });
+            if (handleApiUnauthorized(res)) return false;
+            if (!res.ok) throw new Error(`角色档案请求失败：HTTP ${res.status}`);
             const data = await res.json();
 
-            if(data && !data.error) {
+            if(data && typeof data === 'object' && !Array.isArray(data) && !data.error) {
                 const avatarUrl = data.avatar || '/static/default_avatar.png';
-                const remarkText = data.remark || data.name || 'Unknown';
+                const remarkText = data.remark || data.name || charId;
                 const isPinned = data.pinned || false;
 
                 // 1. 填充【查看模式】
@@ -1160,10 +1507,12 @@
                 updateEmotionUI(emo);
                 document.getElementById('emotion-range').value = emo;
                 document.getElementById('emotion-num').value = emo;
+                document.getElementById('emotion-locked-chk').checked = data.emotion_locked === true;
 
                 // 性格指数
                 const momentsIdx = data.moments_index !== undefined ? data.moments_index : 1;
                 document.getElementById('moments-index-num').value = momentsIdx;
+                document.getElementById('moments-index-locked-chk').checked = data.moments_index_locked === true;
 
                 // 亲密度
                 const intimacyVal = data.intimacy !== undefined ? data.intimacy : 60;
@@ -1174,6 +1523,13 @@
 	                document.getElementById('ds-start').value = data.ds_start || '23:00';
 	                document.getElementById('ds-end').value = data.ds_end || '07:00';
 	                document.getElementById('bedtime-diary-chk').checked = data.bedtime_diary_enabled !== false;
+                    document.getElementById('character-timezone-input').value = data.timezone || 'Asia/Shanghai';
+                    renderCharacterTimeMeta(data);
+                    lastSleepStatus = {
+                        deep_sleep: !!data.deep_sleep,
+                        ds_start: data.ds_start || '23:00',
+                        ds_end: data.ds_end || '07:00'
+                    };
 
 	                // 睡眠开关 (注意顺序，先设值，再跑逻辑检查)
                 document.getElementById('deep-sleep-chk').checked = data.deep_sleep || false;
@@ -1210,8 +1566,17 @@
                     document.getElementById('light-sleep-chk').disabled = true;
                     document.getElementById('deep-sleep-chk').disabled = true;
                 }
+                return true;
             }
-        } catch(e) { console.error("加载失败", e); }
+            throw new Error(data?.error || '角色档案数据格式错误');
+        } catch(e) {
+            console.error("加载角色档案失败", e);
+            document.getElementById('view-avatar').src = '/static/default_avatar.png';
+            document.getElementById('view-remark').textContent = charId;
+            document.getElementById('view-id').textContent = charId;
+            showToast('角色档案加载失败，请刷新重试');
+            return false;
+        }
     }
 
     // --- 【修正版】保存档案 ---
@@ -1305,72 +1670,158 @@
         }
     }
 
-    // --- 【新增】声音克隆 ---
-    async function cloneVoice() {
-        const fileInput = document.getElementById('voice-clone-file');
-        const statusEl = document.getElementById('clone-status');
-        const resultDiv = document.getElementById('clone-result');
-        const resultInput = document.getElementById('clone-voice-id-result');
-        const btn = document.getElementById('btn-clone-voice');
-
-        if (!fileInput.files.length) {
-            alert('请先选择一个音频文件');
-            return;
-        }
-
-        const formData = new FormData();
-        formData.append('file', fileInput.files[0]);
-        formData.append('name', charId + '_voice');
-
-        btn.disabled = true;
-        btn.textContent = '生成中...';
-        statusEl.textContent = '正在上传并克隆声音...';
-        statusEl.style.color = '#888';
-        resultDiv.style.display = 'none';
-
-        try {
-            const res = await fetch('/api/voice_clone', {
-                method: 'POST',
-                body: formData
-            });
-            const data = await res.json();
-            if (data.status === 'success' && data.voice_id) {
-                resultInput.value = data.voice_id;
-                resultDiv.style.display = 'block';
-                document.getElementById('voice-id-input').value = data.voice_id;
-                statusEl.textContent = '生成成功！已自动填入下方ID框';
-                statusEl.style.color = '#4cd964';
-            } else {
-                statusEl.textContent = '失败: ' + (data.error || '未知错误');
-                statusEl.style.color = '#ff3b30';
-            }
-        } catch (e) {
-            statusEl.textContent = '网络错误: ' + e.message;
-            statusEl.style.color = '#ff3b30';
-        } finally {
-            btn.disabled = false;
-            btn.textContent = '生成 / Generate';
-        }
-    }
-
-    function copyVoiceId(elementId) {
-        const input = document.getElementById(elementId);
-        if (!input || !input.value) return;
-        input.select();
-        input.setSelectionRange(0, 99999);
-        navigator.clipboard.writeText(input.value).then(() => {
-            alert('已复制: ' + input.value);
-        }).catch(() => {
-            alert('复制失败，请手动复制');
-        });
-    }
-
     function copyText(text) {
         navigator.clipboard.writeText(text).then(() => {
             alert('已复制链接');
         }).catch(() => {
             prompt('请手动复制链接:', text);
         });
+    }
+
+    async function loadElevenLabsCredentialStatus() {
+        const statusEl = document.getElementById('elevenlabs-voice-key-status');
+        if (!statusEl) return;
+        try {
+            const response = await fetchWithAuthGuard('/api/user/profile_settings', {cache: 'no-store'});
+            if (handleApiUnauthorized(response)) return;
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const payload = await response.json();
+            const credential = payload.credentials?.elevenlabs;
+            if (credential?.configured) {
+                const suffix = credential.last_four ? `（末四位 ${credential.last_four}）` : '';
+                statusEl.textContent = `✓ 已配置个人 ElevenLabs API Key ${suffix}`;
+                statusEl.style.color = '#36a269';
+            } else {
+                statusEl.textContent = '尚未配置。克隆、试听和语音生成前，请先在个人主页保存 ElevenLabs API Key。用户语音转文字不受影响。';
+                statusEl.style.color = '#c53d5b';
+            }
+        } catch (error) {
+            statusEl.textContent = '暂时无法读取 ElevenLabs Key 状态，请刷新重试。';
+            statusEl.style.color = '#c53d5b';
+        }
+    }
+
+    async function cloneVoice() {
+        const fileInput = document.getElementById('voice-clone-file');
+        const nameInput = document.getElementById('voice-clone-name');
+        const consentInput = document.getElementById('voice-clone-consent');
+        const statusEl = document.getElementById('clone-status');
+        const resultDiv = document.getElementById('clone-result');
+        const resultInput = document.getElementById('clone-voice-id-result');
+        const btn = document.getElementById('btn-clone-voice');
+
+        const file = fileInput?.files?.[0];
+        if (!file) {
+            alert('请先选择一个音频文件');
+            return;
+        }
+        if (file.size > 20 * 1024 * 1024) {
+            alert('音频文件不能超过 20 MB');
+            return;
+        }
+        if (!consentInput?.checked) {
+            alert('请先确认你拥有该声音的使用权或已经获得明确授权');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('name', nameInput?.value.trim() || `${charId} Voice`);
+        formData.append('consent', 'true');
+
+        btn.disabled = true;
+        btn.textContent = '创建中…';
+        statusEl.textContent = '正在通过你的 ElevenLabs 账户创建私有音色…';
+        statusEl.style.color = '#888';
+        resultDiv.style.display = 'none';
+
+        try {
+            const response = await fetch('/api/voice_clone', {
+                method: 'POST',
+                headers: {'X-Requested-With': 'XMLHttpRequest'},
+                body: formData
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || payload.status !== 'success' || !payload.voice_id) {
+                throw new Error(payload.error || '音色创建失败');
+            }
+
+            resultInput.value = payload.voice_id;
+            resultDiv.style.display = 'block';
+            document.getElementById('voice-id-input').value = payload.voice_id;
+
+            const saveResponse = await fetch(`/api/${charId}/update_meta`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({voice_id: payload.voice_id})
+            });
+            const savePayload = await saveResponse.json().catch(() => ({}));
+            if (saveResponse.ok && savePayload.status === 'success') {
+                statusEl.textContent = payload.requires_verification
+                    ? '音色已创建并保存，但 ElevenLabs 要求进一步验证。'
+                    : '音色已创建，并已自动保存到当前角色。';
+                statusEl.style.color = payload.requires_verification ? '#b7791f' : '#36a269';
+            } else {
+                statusEl.textContent = '音色已创建，但自动保存失败；请复制 ID 后手动保存语音设置。';
+                statusEl.style.color = '#b7791f';
+            }
+        } catch (error) {
+            statusEl.textContent = error.message || '音色创建失败';
+            statusEl.style.color = '#c53d5b';
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '上传并创建音色';
+        }
+    }
+
+    function copyVoiceId(elementId) {
+        const input = document.getElementById(elementId);
+        if (!input?.value) return;
+        navigator.clipboard.writeText(input.value).then(() => {
+            alert('Voice ID 已复制');
+        }).catch(() => {
+            input.select();
+            alert('复制失败，请手动复制');
+        });
+    }
+
+    async function testVoiceId() {
+        const voiceId = document.getElementById('voice-id-input').value.trim();
+        const btn = document.getElementById('btn-test-voice');
+        if (!voiceId) {
+            alert('请先填写音色 ID');
+            return;
+        }
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '生成试听中...';
+        try {
+            const response = await fetch(`/api/${charId}/tts`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    voice_id: voiceId,
+                    text: '你好，很高兴认识你。'
+                })
+            });
+            if (!response.ok) {
+                let message = '该音色当前不可用';
+                try {
+                    const payload = await response.json();
+                    if (payload.error) message = payload.error;
+                } catch (e) {}
+                throw new Error(message);
+            }
+            const audioUrl = URL.createObjectURL(await response.blob());
+            const audio = new Audio(audioUrl);
+            audio.addEventListener('ended', () => URL.revokeObjectURL(audioUrl), {once: true});
+            await audio.play();
+        } catch (e) {
+            alert('试听失败：' + (e.message || '未知错误'));
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
     }
 
     // --- 【新增】语音设置函数 ---
@@ -1416,16 +1867,30 @@
     }
 
     // --- 初始化部分 ---
-    loadCharMeta(); // <--- 【关键】页面加载时执行这个
-    initChatBackground(); // 【新增】初始化聊天背景
+    async function initializeMemoryPage() {
+        const metaReady = await loadCharMeta();
+        if (!metaReady) return;
 
-    // 初始化
-    fetch(`/api/${charId}/prompts_data`)
-        .then(r => r.json())
-        .then(data => {
+        await loadElevenLabsCredentialStatus();
+        await initChatBackground();
+
+        try {
+            const response = await fetchWithAuthGuard(`/api/${charId}/prompts_data`, { cache: 'no-store' });
+            if (handleApiUnauthorized(response)) return;
+            if (!response.ok) throw new Error(`记忆配置请求失败：HTTP ${response.status}`);
+            const data = await response.json();
+            if (!data || typeof data !== 'object' || Array.isArray(data) || data.error) {
+                throw new Error(data?.error || '记忆配置数据格式错误');
+            }
             GLOBAL_DATA = data;
             Object.keys(CONFIG).forEach(key => initModule(key, data[key]));
-        });
+        } catch (error) {
+            console.error('加载记忆配置失败:', error);
+            showToast('记忆配置加载失败，请刷新重试');
+        }
+    }
+
+    initializeMemoryPage();
 
     function initModule(key, data) {
         const tpl = document.getElementById('tpl-module').content.cloneNode(true);
@@ -1441,12 +1906,35 @@
     // ================= 渲染视图逻辑 (View Mode) =================
 
     function renderView(key, data) {
-        // 【防御】如果传入了对象（如base的{system_prompt,visual_descriptions}），自动提取文本
+        // 防御性兼容对象形式，编辑器始终只处理 system_prompt 文本。
         if (data && typeof data === 'object' && data.system_prompt !== undefined) {
             data = data.system_prompt || '';
         }
 
         const container = document.querySelector(`#module-${key} .view-mode`);
+
+        if (key === 'base') {
+            try {
+                const segments = parsePersonaLockSegments(data || '');
+                let html = '';
+                segments.forEach(segment => {
+                    if (!segment.text) return;
+                    if (segment.locked) {
+                        html += `<div class="persona-lock-card">
+                          <div class="persona-lock-badge">🔒 AI 编辑保护</div>
+                          <div style="white-space:pre-wrap;">${escapeRelationHtml(segment.text)}</div>
+                        </div>`;
+                    } else if (segment.text.trim()) {
+                        html += `<div style="padding:15px; white-space:pre-wrap;">${escapeRelationHtml(segment.text)}</div>`;
+                    }
+                });
+                container.innerHTML = html || '<div class="empty-state">暂无数据</div>';
+            } catch (error) {
+                container.innerHTML = `<div style="padding:12px; color:#c62828; font-size:12px;">⚠️ ${escapeRelationHtml(error.message)}</div>
+                  <div style="padding:15px; white-space:pre-wrap;">${escapeRelationHtml(data || '')}</div>`;
+            }
+            return;
+        }
         
         // 1. Markdown 渲染
         if(CONFIG[key].method === 'renderMD') {
@@ -1463,7 +1951,7 @@
             html += `
                 <div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">
                     <button class="mode-btn ${!isReverse ? 'active' : ''}" onclick="switchRelationMode('${key}', 'normal')">我的视角</button>
-                    <button class="mode-btn ${isReverse ? 'active' : ''}" onclick="switchRelationMode('${key}', 'reverse')">对方视角</button>
+                    <button class="mode-btn ${isReverse ? 'active' : ''}" onclick="switchRelationMode('${key}', 'reverse')">他人视角（他们如何看我）</button>
                 </div>
             `;
 
@@ -1524,14 +2012,12 @@
 
             // 计算【应该】显示的日期
             const now = new Date();
-            const todayStr = now.toISOString().split('T')[0];
-            const yesterday = new Date(now);
-            yesterday.setDate(yesterday.getDate() - 1);
-            const yesterdayStr = yesterday.toISOString().split('T')[0];
+            const todayStr = beijingDateString(now);
+            const yesterdayStr = shiftBeijingDate(todayStr, -1);
 
             // 逻辑：如果是凌晨4点前，目标日期是 [今天, 昨天]；否则只是 [今天]
             const targetDates = [todayStr];
-            if (now.getHours() < 4) {
+            if (beijingHour(now) < 4) {
                 targetDates.push(yesterdayStr);
             }
 
@@ -1551,7 +2037,7 @@
                     const label = (dateKey === todayStr) ? '(Today)' : '';
 
                     html += `<div class="mem-item" style="border-left: 3px solid var(--primary-color); padding-left:12px;">
-                      <div class="mem-header">📅 ${dateKey} ${label}</div>`;
+                      <div class="mem-header">📅 ${dateKey} ${label} · 北京时间</div>`;
 
                     events.forEach(e => {
                         html += `<div class="time-capsule">
@@ -1578,28 +2064,34 @@
             return;
         }
 
-        // --- Schedule 渲染 (只显示未来 7 天) ---
+        // --- Schedule 渲染（无时间计划 + 未来 7 天） ---
         if(key === 'schedule') {
-            // 计算今天和7天后的日期字符串
             const now = new Date();
-            const todayStr = now.toISOString().split('T')[0];
-
-            const limitDate = new Date(now);
-            limitDate.setDate(now.getDate() + 7);
-            const limitStr = limitDate.toISOString().split('T')[0];
-
-            const dates = Object.keys(data).sort();
+            const todayStr = beijingDateString(now);
+            const limitStr = shiftBeijingDate(todayStr, 7);
             let html = '';
 
-            dates.forEach(d => {
-                // 【修改】只显示范围内的数据
+            const undatedPlans = Array.isArray(data._undated) ? data._undated : [];
+            if (undatedPlans.length > 0) {
+                html += '<div class="mem-item"><div class="mem-header">🗒️ 无时间计划</div>';
+                undatedPlans.forEach(plan => {
+                    html += `<div class="mem-text" style="margin-top:8px;">• ${escapeRelationHtml(plan)}</div>`;
+                });
+                html += '</div>';
+            }
+
+            Object.keys(data).filter(d => d !== '_undated').sort().forEach(d => {
                 if (d >= todayStr && d <= limitStr) {
-                    html += `<div class="mem-item"><div class="mem-header">📌 ${d}</div><div class="mem-text">${data[d]}</div></div>`;
+                    const plans = Array.isArray(data[d]) ? data[d] : [data[d]];
+                    html += `<div class="mem-item"><div class="mem-header">📌 ${escapeRelationHtml(d)}</div>`;
+                    plans.filter(Boolean).forEach(plan => {
+                        html += `<div class="mem-text" style="margin-top:8px;">• ${escapeRelationHtml(plan)}</div>`;
+                    });
+                    html += '</div>';
                 }
             });
 
-            // 如果没有数据，或者数据都在范围外
-            container.innerHTML = html || '<div class="empty-state">未来7天暂无日程</div>';
+            container.innerHTML = html || '<div class="empty-state">暂无无时间计划，未来7天也暂无日程</div>';
             return;
         }
 
@@ -1624,7 +2116,7 @@
             html += `
                 <div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">
                     <button class="mode-btn ${!isReverse ? 'active' : ''}" onclick="switchRelationMode('${key}', 'normal')">我的视角</button>
-                    <button class="mode-btn ${isReverse ? 'active' : ''}" onclick="switchRelationMode('${key}', 'reverse')">对方视角</button>
+                    <button class="mode-btn ${isReverse ? 'active' : ''}" onclick="switchRelationMode('${key}', 'reverse')">他人视角（他们如何看我）</button>
                 </div>
             `;
 
@@ -1665,17 +2157,19 @@
     }
 
     // --- 【新增】反向关系处理函数 ---
-    function switchRelationMode(key, mode) {
+    async function switchRelationMode(key, mode) {
         const container = document.querySelector(`#module-${key} .view-mode`);
         const module = container.closest('.module');
-        
-        container.dataset.mode = mode;
-        
-        // 如果正在编辑模式，切换模式也需要重新构建编辑器
+
         if (module.classList.contains('editing')) {
+            if (container.dataset.mode === mode) return;
+            const synced = await syncCurrentRelationEditor(true);
+            if (!synced) return;
+            container.dataset.mode = mode;
             const editBox = module.querySelector('.edit-mode');
             buildEditor(key, editBox);
         } else {
+            container.dataset.mode = mode;
             // 如果在查看模式，清除缓存标志以便切换时重新获取（或者为了流畅性不清除）
             if (mode === 'normal') {
                 delete container.dataset.reverseLoaded;
@@ -1705,7 +2199,7 @@
 
     // ================= 编辑模式逻辑 (Edit Mode) =================
 
-    function toggleEdit(btn) {
+    async function toggleEdit(btn) {
         const module = btn.closest('.module');
         const key = module.id.replace('module-', '');
         const editBox = module.querySelector('.edit-mode');
@@ -1717,12 +2211,25 @@
         const detailsEl = module.querySelector('details');
         if(detailsEl) detailsEl.open = true;
 
-        // 根据类型生成编辑器
-        buildEditor(key, editBox);
+        try {
+            if (key === 'relation') await ensureRelationDraft();
+            buildEditor(key, editBox);
+        } catch (e) {
+            module.classList.remove('editing');
+            alert(`关系图谱加载失败：${e.message}`);
+        }
     }
 
     function cancelEdit(btn) {
         const module = btn.closest('.module');
+        const key = module.id.replace('module-', '');
+        if (key === 'relation') {
+            captureCurrentRelationDraft();
+            if (relationDraftIsDirty() && !confirm('我的视角和他人视角仍有未保存修改，确定全部放弃吗？')) return;
+            relationDraft = null;
+            clearRelationDraftCache();
+            updateRelationDraftIndicators();
+        }
         module.classList.remove('editing');
     }
 
@@ -1743,28 +2250,28 @@
             // 【新增】只在角色人设(base)模块显示 AI生成按钮
             if (key === 'base') {
                 extraHtml = `
-                <div class="base-meta-editor" style="background:#f9f9f9; padding:15px; border-radius:12px; margin-bottom:15px; border:1px solid #eee;">
-                    <div style="font-size:13px; font-weight:bold; margin-bottom:10px; color:var(--primary-color);">🎨 生图外貌设定 (Visual Descriptions)</div>
-                    <div style="margin-bottom:10px;">
-                        <label style="font-size:12px; color:#666;">生图 Tags (英文):</label>
-                        <input type="text" id="visual-tags" class="field-input" style="width:100%; margin-top:5px;" value="${(GLOBAL_DATA.visual_descriptions && GLOBAL_DATA.visual_descriptions.tags) || ''}" placeholder="e.g. 1girl, black hair, glasses">
-                    </div>
-                    <div>
-                        <label style="font-size:12px; color:#666;">中文外貌简述:</label>
-                        <input type="text" id="visual-desc" class="field-input" style="width:100%; margin-top:5px;" value="${(GLOBAL_DATA.visual_descriptions && GLOBAL_DATA.visual_descriptions.description) || ''}" placeholder="用于识图或简单描述...">
-                    </div>
+                <div class="persona-lock-help">
+                    <div style="font-weight:700; margin-bottom:4px;">🔒 设置人设的 AI 编辑保护</div>
+                    用独占行的 <code>[[LOCK]]</code> 和 <code>[[/LOCK]]</code> 包住核心设定。角色和模型会读取标签，并在以后由 AI 编辑人设时保留其中内容。<strong>这不会限制你本人</strong>：编辑框仍是普通文本，你可以改区块内任何文字、移动或删除标签；保存后以你的新版本为准。
                 </div>
-                <button class="btn" style="background:#e1bee7; color:#4a148c; margin-bottom:10px; width:100%;" onclick="openGenModal()">✨ AI 自动编写人设 (JSON版)</button>`;
+                <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+                    <button class="btn" style="background:#e1bee7; color:#4a148c; flex:1; min-width:180px;" onclick="openGenModal('generate')">✨ AI 自动编写人设</button>
+                    <button class="btn" style="background:#fff3d6; color:#7a541d; flex:1; min-width:150px;" onclick="openGenModal('copy')">📋 复制生成人设 Prompt</button>
+                </div>`;
             }
 
-            container.innerHTML = `${extraHtml}<textarea class="md-editor">${data || ''}</textarea>`;
+            const editorClass = key === 'base' ? 'md-editor persona-editor' : 'md-editor';
+            const editorInput = key === 'base' ? ' oninput="updatePersonaLockHint(this)"' : '';
+            const lockStatus = key === 'base' ? '<div class="persona-lock-status" id="persona-lock-status"></div>' : '';
+            container.innerHTML = `${extraHtml}<textarea class="${editorClass}"${editorInput}>${escapeRelationHtml(data || '')}</textarea>${lockStatus}`;
+            if (key === 'base') updatePersonaLockHint(container.querySelector('.persona-editor'));
             return;
         }
 
         // 2. Short 编辑器 (特殊：只编辑最近一天，或者提供添加新日期的能力？为了简单，我们编辑“展示出来的那个日期”)
         if(key === 'short') {
             const dates = Object.keys(data).sort().reverse();
-            const defaultDate = dates.length > 0 ? dates[0] : new Date().toISOString().split('T')[0];
+            const defaultDate = dates.length > 0 ? dates[0] : beijingDateString();
 
             // 如果 container 之前存过 dateKey，就用存的（防止刷新变回今天），否则用默认
             const targetDate = container.dataset.dateKey || defaultDate;
@@ -1785,7 +2292,7 @@
           </div>
 
           <div style="font-weight:bold; margin-bottom:10px; color:var(--primary-color); display:flex; justify-content:space-between;">
-            <span>当前编辑: ${targetDate}</span>
+            <span>当前编辑: ${targetDate}（北京时间）</span>
             <label style="font-size:12px; color:#666; display:flex; align-items:center; cursor:pointer;">
                 <input type="checkbox" id="reset-progress-chk" style="margin-right:4px;">
                 保存时重置进度
@@ -1881,6 +2388,53 @@
             }
             // ========================================================
 
+            if (key === 'schedule') {
+                const topBtns = document.createElement('div');
+                topBtns.className = 'editor-top-actions';
+                topBtns.innerHTML = `
+                  <button class="btn-action-top btn-add-top" onclick="addScheduleDatedRow(this)">+ 添加日期计划</button>
+                  <button class="btn-action-top btn-clear-top" onclick="clearScheduleDatedItems(this)">🗑️ 清空日期计划</button>
+                `;
+                container.appendChild(topBtns);
+
+                const wrapper = document.createElement('div');
+                wrapper.id = 'schedule-list-wrapper';
+
+                const undatedPlans = Array.isArray(data._undated) ? data._undated : [];
+                const undatedRows = undatedPlans.map(plan => `
+                  <div class="input-group undated-plan-row">
+                      <div class="mem-meta-col"><span style="font-weight:bold; color:#666;">无时间</span></div>
+                      <textarea class="input-val undated-plan-input" rows="3" placeholder="尚未确定日期的计划...">${escapeRelationHtml(plan)}</textarea>
+                      <button class="btn-del" onclick="this.parentElement.remove()">×</button>
+                  </div>`).join('');
+
+                const datedRows = Object.keys(data)
+                    .filter(k => k !== '_undated')
+                    .sort()
+                    .reverse()
+                    .flatMap(k => (Array.isArray(data[k]) ? data[k] : [data[k]]).map(plan => `
+                      <div class="input-group schedule-dated-row">
+                          <div class="mem-meta-col">
+                              <input type="text" class="input-key" value="${escapeRelationHtml(k)}" placeholder="YYYY-MM-DD">
+                              <div class="meta-right-side"></div>
+                          </div>
+                          <textarea class="input-val" rows="3" placeholder="计划内容...">${escapeRelationHtml(plan || '')}</textarea>
+                          <button class="btn-del" onclick="this.parentElement.remove()">×</button>
+                      </div>`)).join('');
+
+                wrapper.innerHTML = `
+                  <div class="schedule-section-header">
+                      <span class="schedule-section-title">🗒️ 无时间计划</span>
+                      <button type="button" class="schedule-section-add" onclick="addUndatedPlanRow(this)" aria-label="添加无时间计划" title="添加无时间计划">＋ 添加</button>
+                  </div>
+                  <div class="undated-plan-list edit-list-container">${undatedRows}</div>
+                  <div style="font-weight:bold; color:#555; margin:18px 0 8px;">📅 日期计划</div>
+                  <div class="schedule-dated-list edit-list-container">${datedRows}</div>
+                `;
+                container.appendChild(wrapper);
+                return;
+            }
+
             // 【新增】顶部按钮组 (添加 + 清空)
             const topBtns = document.createElement('div');
             topBtns.className = 'editor-top-actions';
@@ -1945,20 +2499,55 @@
         // 4. Relation 编辑器
         if(key === 'relation') {
             const isReverse = viewMode.dataset.mode === 'reverse';
+            const perspective = isReverse ? 'reverse' : 'normal';
+            if (!relationDraft) {
+                container.innerHTML = '<div class="empty-state">正在初始化关系草稿...</div>';
+                return;
+            }
             let html = '';
+            const editorMode = relationDraft.editorMode?.[perspective] || 'cards';
             
             // 模式切换按钮 (并在编辑模式也显示，以便切换)
             html += `
-                <div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">
-                    <button class="mode-btn ${!isReverse ? 'active' : ''}" onclick="switchRelationMode('${key}', 'normal')">我的视角</button>
-                    <button class="mode-btn ${isReverse ? 'active' : ''}" onclick="switchRelationMode('${key}', 'reverse')">对方视角</button>
-                    
-                    ${!isReverse ? `
-                        <button class="btn" style="background: #e1bee7; color: #4a148c; margin-left: auto;" 
-                                onclick="aiCompleteRelation()">✨ AI 补全关系</button>
-                    ` : ''}
+                <div style="margin-bottom:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <button class="mode-btn ${!isReverse ? 'active' : ''}" data-relation-mode="normal" onclick="switchRelationMode('${key}', 'normal')">我的视角</button>
+                    <button class="mode-btn ${isReverse ? 'active' : ''}" data-relation-mode="reverse" onclick="switchRelationMode('${key}', 'reverse')">他人视角（他们如何看我）</button>
+                </div>
+                <div style="margin-bottom:15px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <button class="btn ${editorMode === 'cards' ? 'active' : ''}" data-relation-editor-mode="cards"
+                            style="background:${editorMode === 'cards' ? '#d7ecff' : '#f5f5f5'}; color:#24527a;"
+                            onclick="switchRelationEditorMode('cards')">卡片编辑</button>
+                    <button class="btn ${editorMode === 'json' ? 'active' : ''}" data-relation-editor-mode="json"
+                            style="background:${editorMode === 'json' ? '#dff4e2' : '#f5f5f5'}; color:#256029;"
+                            onclick="switchRelationEditorMode('json')">&#123;&#125; JSON 编辑</button>
+                    <button class="btn" style="background:#fff3d6; color:#7a541d;"
+                            onclick="copyRelationshipPrompt(this)">📋 复制 AI Prompt</button>
+                    <button class="btn" style="background:#e1bee7; color:#4a148c; margin-left:auto;"
+                            onclick="aiCompleteRelation()">✨ ${isReverse ? 'AI 生成他人视角' : 'AI 补全关系'}</button>
                 </div>
             `;
+
+            if (editorMode === 'json') {
+                html += `
+                    <div id="relation-json-editor" style="background:#f6fff7; border:1px solid #c8e6c9; border-radius:10px; padding:12px; margin-bottom:15px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+                            <span style="font-size:12px; font-weight:bold; color:#256029;">${isReverse ? '完整编辑“其他角色如何看我”的 JSON；顶层键建议使用角色 ID' : '完整编辑当前“我的视角”关系 JSON'}</span>
+                            <button type="button" class="btn" style="background:#eef7ef; color:#256029;" onclick="formatRelationJson()">格式化 JSON</button>
+                        </div>
+                        <textarea id="relation-json-input" class="md-editor" style="min-height:300px; font-family:ui-monospace, SFMono-Regular, Consolas, monospace;" spellcheck="false" oninput="onRelationJsonInput()"></textarea>
+                        <div id="relation-json-status" style="font-size:11px; margin-top:7px;"></div>
+                        <div style="font-size:11px; color:#777; margin-top:5px;">这里显示的是当前完整关系。删除某个顶层键即表示删除该关系；保存时不再区分合并或覆盖。</div>
+                    </div>`;
+                container.innerHTML = html;
+                const textarea = document.getElementById('relation-json-input');
+                textarea.value = relationDraft.jsonText[perspective] || stringifyRelationshipGraph(relationDraft[perspective]);
+                updateRelationJsonStatus(
+                    relationDraft.jsonValid[perspective] !== false,
+                    relationDraft.jsonValid[perspective] === false ? 'JSON 尚未通过校验，请修正后再切换或保存' : '当前 JSON 已同步'
+                );
+                updateRelationDraftIndicators();
+                return;
+            }
             
             if (isReverse) {
                 // 【核心修复】如果没加载过且当前是反向模式，直接在 buildEditor 里触发加载
@@ -1967,59 +2556,507 @@
                     container.innerHTML = html + '<div class="empty-state">正在同步对方视角数据...</div>';
                     return;
                 }
-                const revData = JSON.parse(viewMode.dataset.reverseBody || '{}');
+                const revData = relationDraft.reverse || {};
                 const listDiv = document.createElement('div');
                 listDiv.className = 'edit-list-container';
                 Object.keys(revData).forEach(sourceCid => {
                     const info = revData[sourceCid];
-                    const score = info.score != null ? info.score : 1;
-                    listDiv.innerHTML += `
-                       <div class="rel-edit-card" data-source-cid="${sourceCid}" style="border-left: 4px solid #673ab7;">
-                           <div style="font-size: 11px; color: #673ab7; font-weight: bold; margin-bottom: 5px;">来自: ${info.char_name || sourceCid} 的视角</div>
-                           <div class="input-group">
-                               <input type="text" class="input-key" value="${info.char_name || sourceCid}" readonly>
-                               <input type="text" class="input-val" value="${info.role}" placeholder="关系定位">
-                               <label class="rel-score-wrap">
-                                   <span class="rel-score-label">指数</span>
-                                   <input type="number" class="input-score" value="${score}" min="0" step="0.1">
-                               </label>
-                               <button class="btn-del" onclick="deleteExistingReverseRelation(this, '${sourceCid}', '${(info.char_name || sourceCid).replace(/'/g, "\\'")}')">×</button>
-                           </div>
-                           <textarea class="input-full" rows="2" placeholder="详细描述">${info.description}</textarea>
-                       </div>`;
+                    listDiv.appendChild(createReverseRelationCardElement(sourceCid, info));
                 });
                 container.innerHTML = html;
                 container.appendChild(listDiv);
                 if (Object.keys(revData).length === 0) {
-                    container.innerHTML += '<div class="empty-state">暂无其他角色视角可以编辑</div>';
+                    container.insertAdjacentHTML(
+                        'beforeend',
+                        '<div class="empty-state">暂无其他角色视角可以编辑</div>'
+                    );
                 }
                 // 【新增】反向模式下的添加按钮
-                container.innerHTML += `<button class="btn-add" onclick="showAddReverseMemberModal()">+ 添加新角色对我方的视角</button>`;
+                container.insertAdjacentHTML(
+                    'beforeend',
+                    `<button class="btn-add" onclick="showAddReverseMemberModal()">+ 添加新角色对我方的视角</button>`
+                );
             } else {
-                const names = Object.keys(data);
+                const normalData = relationDraft.normal || {};
+                const names = Object.keys(normalData);
                 const listDiv = document.createElement('div');
                 listDiv.className = 'edit-list-container';
                 names.forEach(name => {
-                    const info = data[name];
+                    const info = normalData[name];
                     const score = info.score != null ? info.score : 1;
-                    listDiv.innerHTML += `
-                       <div class="rel-edit-card">
-                           <div class="input-group">
-                               <input type="text" class="input-key" value="${name}" placeholder="姓名">
-                               <input type="text" class="input-val" value="${info.role}" placeholder="关系定位">
-                               <label class="rel-score-wrap" title="该角色认为自己与此人关系的程度">
-                                   <span class="rel-score-label">指数</span>
-                                   <input type="number" class="input-score" value="${score}" min="0" step="0.1" placeholder="1">
-                               </label>
-                               <button class="btn-del" onclick="this.closest('.rel-edit-card').remove()">×</button>
-                           </div>
-                           <textarea class="input-full" rows="2" placeholder="详细描述">${info.description}</textarea>
-                       </div>`;
+                    listDiv.appendChild(createRelationCardElement(name, {
+                        role: info.role || '',
+                        score,
+                        description: info.description || info.desc || ''
+                    }));
                 });
                 container.innerHTML = html;
                 container.appendChild(listDiv);
-                container.innerHTML += `<button class="btn-add" onclick="addRelRow(this)">+ 添加角色</button>`;
+                // 不能使用 innerHTML +=：它会重建已有节点，导致通过
+                // element.value 写入的关系卡片内容全部丢失。
+                container.insertAdjacentHTML(
+                    'beforeend',
+                    `<button class="btn-add" onclick="addRelRow(this)">+ 添加角色</button>`
+                );
             }
+            container.oninput = () => {
+                captureCurrentRelationDraft();
+                persistRelationDraft();
+                updateRelationDraftIndicators();
+            };
+            updateRelationDraftIndicators();
+        }
+    }
+
+    function updateRelationJsonStatus(valid, message, perspective = null) {
+        if (perspective) {
+            const active = document.querySelector('#module-relation .view-mode')?.dataset.mode === 'reverse'
+                ? 'reverse' : 'normal';
+            if (active !== perspective) return;
+        }
+        const status = document.getElementById('relation-json-status');
+        if (!status) return;
+        status.textContent = valid ? `✓ ${message}` : `⚠ ${message}`;
+        status.style.color = valid ? '#2e7d32' : '#c62828';
+    }
+
+    function onRelationJsonInput() {
+        if (!relationDraft) return;
+        const viewMode = document.querySelector('#module-relation .view-mode');
+        const perspective = viewMode.dataset.mode === 'reverse' ? 'reverse' : 'normal';
+        const textarea = document.getElementById('relation-json-input');
+        relationDraft.jsonText[perspective] = textarea?.value || '';
+        relationDraft.jsonValid[perspective] = false;
+        relationDraft.dirty[perspective] = true;
+        persistRelationDraft();
+        updateRelationDraftIndicators();
+        updateRelationJsonStatus(false, '正在检查 JSON…', perspective);
+        if (relationJsonValidationTimer) clearTimeout(relationJsonValidationTimer);
+        relationJsonValidationTimer = setTimeout(() => validateRelationJsonEditor(false), 500);
+    }
+
+    async function switchRelationEditorMode(nextMode) {
+        if (!relationDraft || !['cards', 'json'].includes(nextMode)) return;
+        const viewMode = document.querySelector('#module-relation .view-mode');
+        const perspective = viewMode.dataset.mode === 'reverse' ? 'reverse' : 'normal';
+        const currentMode = relationDraft.editorMode[perspective] || 'cards';
+        if (currentMode === nextMode) return;
+        if (currentMode === 'json') {
+            const valid = await validateRelationJsonEditor(true);
+            if (!valid) return;
+        } else {
+            captureCurrentRelationDraft();
+            relationDraft.jsonText[perspective] = stringifyRelationshipGraph(relationDraft[perspective]);
+            relationDraft.jsonValid[perspective] = true;
+        }
+        relationDraft.editorMode[perspective] = nextMode;
+        persistRelationDraft();
+        buildEditor('relation', document.querySelector('#module-relation .edit-mode'));
+    }
+
+    async function syncCurrentRelationEditor(showAlert = false) {
+        if (!relationDraft) return false;
+        const viewMode = document.querySelector('#module-relation .view-mode');
+        const perspective = viewMode.dataset.mode === 'reverse' ? 'reverse' : 'normal';
+        if (relationDraft.editorMode[perspective] === 'json') {
+            return await validateRelationJsonEditor(showAlert);
+        }
+        captureCurrentRelationDraft();
+        persistRelationDraft();
+        return true;
+    }
+
+    function createRelationCardElement(name, info) {
+        const card = document.createElement('div');
+        card.className = 'rel-edit-card';
+
+        const row = document.createElement('div');
+        row.className = 'input-group';
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.className = 'input-key';
+        nameInput.placeholder = '姓名';
+        nameInput.value = name || '';
+        const roleInput = document.createElement('input');
+        roleInput.type = 'text';
+        roleInput.className = 'input-val';
+        roleInput.placeholder = '关系定位';
+        roleInput.value = info.role || '';
+        const scoreWrap = document.createElement('label');
+        scoreWrap.className = 'rel-score-wrap';
+        const scoreLabel = document.createElement('span');
+        scoreLabel.className = 'rel-score-label';
+        scoreLabel.textContent = '指数';
+        const scoreInput = document.createElement('input');
+        scoreInput.type = 'number';
+        scoreInput.className = 'input-score';
+        scoreInput.min = '0';
+        scoreInput.max = '5';
+        scoreInput.step = '0.1';
+        scoreInput.value = info.score ?? 1;
+        scoreWrap.append(scoreLabel, scoreInput);
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'btn-del';
+        deleteButton.textContent = '×';
+        deleteButton.onclick = () => {
+            card.remove();
+            captureCurrentRelationDraft();
+            persistRelationDraft();
+            updateRelationDraftIndicators();
+        };
+        row.append(nameInput, roleInput, scoreWrap, deleteButton);
+
+        const description = document.createElement('textarea');
+        description.className = 'input-full';
+        description.rows = 2;
+        description.placeholder = '详细描述';
+        description.value = info.description || '';
+        card.append(row, description);
+        return card;
+    }
+
+    function createReverseRelationCardElement(sourceCid, info = {}) {
+        const card = document.createElement('div');
+        card.className = 'rel-edit-card';
+        card.dataset.sourceCid = sourceCid;
+        card.style.cssText = 'border-left:4px solid #673ab7; background:#fffcf9;';
+        const sourceName = info.char_name || sourceCid;
+        const sourceLabel = document.createElement('div');
+        sourceLabel.style.cssText = 'font-size:11px;color:#673ab7;font-weight:bold;margin-bottom:5px;';
+        sourceLabel.textContent = `来自：${sourceName} 的视角`;
+        const row = document.createElement('div');
+        row.className = 'input-group';
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.className = 'input-key';
+        nameInput.value = sourceName;
+        nameInput.readOnly = true;
+        const roleInput = document.createElement('input');
+        roleInput.type = 'text';
+        roleInput.className = 'input-val';
+        roleInput.placeholder = '对方如何定义这段关系';
+        roleInput.value = info.role || '';
+        const scoreWrap = document.createElement('label');
+        scoreWrap.className = 'rel-score-wrap';
+        const scoreLabel = document.createElement('span');
+        scoreLabel.className = 'rel-score-label';
+        scoreLabel.textContent = '指数';
+        const scoreInput = document.createElement('input');
+        scoreInput.type = 'number';
+        scoreInput.className = 'input-score';
+        scoreInput.min = '0';
+        scoreInput.max = '5';
+        scoreInput.step = '0.1';
+        scoreInput.value = info.score ?? 1;
+        scoreWrap.append(scoreLabel, scoreInput);
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'btn-del';
+        deleteButton.textContent = '×';
+        deleteButton.onclick = () => deleteExistingReverseRelation(deleteButton, sourceCid, sourceName);
+        row.append(nameInput, roleInput, scoreWrap, deleteButton);
+        const description = document.createElement('textarea');
+        description.className = 'input-full';
+        description.rows = 2;
+        description.placeholder = '对方对当前角色的详细看法';
+        description.value = info.description || info.desc || '';
+        card.append(sourceLabel, row, description);
+        return card;
+    }
+
+    function captureCurrentRelationDraft() {
+        if (!relationDraft) return;
+        const module = document.getElementById('module-relation');
+        if (!module?.classList.contains('editing')) return;
+        const viewMode = module.querySelector('.view-mode');
+        const mode = viewMode.dataset.mode === 'reverse' ? 'reverse' : 'normal';
+        if (relationDraft.editorMode?.[mode] === 'json') {
+            const textarea = document.getElementById('relation-json-input');
+            if (textarea && relationDraft.jsonText[mode] !== textarea.value) {
+                relationDraft.jsonText[mode] = textarea.value;
+                relationDraft.jsonValid[mode] = false;
+                relationDraft.dirty[mode] = true;
+            }
+            return;
+        }
+        const cards = module.querySelectorAll('.edit-mode .rel-edit-card');
+        const before = JSON.stringify({
+            data: relationDraft[mode],
+            deleted: relationDraft.deletedReverseIds
+        });
+        if (mode === 'normal') {
+            const normal = {};
+            cards.forEach(card => {
+                const name = card.querySelector('.input-key')?.value.trim();
+                if (!name) return;
+                const score = Number.parseFloat(card.querySelector('.input-score')?.value);
+                normal[name] = {
+                    role: card.querySelector('.input-val')?.value.trim() || '',
+                    score: Number.isFinite(score) ? score : 1,
+                    description: card.querySelector('.input-full')?.value.trim() || ''
+                };
+            });
+            relationDraft.normal = normal;
+        } else {
+            const reverse = {};
+            const deleted = new Set(relationDraft.deletedReverseIds || []);
+            cards.forEach(card => {
+                const sourceCid = card.dataset.sourceCid;
+                if (!sourceCid) return;
+                if (card.dataset.pendingDelete === 'true') {
+                    deleted.add(sourceCid);
+                    return;
+                }
+                deleted.delete(sourceCid);
+                const oldInfo = relationDraft.reverse?.[sourceCid] || {};
+                const score = Number.parseFloat(card.querySelector('.input-score')?.value);
+                reverse[sourceCid] = {
+                    role: card.querySelector('.input-val')?.value.trim() || '',
+                    score: Number.isFinite(score) ? score : 1,
+                    description: card.querySelector('.input-full')?.value.trim() || '',
+                    char_name: oldInfo.char_name || card.querySelector('.input-key')?.value.trim() || sourceCid,
+                    char_remark: oldInfo.char_remark || ''
+                };
+            });
+            relationDraft.reverse = reverse;
+            relationDraft.deletedReverseIds = Array.from(deleted);
+        }
+        const after = JSON.stringify({
+            data: relationDraft[mode],
+            deleted: relationDraft.deletedReverseIds
+        });
+        if (before !== after) {
+            relationDraft.dirty[mode] = true;
+            relationDraft.jsonText[mode] = stringifyRelationshipGraph(relationDraft[mode]);
+            relationDraft.jsonValid[mode] = true;
+        }
+    }
+
+    function applyParsedRelationshipGraph(graph, mode, perspective = null) {
+        const viewMode = document.querySelector('#module-relation .view-mode');
+        const activePerspective = perspective || (viewMode.dataset.mode === 'reverse' ? 'reverse' : 'normal');
+        if (relationDraft.editorMode?.[activePerspective] === 'json') {
+            const previous = relationDraft[activePerspective] || {};
+            const next = mode === 'replace' ? cloneJson(graph) : {...cloneJson(previous), ...cloneJson(graph)};
+            if (activePerspective === 'reverse' && mode === 'replace') {
+                const deleted = new Set(relationDraft.deletedReverseIds || []);
+                Object.keys(previous).forEach(sourceCid => {
+                    if (!(sourceCid in next)) deleted.add(sourceCid);
+                });
+                Object.keys(next).forEach(sourceCid => deleted.delete(sourceCid));
+                relationDraft.deletedReverseIds = Array.from(deleted);
+            }
+            relationDraft[activePerspective] = next;
+            relationDraft.jsonText[activePerspective] = stringifyRelationshipGraph(next);
+            relationDraft.jsonValid[activePerspective] = true;
+            relationDraft.dirty[activePerspective] = true;
+            persistRelationDraft();
+            buildEditor('relation', document.querySelector('#module-relation .edit-mode'));
+            updateRelationDraftIndicators();
+            return;
+        }
+        const list = document.querySelector('#module-relation .edit-mode .edit-list-container');
+        if (!list) throw new Error('找不到关系卡片容器');
+        if (mode === 'replace') {
+            if (activePerspective === 'reverse') {
+                const removed = Array.from(list.querySelectorAll('[data-source-cid]')).map(card => card.dataset.sourceCid);
+                relationDraft.deletedReverseIds = Array.from(new Set([
+                    ...(relationDraft.deletedReverseIds || []),
+                    ...removed
+                ]));
+            }
+            list.innerHTML = '';
+        }
+
+        const existing = new Map();
+        list.querySelectorAll('.rel-edit-card').forEach(card => {
+            const key = activePerspective === 'reverse'
+                ? card.dataset.sourceCid
+                : card.querySelector('.input-key')?.value.trim();
+            if (key) existing.set(key, card);
+        });
+
+        Object.entries(graph).forEach(([key, info]) => {
+            const card = existing.get(key);
+            if (card) {
+                card.dataset.pendingDelete = 'false';
+                card.style.display = '';
+                card.querySelector('.input-val').value = info.role || '';
+                card.querySelector('.input-score').value = info.score ?? 1;
+                card.querySelector('.input-full').value = info.description || '';
+            } else {
+                list.appendChild(activePerspective === 'reverse'
+                    ? createReverseRelationCardElement(key, info)
+                    : createRelationCardElement(key, info));
+            }
+            if (activePerspective === 'reverse') {
+                relationDraft.deletedReverseIds = (relationDraft.deletedReverseIds || []).filter(cid => cid !== key);
+            }
+        });
+        captureCurrentRelationDraft();
+        relationDraft.dirty[activePerspective] = true;
+        relationDraft.jsonText[activePerspective] = stringifyRelationshipGraph(relationDraft[activePerspective]);
+        relationDraft.jsonValid[activePerspective] = true;
+        persistRelationDraft();
+        updateRelationDraftIndicators();
+    }
+
+    async function validateRelationJsonEditor(showAlert = false) {
+        const textarea = document.getElementById('relation-json-input');
+        if (!textarea || !relationDraft) return true;
+        const viewMode = document.querySelector('#module-relation .view-mode');
+        const perspective = viewMode.dataset.mode === 'reverse' ? 'reverse' : 'normal';
+        const content = textarea.value.trim();
+        relationDraft.jsonText[perspective] = textarea.value;
+        const validationText = textarea.value;
+        updateRelationJsonStatus(false, '正在校验 JSON…', perspective);
+        try {
+            const parsed = JSON.parse(content);
+            if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+                throw new Error('顶层必须是 JSON 对象');
+            }
+            const apiUrl = perspective === 'reverse'
+                ? `/api/${charId}/relationship_reverse/parse`
+                : '/api/relationship/parse';
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({content})
+            });
+            const result = await response.json();
+            if (!response.ok || result.status !== 'success') {
+                throw new Error(result.message || 'JSON 格式错误');
+            }
+            if (relationDraft.jsonText[perspective] !== validationText) {
+                return false;
+            }
+            const graphChanged = stringifyRelationshipGraph(relationDraft[perspective]) !== stringifyRelationshipGraph(result.graph);
+            if (perspective === 'reverse') {
+                const previousIds = new Set(Object.keys(relationDraft.reverse || {}));
+                const nextIds = new Set(Object.keys(result.graph));
+                const deleted = new Set(relationDraft.deletedReverseIds || []);
+                previousIds.forEach(sourceCid => {
+                    if (!nextIds.has(sourceCid)) deleted.add(sourceCid);
+                });
+                nextIds.forEach(sourceCid => deleted.delete(sourceCid));
+                relationDraft.deletedReverseIds = Array.from(deleted);
+            }
+            relationDraft[perspective] = result.graph;
+            relationDraft.jsonValid[perspective] = true;
+            if (graphChanged) relationDraft.dirty[perspective] = true;
+            persistRelationDraft();
+            updateRelationDraftIndicators();
+            updateRelationJsonStatus(true, `JSON 有效，共 ${Object.keys(result.graph).length} 条关系`, perspective);
+            return true;
+        } catch (error) {
+            relationDraft.jsonValid[perspective] = false;
+            persistRelationDraft();
+            updateRelationJsonStatus(false, `JSON 无效：${error.message}`, perspective);
+            if (showAlert) alert(`JSON 格式有误，无法切换或保存：\n${error.message}`);
+            return false;
+        }
+    }
+
+    async function formatRelationJson() {
+        const valid = await validateRelationJsonEditor(true);
+        if (!valid) return;
+        const viewMode = document.querySelector('#module-relation .view-mode');
+        const perspective = viewMode.dataset.mode === 'reverse' ? 'reverse' : 'normal';
+        const formatted = stringifyRelationshipGraph(relationDraft[perspective]);
+        relationDraft.jsonText[perspective] = formatted;
+        document.getElementById('relation-json-input').value = formatted;
+        persistRelationDraft();
+        updateRelationJsonStatus(true, `已格式化，共 ${Object.keys(relationDraft[perspective]).length} 条关系`);
+    }
+
+    async function loadRelationPromptContacts() {
+        if (Array.isArray(relationPromptContacts)) return relationPromptContacts;
+        const response = await fetch('/api/contacts');
+        const contacts = await response.json();
+        if (!response.ok || !Array.isArray(contacts)) throw new Error('角色列表加载失败');
+        relationPromptContacts = contacts.filter(contact => contact.type !== 'group');
+        return relationPromptContacts;
+    }
+
+    function relationshipPromptTargetName(contacts) {
+        const current = (contacts || []).find(contact => contact.id === charId);
+        return current?.name || charId;
+    }
+
+    function relationshipGraphForPrompt(perspective, contacts) {
+        const graph = relationshipGraphForEditor(relationDraft[perspective]);
+        if (perspective === 'reverse') return graph;
+
+        const promptGraph = {};
+        Object.entries(graph).forEach(([key, info]) => {
+            const contact = (contacts || []).find(item =>
+                [item.id, item.name, item.remark].some(alias => alias && alias === key)
+            );
+            const originalName = contact?.name || key;
+            promptGraph[originalName] = info;
+        });
+        return promptGraph;
+    }
+
+    function buildRelationshipPrompt(perspective, contacts) {
+        const targetName = relationshipPromptTargetName(contacts);
+        const currentJson = JSON.stringify(
+            relationshipGraphForPrompt(perspective, contacts), null, 2
+        );
+        const otherContacts = (contacts || []).filter(contact => contact.id !== charId);
+        const schema = [
+            'JSON 格式说明：',
+            '- 顶层必须是一个 JSON 对象。',
+            '- 每个关系值必须是对象，并包含 role、score、description 三个字段。',
+            '- role：字符串，表示关系定位，例如“朋友”“队友”“宿敌”。',
+            '- score：0 到 5 的数字，表示关系紧密程度。',
+            '- description：字符串，使用当前视角描述这段关系。'
+        ].join('\n');
+        if (perspective === 'reverse') {
+            const allowed = otherContacts
+                .map(contact => {
+                    const name = contact.name || contact.id;
+                    return `- ${contact.id}：${name}`;
+                })
+                .join('\n') || '- 暂无其他可用角色';
+            return `请分别站在其他角色的独立视角，生成或修改他们如何看待“${targetName}”的关系图谱。不要机械反转“${targetName}”对他们的看法，每个角色的描述必须符合自己的人设。仅输出一个合法 JSON 对象，不要输出 Markdown 代码块、前后说明或任何额外文字。\n\n${schema}\n- 此视角的 JSON 顶层键必须使用下方允许列表中的角色 ID。\n- description 必须以该来源角色的视角描述其如何看待“${targetName}”。\n- 没有出现在最终 JSON 中的旧关系会被删除；需要保留的关系请勿遗漏。\n\n允许使用的来源角色：\n${allowed}\n\n请在以下当前完整 JSON 基础上修改：\n${currentJson}`;
+        }
+        const availableTargets = otherContacts
+            .map(contact => {
+                const name = contact.name || contact.id;
+                return `- 原名：${name}；ID：${contact.id}`;
+            })
+            .join('\n') || '- 暂无其他可用角色';
+        return `请根据角色设定，生成或修改“${targetName}”如何看待其他角色的关系图谱。仅输出一个合法 JSON 对象，不要输出 Markdown 代码块、前后说明或任何额外文字。\n\n${schema}\n- 此视角的 JSON 顶层键必须使用下方可生成角色列表中的“原名”，不要使用角色 ID 或备注。\n- description 必须使用“${targetName}”的视角描述其如何看待对方。\n- 只允许新增下方列表中的角色，不要虚构其他角色。\n- 没有出现在最终 JSON 中的旧关系会被删除；需要保留的关系请勿遗漏。\n\n可生成关系的其他角色：\n${availableTargets}\n\n请在以下当前完整 JSON 基础上修改：\n${currentJson}`;
+    }
+
+    async function copyRelationshipPrompt(btn) {
+        const synced = await syncCurrentRelationEditor(true);
+        if (!synced) return;
+        const viewMode = document.querySelector('#module-relation .view-mode');
+        const perspective = viewMode.dataset.mode === 'reverse' ? 'reverse' : 'normal';
+        const originalText = btn?.textContent || '📋 复制 AI Prompt';
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '正在生成…';
+        }
+        let copied = false;
+        try {
+            const contacts = await loadRelationPromptContacts();
+            const prompt = buildRelationshipPrompt(perspective, contacts);
+            await writeTextToClipboard(prompt);
+            copied = true;
+        } catch (error) {
+            alert(`复制 AI Prompt 失败：${error.message}`);
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+        if (copied) {
+            showToast(`已复制${perspective === 'reverse' ? '他人视角' : '我的视角'} AI Prompt`);
         }
     }
 
@@ -2029,6 +3066,10 @@
         const card = btn.closest('.rel-edit-card');
         card.dataset.pendingDelete = "true";
         card.style.display = "none"; // 先隐藏，保存时处理
+        captureCurrentRelationDraft();
+        relationDraft.dirty.reverse = true;
+        persistRelationDraft();
+        updateRelationDraftIndicators();
         showToast(`已标记删除 ${sourceName} 的视角`);
     }
 
@@ -2052,7 +3093,7 @@
         const container = btn.closest('.edit-mode').querySelector('.edit-list-container');
 
         // 对于中长期记忆，添加时最好自动填个今天的日期
-        const today = new Date().toISOString().split('T')[0];
+        const today = beijingDateString();
 
         const row = `<div class="input-group">
           <div class="mem-meta-col">
@@ -2064,6 +3105,36 @@
       </div>`;
 
         container.insertAdjacentHTML('afterbegin', row);
+    }
+
+    function addScheduleDatedRow(btn) {
+        const container = btn.closest('.edit-mode').querySelector('.schedule-dated-list');
+        const today = beijingDateString();
+        const row = `<div class="input-group schedule-dated-row">
+          <div class="mem-meta-col">
+              <input type="text" class="input-key" value="${today}" placeholder="YYYY-MM-DD">
+              <div class="meta-right-side"></div>
+          </div>
+          <textarea class="input-val" rows="3" placeholder="计划内容..."></textarea>
+          <button class="btn-del" onclick="this.parentElement.remove()">×</button>
+        </div>`;
+        container.insertAdjacentHTML('afterbegin', row);
+    }
+
+    function addUndatedPlanRow(btn) {
+        const container = btn.closest('.edit-mode').querySelector('.undated-plan-list');
+        const row = `<div class="input-group undated-plan-row">
+          <div class="mem-meta-col"><span style="font-weight:bold; color:#666;">无时间</span></div>
+          <textarea class="input-val undated-plan-input" rows="3" placeholder="尚未确定日期的计划..."></textarea>
+          <button class="btn-del" onclick="this.parentElement.remove()">×</button>
+        </div>`;
+        container.insertAdjacentHTML('beforeend', row);
+    }
+
+    function clearScheduleDatedItems(btn) {
+        if (!confirm("确定清空所有有日期的计划吗？无时间计划不会受影响。\n需要点击底部保存才会生效。")) return;
+        const container = btn.closest('.edit-mode').querySelector('.schedule-dated-list');
+        container.innerHTML = '';
     }
 
     // --- 【新增】全部删除功能 ---
@@ -2114,6 +3185,66 @@
             '"': '&quot;',
             "'": '&#39;'
         })[char]);
+    }
+
+    function parsePersonaLockSegments(value) {
+        const text = String(value || '');
+        const parts = text.split(/(\r\n|\n|\r)/);
+        const lines = [];
+        for (let i = 0; i < parts.length; i += 2) {
+            if (parts[i] === '' && i >= parts.length - 1) break;
+            lines.push(parts[i] + (parts[i + 1] || ''));
+        }
+
+        const segments = [];
+        let unlocked = '';
+        let locked = '';
+        let insideLock = false;
+        let openLine = 0;
+
+        lines.forEach((line, index) => {
+            const marker = line.trim();
+            const lineNumber = index + 1;
+            if (marker === '[[LOCK]]') {
+                if (insideLock) throw new Error(`第 ${lineNumber} 行不允许嵌套 [[LOCK]]`);
+                if (unlocked) segments.push({locked: false, text: unlocked});
+                unlocked = '';
+                locked = '';
+                insideLock = true;
+                openLine = lineNumber;
+                return;
+            }
+            if (marker === '[[/LOCK]]') {
+                if (!insideLock) throw new Error(`第 ${lineNumber} 行出现了没有开始标签的 [[/LOCK]]`);
+                if (!locked.trim()) throw new Error(`第 ${openLine} 行的锁定区块不能为空`);
+                segments.push({locked: true, text: locked});
+                locked = '';
+                insideLock = false;
+                openLine = 0;
+                return;
+            }
+            if (insideLock) locked += line;
+            else unlocked += line;
+        });
+
+        if (insideLock) throw new Error(`第 ${openLine} 行的 [[LOCK]] 缺少 [[/LOCK]]`);
+        if (unlocked) segments.push({locked: false, text: unlocked});
+        return segments;
+    }
+
+    function updatePersonaLockHint(editor) {
+        const status = document.getElementById('persona-lock-status');
+        if (!editor || !status) return;
+        try {
+            const count = parsePersonaLockSegments(editor.value).filter(segment => segment.locked).length;
+            status.className = `persona-lock-status ${count ? 'valid' : ''}`;
+            status.textContent = count
+                ? `已识别 ${count} 个 AI 编辑保护区块；你本人仍可自由修改。`
+                : '尚未设置 AI 编辑保护区块。';
+        } catch (error) {
+            status.className = 'persona-lock-status invalid';
+            status.textContent = `标签格式错误：${error.message}`;
+        }
     }
 
     async function loadRelationMemberCandidates() {
@@ -2206,6 +3337,10 @@
         
         if (listDiv) {
             listDiv.insertAdjacentHTML('beforeend', row);
+            captureCurrentRelationDraft();
+            if (relationDraft) relationDraft.dirty.normal = true;
+            persistRelationDraft();
+            updateRelationDraftIndicators();
         } else {
             // 兜底方案
             const btnAdd = module.querySelector('.btn-add');
@@ -2246,7 +3381,7 @@
         const editContainer = document.querySelector('#module-relation .edit-mode');
         
         // 获取已经存在的 CID（由后端加载的）
-        const existingData = JSON.parse(viewMode.dataset.reverseBody || '{}');
+        const existingData = relationDraft?.reverse || JSON.parse(viewMode.dataset.reverseBody || '{}');
         const existingCids = Object.keys(existingData);
         
         // 获取当前编辑器中已经新添加但还没保存的 CID
@@ -2291,58 +3426,15 @@
 
     function addReverseMemberRow(cid, name) {
         document.getElementById('addReverseMemberModal').style.display = 'none';
-        
-        let container = document.querySelector('#module-relation .edit-mode .edit-list-container');
-        
-        // 如果找不到 .edit-list-container，说明可能是在构建编辑器时没有给它这个类名，或者结构有变
-        if (!container) {
-            // 兜底方案：直接找 .edit-mode 下的第一个 div 或者直接作为子元素
-            container = document.querySelector('#module-relation .edit-mode');
-        }
-
-        // 查找是否已经存在（防止重复点）
+        const container = document.querySelector('#module-relation .edit-mode .edit-list-container');
+        if (!container) return;
         if (container.querySelector(`[data-source-cid="${cid}"]`)) return;
-
-        const row = `
-           <div class="rel-edit-card" data-source-cid="${cid}" style="border-left: 4px solid #673ab7; background: #fffcf9;">
-               <div style="font-size: 11px; color: #673ab7; font-weight: bold; margin-bottom: 5px;">来自: ${name} 的视角 (新添加)</div>
-               <div class="input-group">
-                   <input type="text" class="input-key" value="${name}" readonly>
-                   <input type="text" class="input-val" value="" placeholder="输入对方对你的关系定位">
-                   <label class="rel-score-wrap">
-                       <span class="rel-score-label">指数</span>
-                       <input type="number" class="input-score" value="1" min="0" step="0.1">
-                   </label>
-                   <button class="btn-del" onclick="this.closest('.rel-edit-card').remove()">×</button>
-               </div>
-               <textarea class="input-full" rows="2" placeholder="输入对方对你的详细描述"></textarea>
-           </div>`;
-        
-        // 如果 container 是 .edit-mode 本身，我们插在切换按钮（第一个子元素）后面
-        if (container.classList.contains('edit-mode')) {
-            const firstChild = container.firstElementChild;
-            if (firstChild) {
-                firstChild.insertAdjacentHTML('afterend', row);
-            } else {
-                container.innerHTML += row;
-            }
-        } else {
-            container.insertAdjacentHTML('afterbegin', row);
-        }
-    }
-
-    function deleteExistingReverseRelation(btn, sourceCid, sourceName) {
-        if (!confirm(`确定要彻底删除 ${sourceName} 对当前角色的看法吗？\n删除后需要点击底部的“保存”才会执行后台同步。`)) return;
-        
-        const card = btn.closest('.rel-edit-card');
-        card.dataset.pendingDelete = "true";
-        card.style.display = "none"; // 先隐藏，保存时处理
-        
-        if (typeof showToast === 'function') {
-            showToast(`已标记删除 ${sourceName} 的视角`);
-        } else {
-            alert(`已标记删除 ${sourceName} 的视角`);
-        }
+        container.prepend(createReverseRelationCardElement(cid, {char_name: name, score: 1}));
+        relationDraft.deletedReverseIds = (relationDraft.deletedReverseIds || []).filter(id => id !== cid);
+        captureCurrentRelationDraft();
+        relationDraft.dirty.reverse = true;
+        persistRelationDraft();
+        updateRelationDraftIndicators();
     }
 
     async function saveData(btn) {
@@ -2355,13 +3447,17 @@
         // 1. Markdown 保存
         if(CONFIG[key].method === 'renderMD') {
             if (key === 'base') {
-                // 如果是 base，我们需要构造 JSON 结构
+                const personaEditor = container.querySelector('.persona-editor');
+                try {
+                    parsePersonaLockSegments(personaEditor.value);
+                } catch (error) {
+                    alert(`人设锁定标签格式错误：${error.message}`);
+                    btn.textContent = '保存 / Save';
+                    btn.disabled = false;
+                    return;
+                }
                 newData = {
-                    "system_prompt": container.querySelector('textarea').value,
-                    "visual_descriptions": {
-                        "tags": document.getElementById('visual-tags').value,
-                        "description": document.getElementById('visual-desc').value
-                    }
+                    "system_prompt": personaEditor.value
                 };
             } else {
                 newData = container.querySelector('textarea').value;
@@ -2412,7 +3508,7 @@
             if (key === 'schedule' && jsonWrapper && jsonWrapper.style.display === 'block') {
                 const textarea = document.getElementById('schedule-json-textarea');
                 try {
-                    newData = JSON.parse(textarea.value);
+                    newData = normalizeScheduleEditorData(JSON.parse(textarea.value));
                 } catch(e) {
                     alert("JSON 格式有误，无法保存！\n" + e.message);
                     btn.textContent = '保存 / Save';
@@ -2421,6 +3517,9 @@
                 }
             }
             // 普通列表模式
+            else if (key === 'schedule') {
+                newData = scrapeScheduleDataFromInputs();
+            }
             else {
                 newData = {};
                 const rows = container.querySelectorAll('.input-group');
@@ -2434,54 +3533,56 @@
 
         // 4. Relation 保存
         else if(key === 'relation') {
-            const isReverse = document.querySelector(`#module-${key} .view-mode`).dataset.mode === 'reverse';
-            
-            if (isReverse) {
-                const cards = container.querySelectorAll('.rel-edit-card');
-                let promiseList = [];
-                cards.forEach(card => {
-                    const sourceCid = card.dataset.sourceCid;
-                    const role = card.querySelector('.input-val').value.trim();
-                    const desc = card.querySelector('.input-full').value.trim();
-                    const score = parseFloat(card.querySelector('.input-score').value) || 1;
-                    
-                    const isDelete = card.dataset.pendingDelete === "true";
-                    
-                    promiseList.push(fetch(`/api/${charId}/save_relationship_reverse`, {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({
-                            source_cid: sourceCid,
-                            data: isDelete ? null : { role: role, description: desc, score: score }
-                        })
-                    }));
-                });
-                
-                btn.textContent = 'Saving Multiple...';
-                await Promise.all(promiseList);
-                // 保存后由于是修改的别人，不更新 GLOBAL_DATA，触发一个刷新
-                const viewMode = document.querySelector(`#module-${key} .view-mode`);
-                delete viewMode.dataset.reverseLoaded;
-                
-                // 强制切回查看模式并渲染（这会触发 fetchReverseRelationships）
-                module.classList.remove('editing');
-                btn.textContent = '保存 / Save';
-                renderView(key, GLOBAL_DATA[key]);
+            const synced = await syncCurrentRelationEditor(true);
+            if (!synced) {
+                btn.textContent = '保存全部关系视角';
+                btn.disabled = false;
                 return;
-            } else {
-                newData = {};
-                const cards = container.querySelectorAll('.rel-edit-card');
-                cards.forEach(card => {
-                    const name = card.querySelector('.input-key').value.trim();
-                    const role = card.querySelector('.input-val').value.trim();
-                    const desc = card.querySelector('.input-full').value.trim();
-                    const scoreEl = card.querySelector('.input-score');
-                    const score = scoreEl ? (parseFloat(scoreEl.value) || 1) : 1;
-                    if(name) {
-                        newData[name] = { role: role, description: desc, score: score };
-                    }
-                });
             }
+            const invalidPerspective = ['normal', 'reverse'].find(
+                perspective => relationDraft.editorMode?.[perspective] === 'json' && relationDraft.jsonValid?.[perspective] === false
+            );
+            if (invalidPerspective) {
+                alert(`${invalidPerspective === 'normal' ? '我的视角' : '他人视角'}中仍有无效 JSON，请切换过去修正后再保存。`);
+                btn.textContent = '保存全部关系视角';
+                btn.disabled = false;
+                return;
+            }
+            persistRelationDraft();
+            btn.textContent = '正在保存全部视角...';
+            btn.disabled = true;
+            try {
+                const res = await fetch(`/api/${charId}/relationships/save_all`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        normal: relationDraft.normal,
+                        reverse: relationDraft.reverse,
+                        deleted_reverse_ids: relationDraft.deletedReverseIds || []
+                    })
+                });
+                const result = await res.json();
+                if (!res.ok || result.status !== 'success') {
+                    throw new Error(result.error || '保存失败');
+                }
+                GLOBAL_DATA.relation = result.normal || {};
+                const viewMode = module.querySelector('.view-mode');
+                viewMode.dataset.reverseLoaded = 'true';
+                viewMode.dataset.reverseBody = JSON.stringify(result.reverse || {});
+                relationDraft = null;
+                clearRelationDraftCache();
+                module.classList.remove('editing');
+                renderView(key, GLOBAL_DATA.relation);
+                showToast('我的视角和他人视角已全部保存');
+            } catch (e) {
+                persistRelationDraft();
+                alert(`保存失败：${e.message}\n草稿仍然保留，可以修正后重试。`);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '保存全部关系视角';
+                updateRelationDraftIndicators();
+            }
+            return;
         }
 
         // --- 发送给后端 ---
@@ -2497,7 +3598,6 @@
                 // 更新本地缓存
                 if (key === 'base' && typeof newData === 'object') {
                     GLOBAL_DATA[key] = newData.system_prompt || '';
-                    GLOBAL_DATA['visual_descriptions'] = newData.visual_descriptions || {};
                     // 重新渲染视图时传入纯文本
                     renderView(key, GLOBAL_DATA[key]);
                 } else {
@@ -2601,19 +3701,80 @@
 
     // --- AI 生成人设逻辑 ---
 
-    function openGenModal() {
-        // 自动填入当前角色配置里的名字，方便用户
-        // 这里假设 charConfig 全局变量还在，如果不在也没关系，空着就行
-        // document.getElementById('gen-char-name').value = ...
-        document.getElementById('genInputModal').style.display = 'flex';
+    function openGenModal(action = 'generate') {
+        const modal = document.getElementById('genInputModal');
+        const isCopy = action === 'copy';
+        modal.dataset.action = isCopy ? 'copy' : 'generate';
+        document.getElementById('gen-input-title').textContent = isCopy
+            ? '复制 AI 生成人设 Prompt' : 'AI 自动撰写人设';
+        document.getElementById('gen-action-btn').textContent = isCopy
+            ? '复制 Prompt' : '开始生成';
+        modal.style.display = 'flex';
     }
 
-    async function submitGeneration() {
+    async function submitPersonaAction(btn) {
+        const action = document.getElementById('genInputModal').dataset.action || 'generate';
+        if (action === 'copy') {
+            await copyPersonaGenerationPrompt(btn);
+        } else {
+            await submitGeneration(btn);
+        }
+    }
+
+    function currentPersonaDraft() {
+        const editor = document.querySelector('#module-base .persona-editor');
+        if (editor) return editor.value;
+        const base = GLOBAL_DATA.base;
+        if (base && typeof base === 'object') return String(base.system_prompt || '');
+        return String(base || '');
+    }
+
+    async function copyPersonaGenerationPrompt(btn) {
         const name = document.getElementById('gen-char-name').value.trim();
         const ip = document.getElementById('gen-source-ip').value.trim();
+        const webSearch = document.getElementById('gen-web-search').checked;
+        if (!name || !ip) return alert('请填写完整！');
+
+        const originalText = btn.textContent;
+        btn.textContent = webSearch ? '正在检索并整理…' : '正在整理…';
+        btn.disabled = true;
+        try {
+            const res = await fetch('/api/generate_persona', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    char_name: name,
+                    source_ip: ip,
+                    char_id: charId,
+                    existing_persona: currentPersonaDraft(),
+                    web_search: webSearch,
+                    prompt_only: true
+                })
+            });
+            const result = await res.json();
+            if (!res.ok || result.status !== 'success' || !result.prompt) {
+                throw new Error(result.error || 'Prompt 生成失败');
+            }
+            await writeTextToClipboard(result.prompt);
+            document.getElementById('genInputModal').style.display = 'none';
+            const sourceCount = Array.isArray(result.sources) ? result.sources.length : 0;
+            showToast(sourceCount
+                ? `已复制生成人设 Prompt（含 ${sourceCount} 条联网资料）`
+                : '已复制生成人设 Prompt');
+        } catch (error) {
+            alert(`复制生成人设 Prompt 失败：${error.message}`);
+        } finally {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    }
+
+    async function submitGeneration(btn) {
+        const name = document.getElementById('gen-char-name').value.trim();
+        const ip = document.getElementById('gen-source-ip').value.trim();
+        const webSearch = document.getElementById('gen-web-search').checked;
         if(!name || !ip) return alert("请填写完整！");
 
-        const btn = event.target;
         const originalText = btn.textContent;
         btn.textContent = "生成中(约15秒)...";
         btn.disabled = true;
@@ -2622,11 +3783,41 @@
             const res = await fetch('/api/generate_persona', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ char_name: name, source_ip: ip })
+                body: JSON.stringify({
+                    char_name: name,
+                    source_ip: ip,
+                    char_id: charId,
+                    existing_persona: currentPersonaDraft(),
+                    web_search: webSearch
+                })
             });
             const result = await res.json();
 
             if(result.status === 'success') {
+                const searchStatus = document.getElementById('gen-search-status');
+                const sourceCount = Array.isArray(result.sources) ? result.sources.length : 0;
+                const statusLabels = {
+                    success: `已联网检索，使用 ${sourceCount} 条参考资料`,
+                    no_results: '已联网检索，但未找到可用资料，本次按模型已有知识生成',
+                    unavailable: '未配置 SERPER_API_KEY，本次未联网',
+                    error: '联网检索失败，本次按模型已有知识生成',
+                    disabled: '本次未启用联网检索'
+                };
+                searchStatus.textContent = statusLabels[result.search_status] || '';
+                if (Array.isArray(result.sources) && result.sources.length) {
+                    const sourceList = document.createElement('div');
+                    sourceList.style.marginTop = '4px';
+                    result.sources.slice(0, 5).forEach((source, index) => {
+                        const link = document.createElement('a');
+                        link.href = source.url;
+                        link.target = '_blank';
+                        link.rel = 'noopener noreferrer';
+                        link.textContent = source.title || `来源 ${index + 1}`;
+                        link.style.marginRight = '8px';
+                        sourceList.appendChild(link);
+                    });
+                    searchStatus.appendChild(sourceList);
+                }
                 // 【修复】Base的人设部分，后台回复可能是Object，直接JSON显示预览
                 const previewText = document.getElementById('gen-preview-text');
                 if (typeof result.content === 'object') {
@@ -2664,15 +3855,10 @@
         if(editor) {
             if (jsonObj && jsonObj.system_prompt) {
                 editor.value = jsonObj.system_prompt;
-                if (jsonObj.visual_descriptions) {
-                    const tagsInput = document.getElementById('visual-tags');
-                    const descInput = document.getElementById('visual-desc');
-                    if (tagsInput) tagsInput.value = jsonObj.visual_descriptions.tags || '';
-                    if (descInput) descInput.value = jsonObj.visual_descriptions.description || '';
-                }
             } else {
                 editor.value = content;
             }
+            updatePersonaLockHint(editor);
             // 2. 关闭弹窗
             document.getElementById('genPreviewModal').style.display = 'none';
             alert("已填入编辑器！\n请检查无误后，点击下方的「保存」按钮写入文件。");
@@ -2728,22 +3914,13 @@
         if (jsonWrapper && jsonWrapper.style.display === 'block') {
             const textarea = document.getElementById('schedule-json-textarea');
             try {
-                newSchedule = JSON.parse(textarea.value);
+                newSchedule = normalizeScheduleEditorData(JSON.parse(textarea.value));
             } catch (e) {
                 alert("JSON 格式错误，无法保存！\n请检查语法（如引号、逗号）。\n" + e.message);
                 return; // 终止执行
             }
         } else {
-            // 普通列表模式：从输入框抓取
-            // (我们可以直接调用之前写的辅助函数，或者在这里原地抓取)
-            const container = document.querySelector('#module-schedule .edit-mode');
-            const inputRows = container.querySelectorAll('.input-group');
-
-            inputRows.forEach(row => {
-                const k = row.querySelector('.input-key').value.trim();
-                const v = row.querySelector('.input-val').value.trim();
-                if (k) newSchedule[k] = v;
-            });
+            newSchedule = scrapeScheduleDataFromInputs();
         }
 
         const btn = event.target;
@@ -2754,11 +3931,15 @@
         try {
             // A. 先保存自己的 (复用 save_prompt 接口)
             // 这一步是为了确保“当前角色”的数据先落袋为安
-            await fetch(`/api/${charId}/save_prompt`, {
+            const ownRes = await fetch(`/api/${charId}/save_prompt`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ key: 'schedule', content: newSchedule })
             });
+            const ownResult = await ownRes.json();
+            if (!ownRes.ok || ownResult.status !== 'success') {
+                throw new Error(ownResult.message || ownResult.error || '当前角色日程保存失败');
+            }
 
             // 更新本地缓存
             GLOBAL_DATA['schedule'] = newSchedule;
@@ -2774,10 +3955,10 @@
                     })
                 });
                 const result = await res.json();
-                if (result.status === 'success') {
+                if (res.ok && result.status === 'success') {
                     alert(`成功！\n已保存当前日程。\n并同步给了: ${result.updated.join(', ')}`);
                 } else {
-                    alert("部分同步失败: " + result.errors.join('; '));
+                    throw new Error(result.error || `同步失败: ${(result.errors || []).join('; ')}`);
                 }
             } else {
                 alert("当前角色日程已保存。");
@@ -2914,7 +4095,7 @@
         const confirm1 = confirm("⚠️ 警告：您确定要删除这个角色吗？此操作不可逆！");
         if (!confirm1) return;
 
-        const confirm2 = confirm("再次确认：真的要删除吗？所有聊天记录和记忆都会消失！");
+        const confirm2 = confirm("再次确认：真的要删除吗？聊天记录、记忆、朋友圈、点赞评论、地图位置和关系引用都会一并清理！");
         if (!confirm2) return;
 
         try {
@@ -2924,7 +4105,8 @@
             const result = await res.json();
 
             if (result.status === 'success') {
-                alert("角色已删除。即将返回通讯录。");
+                const deleted = result.deleted || {};
+                alert(`角色已删除。已清理 ${deleted.posts || 0} 条朋友圈、${deleted.likes || 0} 个点赞、${deleted.comments || 0} 条评论和地图位置。即将返回通讯录。`);
                 window.location.href = '/'; // 跳回首页
             } else {
                 alert("删除失败: " + result.error);
@@ -3033,7 +4215,7 @@
 
             // 1. 尝试解析 JSON
             try {
-                const newData = JSON.parse(textarea.value);
+                const newData = normalizeScheduleEditorData(JSON.parse(textarea.value));
 
                 // 2. 重新渲染列表 (需要临时调用 buildEditor 的内部逻辑，或者简单点：更新全局数据并重绘)
                 // 为了简单，我们更新 GLOBAL_DATA 并重新调用 buildEditor
@@ -3053,15 +4235,122 @@
     // 辅助：从输入框抓取当前数据
     function scrapeScheduleDataFromInputs() {
         const container = document.querySelector('#module-schedule .edit-mode');
-        const inputRows = container.querySelectorAll('.input-group');
         const newData = {};
 
-        inputRows.forEach(row => {
+        container.querySelectorAll('.schedule-dated-row').forEach(row => {
             const k = row.querySelector('.input-key').value.trim();
             const v = row.querySelector('.input-val').value.trim();
-            if(k) newData[k] = v;
+            if(k && v) {
+                if (!newData[k]) newData[k] = [];
+                newData[k].push(v);
+            }
         });
-        return newData;
+
+        newData._undated = Array.from(container.querySelectorAll('.undated-plan-input'))
+            .map(input => input.value.trim())
+            .filter(Boolean);
+        return normalizeScheduleEditorData(newData);
+    }
+
+    function normalizeScheduleEditorData(rawData) {
+        if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) {
+            throw new Error('日程数据必须是 JSON 对象');
+        }
+
+        const normalized = {};
+        Object.entries(rawData).forEach(([rawKey, value]) => {
+            if (rawKey === '_undated') return;
+            const key = String(rawKey || '').trim();
+            if (!key) return;
+            const items = typeof value === 'string' ? [value] : value;
+            if (!Array.isArray(items)) {
+                throw new Error(`日程 ${key} 必须是文本或文本数组`);
+            }
+            normalized[key] = items.map(item => {
+                if (typeof item !== 'string') {
+                    throw new Error(`日程 ${key} 的每一项都必须是文本`);
+                }
+                return item.trim();
+            }).filter(Boolean);
+            if (!normalized[key].length) delete normalized[key];
+        });
+
+        const rawUndated = rawData._undated == null ? [] : rawData._undated;
+        if (!Array.isArray(rawUndated)) {
+            throw new Error('_undated 必须是文本数组');
+        }
+        normalized._undated = rawUndated.map(item => {
+            if (typeof item !== 'string') {
+                throw new Error('无时间计划的每一项都必须是文本');
+            }
+            return item.trim();
+        }).filter(Boolean);
+        return normalized;
+    }
+
+    function renderCharacterTimeMeta(data) {
+        const meta = document.getElementById('character-timezone-meta');
+        const preview = document.getElementById('sleep-time-preview');
+        const basisLabel = document.getElementById('sleep-time-basis-label');
+        const timePreview = data.time_preview || {};
+        if (meta) {
+            if (data.timezone_source !== undefined) {
+                meta.dataset.source = data.timezone_source || '默认';
+            }
+            if (data.ds_time_basis !== undefined) {
+                meta.dataset.basis = data.ds_time_basis || 'user';
+            } else if (timePreview.basis) {
+                meta.dataset.basis = timePreview.basis;
+            }
+            meta.textContent = `来源：${meta.dataset.source || '默认'} · 睡眠基准：${meta.dataset.basis === 'character' ? '角色当地时间' : '用户当地时间'}`;
+            if (basisLabel) {
+                basisLabel.textContent = '按角色当地时间设置:';
+            }
+        }
+        if (preview) {
+            const sleep = timePreview.sleep;
+            const wake = timePreview.wake;
+            preview.textContent = sleep && wake
+                ? `下次入睡：用户 ${sleep.user} / 角色 ${sleep.character} / 北京 ${sleep.beijing}；下次唤醒：用户 ${wake.user} / 角色 ${wake.character} / 北京 ${wake.beijing}`
+                : '';
+        }
+    }
+
+    async function loadCharacterTimezones() {
+        const list = document.getElementById('character-timezone-options');
+        if (!list || list.dataset.loaded === '1') return;
+        try {
+            const res = await fetch('/api/timezones?limit=500');
+            const data = await res.json();
+            list.innerHTML = (data.timezones || [])
+                .map(item => `<option value="${item.name}">${item.offset} · ${item.local_time}</option>`)
+                .join('');
+            list.dataset.loaded = '1';
+        } catch (e) {
+            console.error('加载时区失败', e);
+        }
+    }
+
+    async function saveCharacterTimezone() {
+        const input = document.getElementById('character-timezone-input');
+        try {
+            const res = await fetch(`/api/${charId}/update_meta`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ timezone: input.value.trim() })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '时区保存失败');
+            renderCharacterTimeMeta({
+                timezone_source: 'manual',
+                ds_time_basis: data.time_preview && data.time_preview.basis,
+                time_preview: data.time_preview
+            });
+            showSaveStatus('success');
+        } catch (e) {
+            alert(e.message);
+            showSaveStatus('error');
+        }
     }
 
     // --- 状态逻辑 (自动保存版) ---
@@ -3228,7 +4517,15 @@
     }
 
     // B. 直接保存 (用于开关和时间选择)
-    async function saveStatusDirect() {
+    let statusSaveQueue = Promise.resolve();
+    function saveStatusDirect() {
+        if (saveTimer) clearTimeout(saveTimer);
+        // 按顺序保存，避免快速锁定/解锁时旧请求覆盖新状态。
+        statusSaveQueue = statusSaveQueue.then(persistStatusDirect, persistStatusDirect);
+        return statusSaveQueue;
+    }
+
+    async function persistStatusDirect() {
         const emotion = document.getElementById('emotion-num').value;
         const momentsIndex = document.getElementById('moments-index-num').value;
         const intimacy = document.getElementById('intimacy-num').value;
@@ -3246,26 +4543,44 @@
 
         try {
             showSaveStatus('saving'); // 显示保存中状态
+            const payload = {
+                emotion: emotion,
+                moments_index: parseFloat(momentsIndex) || 1,
+                emotion_locked: document.getElementById('emotion-locked-chk').checked,
+                moments_index_locked: document.getElementById('moments-index-locked-chk').checked,
+                intimacy: Math.max(0, Math.min(100, parseInt(intimacy, 10) || 60)),
+                light_sleep: lightSleepToSave,
+                bedtime_diary_enabled: bedtimeDiaryEnabled,
+                chat_mode: document.getElementById('chat-mode-chk').checked ? 'offline' : 'online'
+            };
+            if (deepSleep !== lastSleepStatus.deep_sleep) {
+                payload.deep_sleep = deepSleep;
+            }
+            if (dsStart !== lastSleepStatus.ds_start || dsEnd !== lastSleepStatus.ds_end) {
+                payload.ds_start = dsStart;
+                payload.ds_end = dsEnd;
+            }
 
             const res = await fetch(`/api/${charId}/update_meta`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    emotion: emotion,
-                    moments_index: parseFloat(momentsIndex) || 1,
-                    intimacy: Math.max(0, Math.min(100, parseInt(intimacy, 10) || 60)),
-	                    light_sleep: lightSleepToSave, // <--- 传这个修正后的值
-	                    deep_sleep: deepSleep,
-	                    ds_start: dsStart,
-	                    ds_end: dsEnd,
-	                    bedtime_diary_enabled: bedtimeDiaryEnabled,
-	                    chat_mode: document.getElementById('chat-mode-chk').checked ? 'offline' : 'online'
-                })
+                body: JSON.stringify(payload)
             });
 
             if(res.ok) {
+                const result = await res.json();
+                if (Object.prototype.hasOwnProperty.call(payload, 'deep_sleep')) {
+                    lastSleepStatus.deep_sleep = deepSleep;
+                }
+                if (Object.prototype.hasOwnProperty.call(payload, 'ds_start')) {
+                    lastSleepStatus.ds_start = dsStart;
+                    lastSleepStatus.ds_end = dsEnd;
+                }
+                renderCharacterTimeMeta({ time_preview: result.time_preview });
                 showSaveStatus('success'); // 显示成功
             } else {
+                const result = await res.json().catch(() => ({}));
+                console.error(result.error || '保存失败');
                 showSaveStatus('error');
             }
         } catch(e) {
@@ -3276,19 +4591,12 @@
 
     // --- 【新增】AI 关系图谱补全前端逻辑 ---
     async function aiCompleteRelation() {
+        const synced = await syncCurrentRelationEditor(true);
+        if (!synced) return;
+        const viewMode = document.querySelector('#module-relation .view-mode');
+        const perspective = viewMode.dataset.mode === 'reverse' ? 'reverse' : 'normal';
         // 1. 采集当前编辑器的数据
-        const currentGraph = {};
-        const cards = document.querySelectorAll('#module-relation .rel-edit-card');
-        cards.forEach(card => {
-            const name = card.querySelector('.input-key')?.value.trim();
-            const role = card.querySelector('.input-val')?.value.trim();
-            const scoreInput = card.querySelector('.input-score');
-            const score = scoreInput ? parseFloat(scoreInput.value) : 1;
-            const description = card.querySelector('.input-full')?.value.trim();
-            if (name) {
-                currentGraph[name] = { role, score, description };
-            }
-        });
+        const currentGraph = cloneJson(relationDraft?.[perspective] || {});
 
         const charName = document.getElementById('view-remark').textContent.trim();
         // 尝试从 Base 获取 Tags
@@ -3299,29 +4607,47 @@
              if (tagMatch) charTags = tagMatch[1];
         }
 
-        const btn = document.querySelector('[onclick="aiCompleteRelation()"]');
+        const btn = Array.from(document.querySelectorAll('#module-relation [onclick="aiCompleteRelation()"]'))
+            .find(el => el.offsetParent !== null);
+        if (!btn) return;
         const originalText = btn.innerHTML;
         btn.innerHTML = "✨ 正在补全...";
         btn.disabled = true;
 
         try {
-            const res = await fetch("/api/memory/ai_complete_relation", {
+            let apiUrl = "/api/memory/ai_complete_relation";
+            let requestBody = {
+                char_id: charId,
+                name: charName,
+                tags: charTags,
+                current_graph: JSON.stringify(currentGraph)
+            };
+            if (perspective === 'reverse') {
+                const contactsRes = await fetch('/api/contacts');
+                const contacts = await contactsRes.json();
+                const sourceIds = contacts
+                    .filter(c => c.type !== 'group' && c.id !== charId)
+                    .map(c => c.id)
+                    .slice(0, 20);
+                if (!sourceIds.length) throw new Error('没有可生成他人视角的其他角色');
+                apiUrl = `/api/${charId}/relationship_reverse/ai_generate`;
+                requestBody = {
+                    source_character_ids: sourceIds,
+                    current_relationships: currentGraph
+                };
+            }
+            const res = await fetch(apiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    char_id: charId,
-                    name: charName,
-                    tags: charTags,
-                    current_graph: JSON.stringify(currentGraph)
-                })
+                body: JSON.stringify(requestBody)
             });
             const data = await res.json();
-            if (data.status === 'success') {
+            if (res.ok && data.status === 'success') {
                 let relData = data.graph;
                 if (typeof relData === 'string') relData = JSON.parse(relData);
-                showRelationAiPreview(relData, currentGraph);
+                showRelationAiPreview(relData, currentGraph, perspective);
             } else {
-                alert("AI 补全失败: " + data.error);
+                alert("AI 补全失败: " + (data.error || data.message || '未知错误'));
             }
         } catch(e) {
             console.error(e);
@@ -3332,13 +4658,14 @@
         }
     }
 
-    function showRelationAiPreview(relData, oldData) {
+    function showRelationAiPreview(relData, oldData, perspective = 'normal') {
         const modal = document.getElementById('aiPreviewModal');
         const content = document.getElementById('ai-preview-content');
         content.innerHTML = '';
 
         for (let n in relData) {
             const info = relData[n];
+            const displayName = perspective === 'reverse' ? (info.char_name || n) : n;
             const isObj = typeof info === 'object' && info !== null;
             const role = isObj ? info.role : '未知';
             const score = isObj ? info.score : 1;
@@ -3348,7 +4675,7 @@
             item.style.cssText = "background:#f8f9fb; padding:15px; border-radius:16px; border-left:4px solid var(--primary-color); margin-bottom:12px; box-shadow: 0 2px 8px rgba(0,0,0,0.03);";
             item.innerHTML = `
                 <div style="font-size:14px; font-weight:700; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
-                    <span>👤 ${n} <small style="background:var(--primary-rgba-light); color:var(--primary-dark); padding:2px 6px; border-radius:6px; margin-left:6px; font-weight:normal;">${role}</small></span>
+                    <span>👤 ${displayName}${perspective === 'reverse' ? ' → 当前角色' : ''} <small style="background:var(--primary-rgba-light); color:var(--primary-dark); padding:2px 6px; border-radius:6px; margin-left:6px; font-weight:normal;">${role}</small></span>
                     <span style="font-size:11px; color:#aaa;">指数: ${score}</span>
                 </div>
                 <div style="font-size:13px; color:#666; line-height:1.5;">${desc}</div>
@@ -3357,31 +4684,7 @@
         }
 
         document.getElementById('apply-ai-btn').onclick = () => {
-             // 确认应用逻辑：清空当前列表并重新填充
-             const editMode = document.querySelector('#module-relation .edit-mode');
-             // 找到列表容器
-             const listDiv = editMode.querySelector('.edit-list-container') || editMode.querySelector('div:has(> .rel-edit-card)');
-             if (listDiv) {
-                 listDiv.innerHTML = '';
-                 // 重新渲染全部
-                 for (let name in relData) {
-                     const info = relData[name];
-                     const score = info.score != null ? info.score : 1;
-                     listDiv.innerHTML += `
-                       <div class="rel-edit-card">
-                           <div class="input-group">
-                               <input type="text" class="input-key" value="${name}" placeholder="姓名">
-                               <input type="text" class="input-val" value="${info.role}" placeholder="关系定位">
-                               <label class="rel-score-wrap" title="该角色认为自己与此人关系的程度">
-                                   <span class="rel-score-label">指数</span>
-                                   <input type="number" class="input-score" value="${score}" min="0" step="0.1" placeholder="1">
-                               </label>
-                               <button class="btn-del" onclick="this.closest('.rel-edit-card').remove()">×</button>
-                           </div>
-                           <textarea class="input-full" rows="2" placeholder="详细描述">${info.description || info.desc || ''}</textarea>
-                       </div>`;
-                 }
-             }
+             applyParsedRelationshipGraph(relData, perspective === 'reverse' ? 'merge' : 'replace', perspective);
              closeAiPreview();
         };
 

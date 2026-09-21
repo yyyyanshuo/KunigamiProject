@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>角色 Ego 八维测评报告</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0d1018; --card:#171c29; --line:#2a3245; --text:#f5f7ff; --muted:#9ba7bf; --accent:#8ea5ff; --pink:#ff7eb6; }
+    * { box-sizing: border-box; }
+    body { margin:0; min-height:100vh; font-family:Inter,"PingFang SC","Microsoft YaHei",sans-serif; background:radial-gradient(circle at 15% -10%,#25335c 0,transparent 34%),var(--bg); color:var(--text); }
+    .shell { width:min(1120px,calc(100% - 32px)); margin:0 auto; padding:44px 0 72px; }
+    .top { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:24px; }
+    .eyebrow { color:var(--accent); letter-spacing:.14em; font-size:12px; font-weight:800; text-transform:uppercase; }
+    h1 { margin:8px 0 6px; font-size:clamp(28px,5vw,54px); line-height:1; }
+    .muted { color:var(--muted); }
+    select,button { border:1px solid var(--line); color:var(--text); background:#111622; border-radius:12px; padding:11px 14px; font:inherit; }
+    button { cursor:pointer; }
+    .controls { display:flex; gap:10px; flex-wrap:wrap; }
+    .card { background:color-mix(in srgb,var(--card) 94%,transparent); border:1px solid var(--line); border-radius:20px; box-shadow:0 20px 60px #0005; }
+    .hero { padding:26px; display:grid; grid-template-columns:1fr auto; gap:24px; margin-bottom:18px; }
+    .name { font-size:30px; font-weight:850; margin:0 0 8px; }
+    .chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
+    .chip { padding:6px 10px; border:1px solid var(--line); border-radius:999px; color:var(--muted); font-size:13px; }
+    .opening { grid-column:1/-1; border-left:3px solid var(--accent); padding:12px 15px; background:#111724; border-radius:0 12px 12px 0; color:#dbe2f5; white-space:pre-wrap; }
+    .grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:18px; }
+    .dimension { padding:16px; overflow:hidden; }
+    .dimension-head { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:12px; }
+    .dimension strong { font-size:25px; }
+    .axis { position:relative; height:8px; border-radius:99px; background:#0c1018; overflow:hidden; }
+    .axis::after { content:""; position:absolute; left:50%; top:0; bottom:0; width:1px; background:#79839a; }
+    .bar { position:absolute; top:0; height:100%; background:linear-gradient(90deg,var(--accent),var(--pink)); border-radius:99px; }
+    .hidden { display:none; padding:20px; margin-bottom:18px; border-color:#765175; background:linear-gradient(135deg,#281c31,#171c29); }
+    .hidden.show { display:block; }
+    .section-title { display:flex; align-items:end; justify-content:space-between; gap:16px; margin:34px 0 14px; }
+    .section-title h2 { margin:0; font-size:24px; }
+    .answers { display:grid; gap:12px; }
+    details { overflow:hidden; }
+    summary { list-style:none; cursor:pointer; padding:18px 20px; display:grid; grid-template-columns:64px 1fr auto; align-items:center; gap:12px; }
+    summary::-webkit-details-marker { display:none; }
+    .qid { color:var(--accent); font-weight:850; }
+    .choice { width:34px; height:34px; display:grid; place-items:center; border-radius:10px; color:#0b1020; background:var(--accent); font-weight:900; }
+    .answer-body { border-top:1px solid var(--line); padding:18px 20px 22px; display:grid; gap:14px; }
+    .question { color:#dce3f4; line-height:1.7; }
+    .monologue { font-size:18px; line-height:1.75; white-space:pre-wrap; }
+    .delta { display:flex; flex-wrap:wrap; gap:7px; }
+    .delta span { font-size:13px; padding:5px 8px; border-radius:8px; background:#101522; color:var(--muted); }
+    .error { color:#ff9d9d; }
+    .empty { padding:40px; text-align:center; }
+    @media (max-width:760px) { .top,.hero { grid-template-columns:1fr; display:grid; } .grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .controls { width:100%; } select { flex:1; } summary { grid-template-columns:52px 1fr auto; } }
+    @media print { body { background:#fff; color:#111; } .shell { width:100%; padding:0; } .controls { display:none; } .card { background:#fff; box-shadow:none; break-inside:avoid; } details { break-inside:avoid; } details > * { display:block; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="top">
+      <div><div class="eyebrow">Kunigami Character Assessment</div><h1>Ego 八维测评</h1><div id="runMeta" class="muted"></div></div>
+      <div class="controls"><select id="characterSelect" aria-label="选择角色"></select><button id="printButton" type="button">打印 / 导出 PDF</button></div>
+    </header>
+
+    <section id="characterHero" class="card hero"></section>
+    <section id="dimensionGrid" class="grid"></section>
+    <section id="hiddenEnding" class="card hidden"></section>
+    <div class="section-title"><h2>逐题记录</h2><span id="answerCount" class="muted"></span></div>
+    <section id="answers" class="answers"></section>
+  </main>
+
+  <script>
+    const DATA = __ASSESSMENT_DATA_JSON__;
+    const select = document.getElementById('characterSelect');
+    const hero = document.getElementById('characterHero');
+    const grid = document.getElementById('dimensionGrid');
+    const ending = document.getElementById('hiddenEnding');
+    const answersRoot = document.getElementById('answers');
+    const answerCount = document.getElementById('answerCount');
+    const questions = new Map(DATA.questionnaire.questions.map(q => [q.id, q]));
+
+    function node(tag, className, text) {
+      const item = document.createElement(tag);
+      if (className) item.className = className;
+      if (text !== undefined) item.textContent = text;
+      return item;
+    }
+    function add(parent, ...children) { children.forEach(child => parent.appendChild(child)); return parent; }
+    function renderHero(character) {
+      hero.replaceChildren();
+      const intro = node('div');
+      add(intro, node('h2','name',character.char_name || character.char_id), node('div','muted',`角色 ID：${character.char_id}`));
+      const chips = node('div','chips');
+      [character.status === 'completed' ? '已完成' : '未完成', `${character.answers.length}/36 题`, `以上皆非 ${character.none_count || 0} 次`, `${character.route || '—'} · ${character.model || '—'}`].forEach(x => chips.appendChild(node('span','chip',x)));
+      intro.appendChild(chips);
+      const rank = node('div','muted', character.completed_at ? `完成于 ${character.completed_at}` : '运行尚未完成');
+      add(hero, intro, rank, node('div','opening',character.opening_message || DATA.opening_message));
+    }
+    function renderDimensions(character) {
+      grid.replaceChildren();
+      const values = DATA.questionnaire.dimensions.map(name => Number(character.dimensions?.[name] || 0));
+      const maxAbs = Math.max(1, ...values.map(Math.abs));
+      DATA.questionnaire.dimensions.forEach((name,index) => {
+        const value = values[index];
+        const card = node('article','card dimension');
+        const head = node('div','dimension-head');
+        add(head,node('span','muted',name),node('strong','',String(value)));
+        const axis = node('div','axis');
+        const bar = node('div','bar');
+        const width = Math.abs(value) / maxAbs * 50;
+        bar.style.width = `${width}%`;
+        bar.style.left = value >= 0 ? '50%' : `${50-width}%`;
+        axis.appendChild(bar); add(card,head,axis); grid.appendChild(card);
+      });
+    }
+    function renderEnding(character) {
+      ending.replaceChildren();
+      if (!character.hidden_ending) { ending.classList.remove('show'); return; }
+      ending.classList.add('show');
+      add(ending,node('div','eyebrow','Hidden Ending'),node('h2','',character.hidden_ending.title),node('p','muted',character.hidden_ending.message));
+    }
+    function renderAnswers(character) {
+      answersRoot.replaceChildren(); answerCount.textContent = `${character.answers.length} 条回答`;
+      if (!character.answers.length) { answersRoot.appendChild(node('div','card empty muted','这个角色还没有成功保存的回答。')); return; }
+      character.answers.forEach(answer => {
+        const question = questions.get(answer.question_id);
+        const details = node('details','card');
+        const summary = node('summary');
+        add(summary,node('span','qid',answer.question_id),node('span','',question ? question.short_title : answer.question_id),node('span','choice',answer.choice));
+        const body = node('div','answer-body');
+        add(body,node('div','question',question ? question.text : ''),node('div','monologue',answer.monologue || answer.raw_reply || ''));
+        if (answer.monologue_zh) {
+          const translated = node('div','monologue',answer.monologue_zh);
+          translated.setAttribute('lang','zh-CN');
+          translated.prepend(node('div','muted','中文翻译'));
+          body.appendChild(translated);
+        }
+        const delta = node('div','delta');
+        const entries = Object.entries(answer.score_delta || {});
+        (entries.length ? entries : [['本题',0]]).forEach(([name,value]) => delta.appendChild(node('span','',`${name} ${value > 0 ? '+' : ''}${value}`)));
+        body.appendChild(delta);
+        if (answer.attempts > 1) body.appendChild(node('div','muted',`本题在第 ${answer.attempts} 次尝试后解析成功`));
+        add(details,summary,body); answersRoot.appendChild(details);
+      });
+    }
+    function render(charId) {
+      const character = DATA.characters.find(item => item.char_id === charId);
+      if (!character) return;
+      renderHero(character); renderDimensions(character); renderEnding(character); renderAnswers(character);
+      document.title = `${character.char_name || character.char_id} · Ego 八维测评`;
+    }
+
+    document.getElementById('runMeta').textContent = `运行 ${DATA.run_id} · 题库 ${DATA.questionnaire.questionnaire_version}`;
+    DATA.characters.forEach(character => { const option = node('option','',character.char_name || character.char_id); option.value = character.char_id; select.appendChild(option); });
+    select.addEventListener('change',event => render(event.target.value));
+    document.getElementById('printButton').addEventListener('click',() => window.print());
+    if (DATA.characters.length) render(DATA.characters[0].char_id);
+  </script>
+</body>
+</html>

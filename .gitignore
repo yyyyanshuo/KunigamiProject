@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .DS_Store
 .env
+instance/
 venv/
 .idea/
 .vscode/
@@ -23,6 +24,15 @@ configs/users.db
 docs/
 scripts/
 users/
+!scripts/
+scripts/*
+!scripts/migrate_user_credentials.py
+!scripts/rebuild_memory_day.py
+!scripts/migrate_base_persona.py
+!scripts/run_character_ego_test.py
+!scripts/cleanup_map_locations.py
+credential-migration-backups/
+memory-rebuild-backups/
 
 # 静态资源 (支付QR码, 头像等)
 static/avatar_user.png

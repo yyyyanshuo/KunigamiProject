@@ -8,6 +8,8 @@
   <meta name="theme-color" content="#fff3f8">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <script src="/static/auth-guard.js"></script>
+  <script defer src="/static/voice-call-incoming.js"></script>
   <!-- 【新增】主题加载脚本 -->
   <script src="/static/theme-loader.js"></script>
   <script>
@@ -403,6 +405,28 @@
       display: flex; align-items: center; gap: 6px; padding: 8px; transition: color 0.2s;
     }
     .btn-logout:active { color: var(--primary-color); }
+    .btn-delete-account {
+      padding: 8px 16px; border-radius: 22px; border: 1px solid rgba(239, 68, 68, 0.45);
+      background: transparent; color: #ef4444; font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px;
+    }
+    .btn-delete-account:active { background: rgba(239, 68, 68, 0.08); }
+    .btn-danger {
+      border: none; border-radius: 20px; padding: 10px 14px; cursor: pointer;
+      background: #ef4444; color: #fff; font-size: 13px; font-weight: 700;
+    }
+    .btn-danger:disabled { opacity: 0.6; cursor: not-allowed; }
+    .delete-warning-box {
+      background: rgba(239, 68, 68, 0.06); border: 1px solid rgba(239, 68, 68, 0.18);
+      border-radius: 12px; padding: 12px; margin: 12px 0 16px;
+      font-size: 13px; line-height: 1.7; color: var(--text-muted);
+    }
+    .delete-input {
+      width: 100%; box-sizing: border-box; border: 1px solid var(--border-color); border-radius: 12px;
+      padding: 10px 12px; margin-top: 10px; font-size: 14px; outline: none;
+    }
+    .delete-input:focus { border-color: #ef4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12); }
+    .delete-error { min-height: 18px; margin: 10px 0; font-size: 12px; color: #ef4444; }
 
     /* 模态框优化 */
     .modal-overlay {
@@ -502,10 +526,11 @@
       </div>
       <div class="field-row">
         <label class="field-label">登录密码</label>
-        <div style="display:flex; gap:8px; width:100%;">
-          <input type="password" id="new-password-input" placeholder="设置新密码 (留空不改)" class="field-input" style="flex:1;">
+        <div style="display:flex; gap:8px; width:100%; flex-wrap:wrap;">
+          <input type="password" id="current-password-input" autocomplete="current-password" placeholder="当前密码" class="field-input" style="flex:1; min-width:130px;">
+          <input type="password" id="new-password-input" autocomplete="new-password" placeholder="新密码（至少 8 位）" class="field-input" style="flex:1; min-width:130px;">
           <button class="btn" style="background:var(--primary-color); color:white; border-radius:16px; padding:6px 12px; font-size:12px;"
-                  onclick="savePassword(document.getElementById('new-password-input'))">
+                  onclick="savePassword()">
             修改
           </button>
         </div>
@@ -522,18 +547,44 @@
         </select>
       </div>
       <div class="field-row">
+        <label class="field-label">用户时区</label>
+        <input id="user-timezone-input" class="field-input"
+               list="user-timezone-options" value="Asia/Shanghai"
+               placeholder="例如 Asia/Shanghai"
+               onfocus="loadTimezoneOptions('user-timezone-options')"
+               onchange="saveUserTimezone(this)">
+        <datalist id="user-timezone-options"></datalist>
+      </div>
+      <div class="field-row">
         <label class="field-label">Gemini Key</label>
-        <input type="password" id="gemini-key-input" placeholder="填写 API Key" class="field-input" onblur="saveGeminiKey(this)">
+        <div style="display:flex; gap:8px; width:100%; flex-wrap:wrap; align-items:center;">
+          <input type="password" id="gemini-key-input" autocomplete="new-password" placeholder="填写新 Key（不会回显已保存内容）" class="field-input" style="flex:1; min-width:180px;">
+          <button class="btn" type="button" onclick="saveApiCredential('gemini', 'gemini-key-input')">保存/覆盖</button>
+          <button class="btn" type="button" onclick="deleteApiCredential('gemini', 'gemini-key-input')">删除</button>
+          <small id="gemini-key-status" style="width:100%; color:#888;">未配置</small>
+        </div>
       </div>
       <div class="field-row">
         <label class="field-label">OpenRouter</label>
-        <input type="password" id="openrouter-key-input" placeholder="填写 API Key" class="field-input" onblur="saveOpenrouterKey(this)">
+        <div style="display:flex; gap:8px; width:100%; flex-wrap:wrap; align-items:center;">
+          <input type="password" id="openrouter-key-input" autocomplete="new-password" placeholder="填写新 Key（不会回显已保存内容）" class="field-input" style="flex:1; min-width:180px;">
+          <button class="btn" type="button" onclick="saveApiCredential('openrouter', 'openrouter-key-input')">保存/覆盖</button>
+          <button class="btn" type="button" onclick="deleteApiCredential('openrouter', 'openrouter-key-input')">删除</button>
+          <small id="openrouter-key-status" style="width:100%; color:#888;">未配置</small>
+        </div>
       </div>
       <div class="field-row">
-        <label class="field-label"></label>
-        <button class="btn" style="background:#f5f5f5; color:#555; border-radius:16px; padding:6px 14px;" onclick="unlockKeys()">
-          🔐 输入登录密码后显示 Key
-        </button>
+        <label class="field-label">ElevenLabs</label>
+        <div style="display:flex; gap:8px; width:100%; flex-wrap:wrap; align-items:center;">
+          <input type="password" id="elevenlabs-key-input" autocomplete="new-password" placeholder="填写个人 ElevenLabs API Key（不会回显）" class="field-input" style="flex:1; min-width:180px;">
+          <button class="btn" type="button" onclick="saveApiCredential('elevenlabs', 'elevenlabs-key-input')">保存/覆盖</button>
+          <button class="btn" type="button" onclick="deleteApiCredential('elevenlabs', 'elevenlabs-key-input')">删除</button>
+          <small id="elevenlabs-key-status" style="width:100%; color:#888;">未配置</small>
+          <small style="width:100%; color:#999; line-height:1.6;">
+            用于你自己的音色克隆和语音生成；Key 仅在服务器加密保存，不会回显。用户语音转文字由平台 Key 提供。
+            <a href="https://try.elevenlabs.io/8f8ks0unlqsw" target="_blank" rel="noopener noreferrer sponsored" style="color:var(--primary-color);">注册或打开 ElevenLabs</a>
+          </small>
+        </div>
       </div>
     </div>
   </div>
@@ -612,6 +663,10 @@
             <div id="view-chat-model" class="api-badge">-</div>
           </div>
           <div class="api-status-item">
+            <div class="api-label">语音通话 (Call)</div>
+            <div id="view-call-model" class="api-badge">-</div>
+          </div>
+          <div class="api-status-item">
             <div class="api-label">翻译 (Translate)</div>
             <div id="view-translation-model" class="api-badge">-</div>
           </div>
@@ -647,12 +702,12 @@
         <div style="margin-bottom: 20px;">
           <div class="input-label" style="font-weight:600; color:var(--text-main);">1. 选择 API 线路 (Route)</div>
           <div style="display:flex; gap:12px; margin-top:8px;">
-            <label class="radio-card" onclick="selectRoute('gemini')">
-              <input type="radio" name="route" value="gemini" id="radio-gemini">
+            <label class="radio-card">
+              <input type="radio" name="route" value="gemini" id="radio-gemini" onchange="selectRoute('gemini')">
               <span>🚀 Gemini 直连</span>
             </label>
-            <label class="radio-card" onclick="selectRoute('relay')">
-              <input type="radio" name="route" value="relay" id="radio-relay">
+            <label class="radio-card">
+              <input type="radio" name="route" value="relay" id="radio-relay" onchange="selectRoute('relay')">
               <span>⚡ 国内中转</span>
             </label>
           </div>
@@ -662,16 +717,16 @@
         <div id="relay-provider-settings" style="margin-bottom: 20px; display:none;">
           <div class="input-label" style="font-weight:600; color:var(--text-main);">2. 中转商选择 (Relay Provider)</div>
           <div style="display:flex; gap:12px; margin-top:8px; flex-wrap: wrap;">
-            <label class="radio-card" onclick="selectRelayProvider('new')">
-              <input type="radio" name="relay_provider" value="new" id="relay_new">
+            <label class="radio-card">
+              <input type="radio" name="relay_provider" value="new" id="relay_new" onchange="selectRelayProvider('new')">
               <span>🆕 新中转商 (api2d)</span>
             </label>
-            <label class="radio-card" onclick="selectRelayProvider('old')">
-              <input type="radio" name="relay_provider" value="old" id="relay_old">
+            <label class="radio-card">
+              <input type="radio" name="relay_provider" value="old" id="relay_old" onchange="selectRelayProvider('old')">
               <span>📡 旧中转商 (vg)</span>
             </label>
-            <label class="radio-card" onclick="selectRelayProvider('custom')">
-              <input type="radio" name="relay_provider" value="custom" id="relay_custom">
+            <label class="radio-card">
+              <input type="radio" name="relay_provider" value="custom" id="relay_custom" onchange="selectRelayProvider('custom')">
               <span>🔧 自定义网址</span>
             </label>
           </div>
@@ -690,6 +745,7 @@
           <div class="input-label" style="font-weight:600; color:var(--text-main);">3. 为功能指派模型 (Select Models)</div>
           <div style="display:grid; grid-template-columns: 1fr; gap:12px; margin-top:8px;">
             <div><div class="input-label">聊天对话</div><select id="model-chat" class="model-select"></select></div>
+            <div><div class="input-label">语音通话</div><select id="model-call" class="model-select"></select></div>
             <div><div class="input-label">翻译功能</div><select id="model-translation" class="model-select"></select></div>
             <div><div class="input-label">朋友圈生成</div><select id="model-moments" class="model-select"></select></div>
             <div><div class="input-label">识图理解</div><select id="model-vision" class="model-select"></select></div>
@@ -802,6 +858,47 @@
   </div>
 </div>
 
+<!-- 模块: 协议与隐私 -->
+<div class="section-container collapsed" id="legal-section">
+  <div class="section-header" onclick="toggleSectionByHeader(this)">
+    <div class="section-header-main">
+      <div class="section-title">📄 协议与隐私</div>
+    </div>
+    <span class="section-arrow">▾</span>
+  </div>
+  <div class="section-body">
+    <div class="config-card">
+      <div style="display:grid; gap:10px;">
+        <a href="{{ legal_documents.terms.path }}" target="_blank" rel="noopener noreferrer"
+           style="display:flex; justify-content:space-between; gap:12px; padding:12px; border:1px solid var(--border-color); border-radius:12px; color:var(--text-main); text-decoration:none; background:var(--card-bg);">
+          <span>
+            <strong style="display:block; font-size:14px;">用户协议</strong>
+            <small style="color:var(--text-muted);">版本 {{ legal_documents.terms.version }} · {{ legal_documents.terms.effective_date }}</small>
+          </span>
+          <span style="color:var(--primary-color); align-self:center;">查看全文 ›</span>
+        </a>
+        <a href="{{ legal_documents.privacy.path }}" target="_blank" rel="noopener noreferrer"
+           style="display:flex; justify-content:space-between; gap:12px; padding:12px; border:1px solid var(--border-color); border-radius:12px; color:var(--text-main); text-decoration:none; background:var(--card-bg);">
+          <span>
+            <strong style="display:block; font-size:14px;">隐私政策</strong>
+            <small style="color:var(--text-muted);">版本 {{ legal_documents.privacy.version }} · {{ legal_documents.privacy.effective_date }}</small>
+          </span>
+          <span style="color:var(--primary-color); align-self:center;">查看全文 ›</span>
+        </a>
+      </div>
+
+      <div id="legal-consent-status" style="margin-top:14px; padding:12px; border-radius:12px; background:var(--bg-color); color:var(--text-muted); font-size:12px; line-height:1.7;">
+        正在读取你的协议确认记录…
+      </div>
+      <button id="legal-consent-button" class="btn btn-save" type="button"
+              style="display:none; width:100%; margin-top:10px;" onclick="confirmCurrentLegalDocuments()">
+        确认同意当前版本
+      </button>
+      <div id="legal-consent-error" style="display:none; margin-top:8px; color:#c62828; font-size:12px;"></div>
+    </div>
+  </div>
+</div>
+
 <!-- 模块: 问题反馈 (Feedback) -->
 <div class="section-container collapsed">
   <div class="section-header" onclick="toggleSectionByHeader(this)">
@@ -883,6 +980,9 @@
   <button class="btn-switch" onclick="openAccountSwitchModal()">
     🔄 切换账号
   </button>
+  <button class="btn-delete-account" onclick="openDeleteAccountModal()">
+    注销账户
+  </button>
   <a href="/logout" class="btn-logout">
     <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
     退出登录
@@ -910,7 +1010,112 @@
 
 <!-- 打赏弹窗已移至 tabbar.html -->
 
+  <script>
+    let currentLegalVersions = {
+      terms: {{ legal_documents.terms.version | tojson }},
+      privacy: {{ legal_documents.privacy.version | tojson }}
+    };
+
+    function formatLegalConsentTime(value) {
+      if (!value) return '尚未确认';
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) return value;
+      return parsed.toLocaleString('zh-CN', { hour12: false });
+    }
+
+    function renderLegalConsentStatus(payload) {
+      const statusEl = document.getElementById('legal-consent-status');
+      const button = document.getElementById('legal-consent-button');
+      const documents = payload && payload.documents ? payload.documents : {};
+      const terms = documents.terms || {};
+      const privacy = documents.privacy || {};
+
+      statusEl.innerHTML = [
+        '<strong style="color:var(--text-main);">你的确认记录</strong>',
+        '用户协议：' + (terms.is_current ? '已确认当前版本' : '尚未确认当前版本') + '（' + formatLegalConsentTime(terms.accepted_at) + '）',
+        '隐私政策：' + (privacy.is_current ? '已确认当前版本' : '尚未确认当前版本') + '（' + formatLegalConsentTime(privacy.accepted_at) + '）'
+      ].join('<br>');
+      button.style.display = payload.current ? 'none' : 'block';
+    }
+
+    async function loadLegalConsentStatus() {
+      const statusEl = document.getElementById('legal-consent-status');
+      const errorEl = document.getElementById('legal-consent-error');
+      if (!statusEl) return;
+      try {
+        const response = await fetch('/api/legal/status', { credentials: 'same-origin' });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.message || '读取失败');
+        renderLegalConsentStatus(payload);
+      } catch (error) {
+        statusEl.textContent = '暂时无法读取协议确认记录。';
+        errorEl.textContent = error.message || '读取失败';
+        errorEl.style.display = 'block';
+      }
+    }
+
+    async function confirmCurrentLegalDocuments() {
+      const button = document.getElementById('legal-consent-button');
+      const errorEl = document.getElementById('legal-consent-error');
+      button.disabled = true;
+      button.textContent = '正在确认…';
+      errorEl.style.display = 'none';
+      try {
+        const response = await fetch('/api/legal/consent', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            legal_accepted: true,
+            terms_version: currentLegalVersions.terms,
+            privacy_version: currentLegalVersions.privacy
+          })
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.message || '确认失败');
+        renderLegalConsentStatus(payload);
+      } catch (error) {
+        errorEl.textContent = error.message || '确认失败，请稍后重试';
+        errorEl.style.display = 'block';
+      } finally {
+        button.disabled = false;
+        button.textContent = '确认同意当前版本';
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', loadLegalConsentStatus);
+  </script>
+
   <!-- AI巡航悬浮球 -->
+  <div id="delete-account-modal" class="modal-overlay">
+  <div class="modal-card">
+    <div id="delete-account-warning-step">
+      <h3 style="margin:0 0 8px 0; font-size:18px; color:#c62828;">注销账户</h3>
+      <div class="delete-warning-box">
+        注销后会删除你的账号、个人配置、角色、聊天数据、论坛内容、点赞收藏和推送订阅，且不做备份。广场投稿角色不会自动删除，只会匿名；如果你想删除投稿，请先去广场手动删除。
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button onclick="closeDeleteAccountModal()" class="btn btn-cancel" style="flex:1;">取消</button>
+        <button onclick="showDeleteAccountConfirmStep()" class="btn-danger" style="flex:1;">继续注销</button>
+      </div>
+    </div>
+
+    <div id="delete-account-confirm-step" style="display:none;">
+      <h3 style="margin:0 0 8px 0; font-size:18px; color:#c62828;">确认注销</h3>
+      <p style="margin:0 0 12px 0; font-size:13px; line-height:1.7; color:var(--text-muted);">
+        请输入当前密码，并手动输入“注销账户”。确认后账号将立即注销。
+      </p>
+      <input id="delete-account-password" class="delete-input" type="password" autocomplete="current-password" placeholder="请输入当前密码">
+      <input id="delete-account-confirm" class="delete-input" type="text" autocomplete="off" placeholder="请输入：注销账户">
+      <div id="delete-account-error" class="delete-error"></div>
+      <div style="display:flex; gap:10px;">
+        <button onclick="showDeleteAccountWarningStep()" class="btn btn-cancel" style="flex:1;">返回</button>
+        <button id="delete-account-submit" onclick="submitDeleteAccount()" class="btn-danger" style="flex:1;">确认注销</button>
+      </div>
+    </div>
+  </div>
+</div>
+
   <script src="/static/ai-cruise.js"></script>
 </body>
 
@@ -939,7 +1144,7 @@
   // 加载并初始化主题
   async function initTheme() {
     try {
-      const res = await fetch('/api/theme/settings');
+      const res = await fetchWithAuthGuard('/api/theme/settings');
       currentTheme = await res.json();
       applyTheme();
       renderThemeUI();
@@ -990,7 +1195,7 @@
   // 加载预设主题列表
   async function loadThemePresets() {
     try {
-      const res = await fetch('/api/theme/presets');
+      const res = await fetchWithAuthGuard('/api/theme/presets');
       const presets = await res.json();
       
       const colorsContainer = document.getElementById('theme-colors');
@@ -1054,7 +1259,7 @@
     previewEl.style.opacity = '0.5';
 
     try {
-      const res = await fetch('/api/theme/upload_bg', {
+      const res = await fetchWithAuthGuard('/api/theme/upload_bg', {
         method: 'POST',
         body: formData
       });
@@ -1064,7 +1269,7 @@
         currentTheme.default_chat_bg = result.filename;
         renderThemeUI();
         try {
-          await fetch('/api/theme/settings', {
+          await fetchWithAuthGuard('/api/theme/settings', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(currentTheme)
@@ -1099,7 +1304,7 @@
   // 保存主题设置
   async function saveThemeSettings() {
     try {
-      const res = await fetch('/api/theme/settings', {
+      const res = await fetchWithAuthGuard('/api/theme/settings', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(currentTheme)
@@ -1124,7 +1329,9 @@
   async function loadConfigs() {
     try {
       // --- A. 加载全局人设 (原有的逻辑) ---
-      const resConfig = await fetch('/api/global_config');
+      const resConfig = await fetchWithAuthGuard('/api/global_config', { cache: 'no-store' });
+      if (handleApiUnauthorized(resConfig)) return false;
+      if (!resConfig.ok) throw new Error(`全局人设请求失败：HTTP ${resConfig.status}`);
       const dataConfig = await resConfig.json();
 
       // 更新缓存
@@ -1134,7 +1341,9 @@
       renderUI('user');
 
       // --- B. 【新增】加载当前用户名 ---
-      const resUser = await fetch('/api/user/profile_settings');
+      const resUser = await fetchWithAuthGuard('/api/user/profile_settings', { cache: 'no-store' });
+      if (handleApiUnauthorized(resUser)) return false;
+      if (!resUser.ok) throw new Error(`个人配置请求失败：HTTP ${resUser.status}`);
       const dataUser = await resUser.json();
 
       // 找到那个顶部输入框并填值
@@ -1146,6 +1355,8 @@
       // 【新增】设置语言下拉框的值
       const langSelect = document.getElementById('ai-lang-select');
       if (langSelect) langSelect.value = dataUser.ai_language || 'ja';
+      const timezoneInput = document.getElementById('user-timezone-input');
+      if (timezoneInput) timezoneInput.value = dataUser.timezone || 'Asia/Shanghai';
 
       // 用户年龄
       const ageInput = document.getElementById('user-age-input');
@@ -1155,10 +1366,14 @@
       if (tickleInput) tickleInput.value = dataUser.tickle_suffix || '';
       const emailInput = document.getElementById('user-email-input');
       if (emailInput) emailInput.value = dataUser.email || '';
-      // 默认不回显具体 Key，除非用户通过密码解锁
+      updateCredentialStatus('gemini', dataUser.credentials?.gemini);
+      updateCredentialStatus('openrouter', dataUser.credentials?.openrouter);
+      updateCredentialStatus('elevenlabs', dataUser.credentials?.elevenlabs);
+      return true;
 
     } catch(e) {
       console.error("配置加载失败", e);
+      return false;
       // alert('配置加载失败'); // 建议注释掉，防止一个接口失败导致一直弹窗
     }
   }
@@ -1166,7 +1381,7 @@
   async function saveUserTickle(input) {
     const val = input.value.trim(); // 留空就存空字符串
     try {
-      const res = await fetch('/api/user/profile_settings', {
+      const res = await fetchWithAuthGuard('/api/user/profile_settings', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ tickle_suffix: val })
@@ -1179,11 +1394,44 @@
     } catch(e) { /* silent */ }
   }
 
+  async function loadTimezoneOptions(listId) {
+    const list = document.getElementById(listId);
+    if (!list || list.dataset.loaded === '1') return;
+    try {
+      const res = await fetchWithAuthGuard('/api/timezones?limit=500');
+      const data = await res.json();
+      list.innerHTML = (data.timezones || [])
+        .map(item => `<option value="${item.name}">${item.offset} · ${item.local_time}</option>`)
+        .join('');
+      list.dataset.loaded = '1';
+    } catch (e) {
+      console.error('加载时区失败', e);
+    }
+  }
+
+  async function saveUserTimezone(input) {
+    const timezone = input.value.trim();
+    try {
+      const res = await fetchWithAuthGuard('/api/user/profile_settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ timezone })
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || '时区保存失败');
+      input.style.border = '1px solid #4cd964';
+      setTimeout(() => { input.style.border = '1px solid #eee'; }, 1000);
+    } catch (e) {
+      alert(e.message);
+      input.value = 'Asia/Shanghai';
+    }
+  }
+
   // 保存用户邮箱
   async function saveUserEmail(input) {
     const val = input.value.trim();
     try {
-      const res = await fetch('/api/user/profile_settings', {
+      const res = await fetchWithAuthGuard('/api/user/profile_settings', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ email: val })
@@ -1202,7 +1450,7 @@
     const ageToSend = (val === '') ? null : (isNaN(parseInt(val, 10)) ? null : parseInt(val, 10));
 
     try {
-      const res = await fetch('/api/user/profile_settings', {
+      const res = await fetchWithAuthGuard('/api/user/profile_settings', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ age: ageToSend })
@@ -1215,80 +1463,62 @@
     } catch(e) { /* silent */ }
   }
 
-  // 保存 Gemini API Key
-  async function saveGeminiKey(input) {
-    const val = input.value.trim();
-    try {
-      const res = await fetch('/api/user/profile_settings', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ gemini_api_key: val })
-      });
-      const result = await res.json();
-      if (result.status === 'success') {
-        input.style.border = '1px solid #4cd964';
-        setTimeout(() => { input.style.border = '1px solid #eee'; }, 1000);
-      }
-    } catch(e) { /* silent */ }
-  }
-
-  // 保存 OpenRouter API Key
-  async function saveOpenrouterKey(input) {
-    const val = input.value.trim();
-    try {
-      const res = await fetch('/api/user/profile_settings', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ openrouter_api_key: val })
-      });
-      const result = await res.json();
-      if (result.status === 'success') {
-        input.style.border = '1px solid #4cd964';
-        setTimeout(() => { input.style.border = '1px solid #eee'; }, 1000);
-      }
-    } catch(e) { /* silent */ }
-  }
-
-  // 解锁并显示 API Keys（需输入登录密码）
-  let keysUnlocked = false;
-  async function unlockKeys() {
-    if (keysUnlocked) {
-      // 已解锁，直接切换为明文显示
-      const g = document.getElementById('gemini-key-input');
-      const o = document.getElementById('openrouter-key-input');
-      if (g) g.type = 'text';
-      if (o) o.type = 'text';
+  function updateCredentialStatus(provider, status) {
+    const statusEl = document.getElementById(`${provider}-key-status`);
+    if (!statusEl) return;
+    if (!status?.configured) {
+      statusEl.textContent = '未配置';
       return;
     }
+    const suffix = status.last_four ? `，末四位 ${status.last_four}` : '';
+    const migrationNote = status.storage === 'legacy' ? '（等待管理员完成安全迁移）' : '';
+    statusEl.textContent = `已配置${suffix}${migrationNote}`;
+  }
 
-    const pwd = prompt("请输入当前账号的登录密码，用于解锁并显示已保存的 API Key：");
-    if (!pwd) return;
-
+  async function saveApiCredential(provider, inputId) {
+    const input = document.getElementById(inputId);
+    const apiKey = input?.value.trim() || '';
+    if (!apiKey) {
+      alert('请先填写新的 API Key');
+      return;
+    }
     try {
-      const res = await fetch('/api/user/unlock_keys', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ password: pwd })
+      const res = await fetchWithAuthGuard(`/api/user/credentials/${provider}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({ api_key: apiKey })
       });
-      const data = await res.json();
-      if (!res.ok || data.status === 'error') {
-        alert(data.message || '密码校验失败，请重试');
-        return;
-      }
-
-      const geminiKeyInput = document.getElementById('gemini-key-input');
-      const openrouterKeyInput = document.getElementById('openrouter-key-input');
-      if (geminiKeyInput) {
-        geminiKeyInput.type = 'text';
-        geminiKeyInput.value = data.gemini_api_key || '';
-      }
-      if (openrouterKeyInput) {
-        openrouterKeyInput.type = 'text';
-        openrouterKeyInput.value = data.openrouter_api_key || '';
-      }
-      keysUnlocked = true;
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.message || '保存失败');
+      input.value = '';
+      updateCredentialStatus(provider, result.credential);
+      input.style.border = '1px solid #4cd964';
+      setTimeout(() => { input.style.border = '1px solid #eee'; }, 1000);
     } catch (e) {
-      alert('网络错误，无法解锁 Key');
+      alert(e.message || '网络错误，无法保存 API Key');
+    }
+  }
+
+  async function deleteApiCredential(provider, inputId) {
+    const deleteMessage = provider === 'elevenlabs'
+      ? '确定删除 ElevenLabs API Key 吗？删除后音色克隆、试听和语音生成将无法使用。'
+      : '确定删除这个 API Key 吗？删除后将改用服务器默认配置（如果有）。';
+    if (!confirm(deleteMessage)) return;
+    try {
+      const res = await fetchWithAuthGuard(`/api/user/credentials/${provider}`, {
+        method: 'DELETE',
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.message || '删除失败');
+      const input = document.getElementById(inputId);
+      if (input) input.value = '';
+      updateCredentialStatus(provider, result.credential);
+    } catch (e) {
+      alert(e.message || '网络错误，无法删除 API Key');
     }
   }
 
@@ -1298,7 +1528,7 @@
     if (!newName) return; // 如果为空就不保存
 
     try {
-      const res = await fetch('/api/user/profile_settings', {
+      const res = await fetchWithAuthGuard('/api/user/profile_settings', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ name: newName })
@@ -1340,7 +1570,7 @@
     imgEl.style.opacity = '0.5';
 
     try {
-      const res = await fetch('/api/upload_user_avatar', {
+      const res = await fetchWithAuthGuard('/api/upload_user_avatar', {
         method: 'POST',
         body: formData
       });
@@ -1403,7 +1633,7 @@
     btn.disabled = true;
 
     try {
-      const res = await fetch('/api/save_global_config', {
+      const res = await fetchWithAuthGuard('/api/save_global_config', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ key: apiKey, content: content })
@@ -1432,7 +1662,7 @@
   async function saveAiLanguage(select) {
     const lang = select.value;
     try {
-      const res = await fetch('/api/user/profile_settings', {
+      const res = await fetchWithAuthGuard('/api/user/profile_settings', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ ai_language: lang })
@@ -1452,8 +1682,11 @@
   // 【新增】加载日志函数
   async function loadUsageLogs() {
     try {
-      const res = await fetch('/api/usage_logs');
+      const res = await fetchWithAuthGuard('/api/usage_logs', { cache: 'no-store' });
+      if (handleApiUnauthorized(res)) return;
+      if (!res.ok) throw new Error(`用量记录请求失败：HTTP ${res.status}`);
       const logs = await res.json();
+      if (!Array.isArray(logs)) throw new Error('用量记录数据格式错误');
 
       const tbody = document.getElementById('usage-log-body');
       if (logs.length === 0) {
@@ -1486,12 +1719,20 @@
 
   // --- 全局配置缓存 ---
   let apiConfig = {};
+  let apiEditConfig = null;
+  let apiEditRoute = null;
+  let apiSaving = false;
 
   // 1. 加载配置并初始化
   async function loadApiConfig() {
     try {
-      const res = await fetch('/api/system_config');
+      const res = await fetchWithAuthGuard('/api/system_config', { cache: 'no-store' });
+      if (handleApiUnauthorized(res)) return false;
+      if (!res.ok) throw new Error(`线路配置请求失败：HTTP ${res.status}`);
       apiConfig = await res.json();
+      if (!apiConfig || typeof apiConfig !== 'object' || !apiConfig.routes) {
+        throw new Error('线路配置数据格式错误');
+      }
 
       // 容错初始化
       if (!apiConfig.model_options) {
@@ -1502,11 +1743,16 @@
       renderApiView();
 
       // 预渲染编辑模式 (但不显示)
+      apiEditConfig = JSON.parse(JSON.stringify(apiConfig));
       const active = apiConfig.active_route;
       document.getElementById(`radio-${active}`).checked = true;
       refreshEditUI(active);
+      return true;
 
-    } catch(e) { console.error("API配置加载失败", e); }
+    } catch(e) {
+      console.error("API配置加载失败", e);
+      return false;
+    }
   }
 
   // 2. 渲染查看模式 (View Mode)
@@ -1517,6 +1763,7 @@
 
     document.getElementById('view-route-name').textContent = routeName;
     document.getElementById('view-chat-model').textContent = models.chat;
+    document.getElementById('view-call-model').textContent = models.call != null ? models.call : 'gemini-3.6-flash';
     document.getElementById('view-translation-model').textContent = models.translation != null ? models.translation : models.chat;
     document.getElementById('view-moments-model').textContent = models.moments != null ? models.moments : models.chat;
     document.getElementById('view-vision-model').textContent = models.vision != null ? models.vision : (route === 'gemini' ? 'gemini-2.5-pro' : 'gpt-4o');
@@ -1535,26 +1782,46 @@
       viewMode.style.display = 'none';
       editMode.style.display = 'block';
       // 进入编辑时，重置为当前生效的配置
+      apiEditConfig = JSON.parse(JSON.stringify(apiConfig));
       const active = apiConfig.active_route;
-      document.getElementById(`radio-${active}`).click(); // 触发点击来刷新UI
+      document.getElementById(`radio-${active}`).checked = true;
+      refreshEditUI(active);
     } else {
       viewMode.style.display = 'block';
       editMode.style.display = 'none';
     }
   }
 
+  // 在重建下拉框或切换线路前，将当前表单收集到同一份编辑草稿。
+  function captureApiEdits() {
+    if (!apiEditConfig || !apiEditRoute) return;
+    const route = apiEditConfig.routes[apiEditRoute];
+    const fields = {chat: 'chat', call: 'call', translation: 'translation',
+      moments: 'moments', vision: 'vision', summary: 'summary',
+      gen_persona: 'gen', image: 'image', forum: 'forum'};
+    Object.entries(fields).forEach(([key, id]) => {
+      route.models[key] = document.getElementById(`model-${id}`).value;
+    });
+    if (apiEditRoute === 'relay') {
+      route.relay_provider = document.querySelector('input[name="relay_provider"]:checked').value;
+      route.relay_custom_url = document.getElementById('relay_custom_url').value.trim();
+    }
+  }
+
   // 4. 编辑模式：切换线路触发
   function selectRoute(route) {
+    captureApiEdits();
     refreshEditUI(route);
   }
 
   // 【新增】中转商选择处理
   function selectRelayProvider(provider) {
+    captureApiEdits();
     // 更新内存中的配置
-    if (!apiConfig.routes.relay) {
-      apiConfig.routes.relay = {};
+    if (!apiEditConfig.routes.relay) {
+      apiEditConfig.routes.relay = {};
     }
-    apiConfig.routes.relay.relay_provider = provider;
+    apiEditConfig.routes.relay.relay_provider = provider;
     // 选中对应的 radio
     document.getElementById(`relay_${provider}`).checked = true;
     
@@ -1564,16 +1831,16 @@
     if (provider === 'custom') {
       customUrlContainer.style.display = 'block';
       // 加载保存的自定义网址
-      customUrlInput.value = apiConfig.routes.relay?.relay_custom_url || '';
+      customUrlInput.value = apiEditConfig.routes.relay?.relay_custom_url || '';
       customUrlInput.focus();
     } else {
       customUrlContainer.style.display = 'none';
-      customUrlInput.value = '';
     }
   }
 
   // 5. 刷新编辑界面 UI (下拉框 + 标签列表)
   function refreshEditUI(route) {
+    apiEditRoute = route;
     // 更新标题
     document.getElementById('manage-route-name').textContent = (route === 'gemini') ? '[Gemini]' : '[中转]';
 
@@ -1582,7 +1849,7 @@
     if (route === 'relay') {
       relayProviderSettings.style.display = 'block';
       // 加载保存的中转商选择
-      const savedProvider = apiConfig.routes.relay?.relay_provider || 'old';
+      const savedProvider = apiEditConfig.routes.relay?.relay_provider || 'old';
       document.getElementById(`relay_${savedProvider}`).checked = true;
       
       // 如果之前选择的是自定义网址，显示输入框并加载值
@@ -1590,23 +1857,24 @@
       const customUrlInput = document.getElementById('relay_custom_url');
       if (savedProvider === 'custom') {
         customUrlContainer.style.display = 'block';
-        customUrlInput.value = apiConfig.routes.relay?.relay_custom_url || '';
+        customUrlInput.value = apiEditConfig.routes.relay?.relay_custom_url || '';
       } else {
         customUrlContainer.style.display = 'none';
-        customUrlInput.value = '';
+        customUrlInput.value = apiEditConfig.routes.relay?.relay_custom_url || '';
       }
     } else {
       relayProviderSettings.style.display = 'none';
     }
 
     // A. 渲染下拉框选项
-    const options = apiConfig.model_options[route] || [];
+    const options = apiEditConfig.model_options[route] || [];
     // 如果列表为空，给个提示
     const optionsHtml = options.length > 0
             ? options.map(m => `<option value="${m}">${m}</option>`).join('')
             : '<option value="">(暂无模型，请在下方添加)</option>';
 
     document.getElementById('model-chat').innerHTML = optionsHtml;
+    document.getElementById('model-call').innerHTML = optionsHtml;
     document.getElementById('model-translation').innerHTML = optionsHtml;
     document.getElementById('model-moments').innerHTML = optionsHtml;
     document.getElementById('model-vision').innerHTML = optionsHtml;
@@ -1616,10 +1884,11 @@
     document.getElementById('model-forum').innerHTML = optionsHtml;
 
     // B. 选中当前(或默认)值
-    // 注意：这里我们优先显示配置文件里存的值。如果那个值不在列表里了(被删了)，就选列表第一个。
-    const savedModels = apiConfig.routes[route].models;
+    // 使用编辑草稿中的选择；不在选项列表里的已选模型由 setSelectValue 补齐。
+    const savedModels = apiEditConfig.routes[route].models;
 
     setSelectValue('model-chat', savedModels.chat);
+    setSelectValue('model-call', savedModels.call != null ? savedModels.call : 'gemini-3.6-flash');
     setSelectValue('model-translation', savedModels.translation != null ? savedModels.translation : savedModels.chat);
     setSelectValue('model-moments', savedModels.moments != null ? savedModels.moments : savedModels.chat);
     setSelectValue('model-vision', savedModels.vision != null ? savedModels.vision : (route === 'gemini' ? 'gemini-2.5-pro' : 'gpt-4o'));
@@ -1668,18 +1937,16 @@
     const newVal = input.value.trim();
     if (!newVal) return;
 
-    const currentRoute = document.querySelector('input[name="route"]:checked').value;
+    captureApiEdits();
+    const currentRoute = apiEditRoute;
 
-    if (!apiConfig.model_options[currentRoute]) apiConfig.model_options[currentRoute] = [];
+    if (!apiEditConfig.model_options[currentRoute]) apiEditConfig.model_options[currentRoute] = [];
 
-    if (!apiConfig.model_options[currentRoute].includes(newVal)) {
-      apiConfig.model_options[currentRoute].push(newVal);
+    if (!apiEditConfig.model_options[currentRoute].includes(newVal)) {
+      apiEditConfig.model_options[currentRoute].push(newVal);
 
       // 刷新 UI
       refreshEditUI(currentRoute);
-
-      // 自动选中新加的模型到第一个下拉框(方便用户)
-      // document.getElementById('model-chat').value = newVal;
 
       input.value = '';
     } else {
@@ -1689,9 +1956,10 @@
 
   // 7. 删除模型
   function deleteModel(val) {
-    const currentRoute = document.querySelector('input[name="route"]:checked').value;
+    captureApiEdits();
+    const currentRoute = apiEditRoute;
     if (confirm(`确定删除模型 "${val}" 吗？`)) {
-      const list = apiConfig.model_options[currentRoute];
+      const list = apiEditConfig.model_options[currentRoute];
       const index = list.indexOf(val);
       if (index > -1) {
         list.splice(index, 1);
@@ -1704,37 +1972,16 @@
   async function saveApiConfig() {
     const activeRoute = document.querySelector('input[name="route"]:checked').value;
 
-    // 更新内存中的配置对象
-    apiConfig.active_route = activeRoute;
-    apiConfig.routes[activeRoute].models.chat = document.getElementById('model-chat').value;
-    apiConfig.routes[activeRoute].models.translation = document.getElementById('model-translation').value;
-    apiConfig.routes[activeRoute].models.moments = document.getElementById('model-moments').value;
-    apiConfig.routes[activeRoute].models.vision = document.getElementById('model-vision').value;
-    apiConfig.routes[activeRoute].models.summary = document.getElementById('model-summary').value;
-    apiConfig.routes[activeRoute].models.gen_persona = document.getElementById('model-gen').value;
-    apiConfig.routes[activeRoute].models.image = document.getElementById('model-image').value;
-    apiConfig.routes[activeRoute].models.forum = document.getElementById('model-forum').value;
-
-    // 【新增】保存 relay 中转商选择
-    if (activeRoute === 'relay') {
-      const relayProvider = document.querySelector('input[name="relay_provider"]:checked').value;
-      if (!apiConfig.routes.relay) {
-        apiConfig.routes.relay = {};
-      }
-      apiConfig.routes.relay.relay_provider = relayProvider;
-      
-      // 如果是自定义网址，保存输入的网址
-      if (relayProvider === 'custom') {
-        const customUrl = document.getElementById('relay_custom_url').value.trim();
-        if (!customUrl) {
-          alert('请输入自定义API网址');
-          btn.textContent = originalText;
-          btn.disabled = false;
-          return;
-        }
-        apiConfig.routes.relay.relay_custom_url = customUrl;
-      }
+    if (apiSaving) return;
+    captureApiEdits();
+    apiEditConfig.active_route = activeRoute;
+    if (activeRoute === 'relay' && apiEditConfig.routes.relay.relay_provider === 'custom'
+        && !apiEditConfig.routes.relay.relay_custom_url) {
+      alert('请输入自定义API网址');
+      return;
     }
+    const submittedConfig = JSON.parse(JSON.stringify(apiEditConfig));
+    apiSaving = true;
 
     const btn = document.querySelector('#module-api .btn-save');
     const originalText = btn.textContent;
@@ -1742,12 +1989,14 @@
     btn.disabled = true;
 
     try {
-      const res = await fetch('/api/system_config', {
+      const res = await fetchWithAuthGuard('/api/system_config', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(apiConfig)
+        body: JSON.stringify(submittedConfig)
       });
+      if (handleApiUnauthorized(res)) return;
       if(res.ok) {
+        apiConfig = submittedConfig;
         // 重新渲染查看模式
         renderApiView();
         toggleApiEdit(false);
@@ -1758,6 +2007,7 @@
     } catch(e) {
       alert('网络或异常错误: ' + e.message); console.error(e);
     } finally {
+      apiSaving = false;
       btn.textContent = originalText;
       btn.disabled = false;
     }
@@ -1768,31 +2018,38 @@
   // loadConfigs(); // 别忘了保留原来加载 User/Format 的函数调用
 
   // 【新增】保存密码
-  async function savePassword(input) {
-    const newPass = input.value.trim();
-    if (!newPass) return; // 为空不改
+  async function savePassword() {
+    const currentInput = document.getElementById('current-password-input');
+    const newInput = document.getElementById('new-password-input');
+    const currentPass = currentInput?.value || '';
+    const newPass = newInput?.value || '';
+    if (!currentPass || !newPass) {
+      alert('请输入当前密码和新密码');
+      return;
+    }
 
     if (!confirm("确定要修改登录密码吗？")) {
-      input.value = "";
       return;
     }
 
     try {
-      const res = await fetch('/api/user/profile_settings', {
+      const res = await fetchWithAuthGuard('/api/user/change_password', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ password: newPass })
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({ current_password: currentPass, new_password: newPass })
       });
       const result = await res.json();
 
-      if (result.status === 'success') {
-        alert("密码修改成功！下次登录请使用新密码。");
-        input.value = ""; // 清空防止误触
-      } else {
-        alert("修改失败: " + result.error);
-      }
+      if (!res.ok) throw new Error(result.message || '密码修改失败');
+      currentInput.value = '';
+      newInput.value = '';
+      alert(result.message || '密码修改成功，请重新登录。');
+      window.location.href = '/login';
     } catch(e) {
-      alert("网络错误");
+      alert(e.message || "网络错误");
     }
   }
 
@@ -1809,7 +2066,7 @@
     listEl.innerHTML = '<div style="padding:8px; color:#999;">加载中...</div>';
 
     try {
-      const res = await fetch('/api/accounts/recent');
+      const res = await fetchWithAuthGuard('/api/accounts/recent');
       if (!res.ok) {
         listEl.innerHTML = '<div style="padding:8px; color:#f44336;">无法获取账号列表，请稍后重试</div>';
         return;
@@ -1854,7 +2111,7 @@
   async function switchAccount(userId) {
     if (!confirm('确定切换到该账号吗？')) return;
     try {
-      const res = await fetch('/api/accounts/switch', {
+      const res = await fetchWithAuthGuard('/api/accounts/switch', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ user_id: userId })
@@ -1868,6 +2125,90 @@
       }
     } catch (e) {
       alert('网络错误，切换失败');
+    }
+  }
+
+  // --- 账号注销 ---
+  function showDeleteAccountWarningStep() {
+    const warningStep = document.getElementById('delete-account-warning-step');
+    const confirmStep = document.getElementById('delete-account-confirm-step');
+    const errorEl = document.getElementById('delete-account-error');
+    if (warningStep) warningStep.style.display = '';
+    if (confirmStep) confirmStep.style.display = 'none';
+    if (errorEl) errorEl.textContent = '';
+  }
+
+  function showDeleteAccountConfirmStep() {
+    const warningStep = document.getElementById('delete-account-warning-step');
+    const confirmStep = document.getElementById('delete-account-confirm-step');
+    const passwordInput = document.getElementById('delete-account-password');
+    const confirmInput = document.getElementById('delete-account-confirm');
+    const errorEl = document.getElementById('delete-account-error');
+    if (warningStep) warningStep.style.display = 'none';
+    if (confirmStep) confirmStep.style.display = '';
+    if (passwordInput) passwordInput.value = '';
+    if (confirmInput) confirmInput.value = '';
+    if (errorEl) errorEl.textContent = '';
+    setTimeout(() => passwordInput && passwordInput.focus(), 50);
+  }
+
+  function openDeleteAccountModal() {
+    const modal = document.getElementById('delete-account-modal');
+    if (modal === null) return;
+
+    showDeleteAccountWarningStep();
+    modal.style.display = 'flex';
+  }
+
+  function closeDeleteAccountModal() {
+    const modal = document.getElementById('delete-account-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  async function submitDeleteAccount() {
+    const passwordInput = document.getElementById('delete-account-password');
+    const confirmInput = document.getElementById('delete-account-confirm');
+    const submitBtn = document.getElementById('delete-account-submit');
+    const errorEl = document.getElementById('delete-account-error');
+    const password = passwordInput ? passwordInput.value : '';
+    const confirmText = confirmInput ? confirmInput.value.trim() : '';
+
+    if (errorEl) errorEl.textContent = '';
+    if (password === '') {
+      if (errorEl) errorEl.textContent = '请输入当前密码';
+      return;
+    }
+    const confirmedDeleteText = confirmText === '注销账户';
+    if (confirmedDeleteText === false) {
+      if (errorEl) errorEl.textContent = '请手动输入“注销账户”确认操作';
+      return;
+    }
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = '注销中...';
+    }
+
+    try {
+      const res = await fetchWithAuthGuard('/api/account/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ password, confirm_text: confirmText })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.status === 'success') {
+        alert('账号已注销');
+        window.location.href = '/login';
+        return;
+      }
+      if (errorEl) errorEl.textContent = data.message || '注销失败，请稍后重试';
+    } catch (e) {
+      if (errorEl) errorEl.textContent = '网络错误，请稍后重试';
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = '确认注销';
+      }
     }
   }
 
@@ -1977,7 +2318,7 @@
       }
 
       // 2. 获取 VAPID 公钥
-      const resKey = await fetch('/api/vapid_public_key');
+      const resKey = await fetchWithAuthGuard('/api/vapid_public_key');
       const dataKey = await resKey.json();
       const publicVapidKey = dataKey.publicKey;
       if (!publicVapidKey) {
@@ -1999,7 +2340,7 @@
       });
 
       // 5. 发送给后端保存
-      await fetch('/api/subscribe', {
+      await fetchWithAuthGuard('/api/subscribe', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(subscription)

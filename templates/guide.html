@@ -349,10 +349,13 @@
         <nav class="top-nav-panel" aria-label="快捷切换章节">
           <a href="#account">登录 / 注册</a>
           <a href="#profile-settings">个人信息</a>
+          <a href="#persona-lock">人设 AI 编辑保护</a>
           <a href="#notifications">接收通知</a>
           <a href="#models">线路与模型</a>
+          <a href="#voice">私有音色</a>
           <a href="#errors">错误码与熔断</a>
           <a href="#pwa-install">安装成应用</a>
+          <a href="#account-safety">账号与安全</a>
         </nav>
       </details>
       {% if session.get('user_id') or session.get('logged_in') %}
@@ -367,7 +370,7 @@
     <section class="hero">
       <div class="eyebrow">GETTING STARTED</div>
       <h1>从注册到开始使用</h1>
-      <p>按照下面的步骤完成账号、个人信息、消息通知、线路与模型配置。</p>
+      <p>按照下面的步骤完成账号、个人信息、消息通知、线路与模型以及私有音色配置。</p>
       <div class="guide-search" role="search">
         <div class="search-box">
           <span class="search-icon" aria-hidden="true">⌕</span>
@@ -379,19 +382,22 @@
       <nav class="quick-nav" aria-label="文档目录">
         <a href="#account">登录 / 注册</a>
         <a href="#profile-settings">配置个人信息</a>
+        <a href="#persona-lock">人设 AI 编辑保护</a>
         <a href="#notifications">接收通知</a>
         <a href="#models">线路与模型</a>
+        <a href="#voice">ElevenLabs 私有音色</a>
         <a href="#errors">错误码与熔断</a>
         <a href="#pwa-install">安装成应用</a>
+        <a href="#account-safety">账号与安全</a>
       </nav>
     </section>
 
     <section class="doc-section" id="account">
       <h2>1. 登录 / 注册</h2>
       <h3>注册账号</h3>
-      <p>打开<a href="/register">注册页面</a>，填写邮箱、用户名和密码后提交。</p>
+      <p>打开<a href="/register">注册页面</a>，填写邮箱、用户名和密码，并按页面提示确认自己已满 18 周岁后提交。</p>
       <div class="notice">
-        邮箱形式不受限制，格式不正确也可以注册。但如果之后忘记密码，将无法通过邮箱找回。遇到这种情况，请联系管理员迁移账号。
+        邮箱形式不受限制，格式不正确也可以注册。但如果之后忘记密码，将无法通过邮箱找回。遇到这种情况，请联系管理员迁移账号。另外，Kunigami 面向已满 18 周岁的用户；未满 18 周岁请不要注册或使用。
       </div>
       <h3>登录账号</h3>
       <p>打开<a href="/login">登录页面</a>，填写注册时使用的邮箱和密码即可登录。</p>
@@ -404,6 +410,22 @@
         <li><span class="path">个人主页 → 账号与通知设置</span>：设置年龄、拍一拍后缀和语言。</li>
         <li><span class="path">个人主页 → 全局用户设定 → 编辑 Edit</span>：填入你自己的人设，完成后保存设定。</li>
       </ol>
+
+      <div id="persona-lock" style="scroll-margin-top:90px; margin-top:24px;">
+        <h3>使用 LOCK 为核心设定添加 AI 编辑保护</h3>
+        <p>进入<span class="path">角色记忆 → 角色人设 → 编辑</span>，用独占一行的 <code>[[LOCK]]</code> 和 <code>[[/LOCK]]</code> 包住原作核心设定：</p>
+        <pre><code>[[LOCK]]
+# 原作核心设定
+- 官方身份、外貌、经历与固定性格
+[[/LOCK]]
+
+# 可以让模型继续调整的补充设定
+- 与用户相处时的习惯</code></pre>
+        <div class="notice">
+          LOCK 标签只约束模型以后编辑、重写人设时不得改动区块内容，不会限制用户本人。编辑框始终是普通文本：你可修改区块内任何文字、移动或删除标签、重新划分范围；保存后以你的新版本为准。标签保留时必须成对、独占一行，并且不能嵌套。
+        </div>
+        <p>AI 自动生成人设会为官方或原作明确资料添加 LOCK 标签，把推测、创作补充和互动偏好留在标签外。普通聊天时角色会读取锁定内容，但不会主动向你解释这些标签。</p>
+      </div>
     </section>
 
     <section class="doc-section" id="notifications">
@@ -874,8 +896,57 @@
     </section>
 
 
+    <section class="doc-section" id="voice">
+      <h2>5. 配置 ElevenLabs 私有音色</h2>
+      <p>角色 TTS、试听和音色克隆使用你自己的 ElevenLabs 账户；API Key、私有音色和套餐额度都属于你本人。用户语音转文字由 Sakura 的平台 STT Key 提供，不消耗你的个人额度。Voice ID 不会上传到角色广场。</p>
+
+      <h3>第一步：注册 ElevenLabs 并创建 API Key</h3>
+      <ol>
+        <li>通过 <a class="external-link" href="https://try.elevenlabs.io/8f8ks0unlqsw" target="_blank" rel="noopener noreferrer sponsored">ElevenLabs 邀请链接</a> 注册或登录。</li>
+        <li>进入账户设置中的 API Keys 页面，创建一个新的 Key。</li>
+        <li>确保该 Key 可以使用 Text to Speech 和 Voices/Voice Cloning；不需要为个人 Key 开启 Speech-to-Text。</li>
+        <li>创建后立即复制并妥善保存，切勿把完整 Key 发给其他人。</li>
+      </ol>
+
+      <h3>第二步：在 Sakura 加密保存 Key</h3>
+      <p>进入<span class="path">个人主页 → 账号与通知设置 → ElevenLabs</span>，粘贴 Key 并点击“保存/覆盖”。保存后页面只显示配置状态和末四位，不会回显完整 Key。</p>
+
+      <h3>第三步：给角色创建音色</h3>
+      <ol>
+        <li>打开联系人，进入该角色的<span class="path">记忆与角色设置 → 语音设置</span>。</li>
+        <li>填写音色名称，上传不超过 20 MB、声音清晰且只有一位说话人的音频。</li>
+        <li>确认你拥有该声音的使用权或已经获得声音本人明确授权。</li>
+        <li>点击“上传并创建音色”。成功后 Voice ID 会自动填入并保存到当前角色。</li>
+        <li>点击“试听音色”确认效果；之后角色发送的语音会消耗你自己的 ElevenLabs 套餐额度。</li>
+      </ol>
+      <div class="notice">
+        Sakura 只会把本次上传的音频转发给 ElevenLabs 创建音色，不会长期保存该文件。你也可以手动填写当前 ElevenLabs 账户有权访问的 Voice ID；其他账户的私有 Voice ID 不能仅凭 ID 使用。
+      </div>
+
+      <h3>常见语音错误</h3>
+      <div class="error-grid">
+        <div class="error-item">
+          <strong>API Key 无效或未配置</strong>
+          <p>回到个人主页重新保存个人 ElevenLabs Key。不要在 Key 前后留下空格。</p>
+        </div>
+        <div class="error-item">
+          <strong>权限不足 / IP 白名单拒绝</strong>
+          <p>检查个人 ElevenLabs Key 是否允许 TTS 和音色操作；若启用了 IP 白名单，请更新允许范围。</p>
+        </div>
+        <div class="error-item">
+          <strong>Voice ID 无法使用</strong>
+          <p>确认该 Voice ID 属于当前 Key 对应的账户，或是该账户能够访问的共享音色。</p>
+        </div>
+        <div class="error-item">
+          <strong>额度不足或音色数量已满</strong>
+          <p>登录个人 ElevenLabs 账户检查套餐额度和已保存音色数量，删除不需要的音色或按需调整套餐。</p>
+        </div>
+      </div>
+    </section>
+
+
     <section class="doc-section" id="errors">
-      <h2>5. 错误码、报错与熔断机制</h2>
+      <h2>6. 错误码、报错与熔断机制</h2>
       <p>遇到 API 报错时，先停止连续重试，记下错误码并确认自己正在使用 <strong>Gemini 直连</strong>还是<strong>国内中转</strong>。不同线路的同一个错误码可能代表不同问题。</p>
       <div class="notice">
         请勿把完整 API Key、登录密码或含有 Key 的截图发给他人。联系管理员时只需提供错误码、所用线路、发生时间和已遮盖敏感信息的截图。
@@ -1000,7 +1071,7 @@
 
 
     <section class="doc-section" id="pwa-install">
-      <h2>6. 把网站安装成 PWA 应用</h2>
+      <h2>7. 把网站安装成 PWA 应用</h2>
       <p>把“Sakura 樱语”添加到手机桌面后，可以像打开普通 App 一样点击图标进入，不必每次重新寻找网址。这是网站的 PWA 版本，不需要下载 APK，也不需要经过应用商店。</p>
       <div class="notice">
         PWA 仍然需要网络才能正常聊天。安装只会添加应用入口，不会创建新账号；请继续使用原来的邮箱和密码登录。
@@ -1094,6 +1165,44 @@
       </div>
     </section>
 
+
+    <section class="doc-section" id="account-safety">
+      <h2>8. 账号与使用安全</h2>
+      <p>下面这些提示用于帮助你更安心地管理账号和使用时间。它们不会改变角色聊天的正常体验。</p>
+
+      <h3>注册时的年龄确认</h3>
+      <p>Kunigami 面向已满 18 周岁的用户。注册时页面会先询问你是否已满 18 周岁，并在继续前再次确认；如果你未满 18 周岁，请不要注册或使用。</p>
+
+      <h3>连续使用 2 小时提醒</h3>
+      <p>如果你连续使用超过 2 小时，页面会弹出使用提醒。这个提醒只是健康使用提示，不会强制下线、不会暂停聊天，也不会影响 AI 回复。</p>
+
+      <h3>安全提示</h3>
+      <p>如果对话中出现明显的人身安全风险，页面可能会在消息附近显示一行居中的灰色安全提示，提醒你联系身边可信任的人、当地紧急服务，或拨打全国统一心理援助热线 <strong>12356</strong>。</p>
+      <div class="notice">
+        安全提示不会替代专业帮助。若你或身边的人正处于紧急危险中，请优先联系身边可信任的人或当地紧急服务。
+      </div>
+
+      <h3>注销账户</h3>
+      <p>你可以在<span class="path">个人主页</span>底部点击“注销账户”。页面会先展示注销影响提示；点击“继续注销”后，需要输入当前密码，并手动输入“注销账户”完成确认。</p>
+      <div class="error-grid">
+        <div class="error-item">
+          <strong>注销后会删除什么？</strong>
+          <p>账号、个人配置、角色、聊天数据、论坛内容、点赞收藏和推送订阅会被删除，且不做备份。</p>
+        </div>
+        <div class="error-item">
+          <strong>广场投稿角色会怎样？</strong>
+          <p>广场投稿角色不会自动删除，只会匿名。若你希望删除自己的投稿，请在注销账户前先到广场手动删除。</p>
+        </div>
+        <div class="error-item">
+          <strong>注销后还能恢复吗？</strong>
+          <p>不能。注销完成后账号和私人数据不会保留备份，请在确认不再需要这些内容后再操作。</p>
+        </div>
+        <div class="error-item">
+          <strong>输错密码会怎样？</strong>
+          <p>不会注销。只有当前密码正确，并且手动输入确认文字后，系统才会执行注销。</p>
+        </div>
+      </div>
+    </section>
     <div class="footer">本文档可直接通过 <strong>/guide</strong> 访问，无需登录。</div>
   </main>
   <button id="guide-back-to-top" class="back-to-top" type="button" aria-label="返回文档顶部">

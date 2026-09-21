@@ -3,6 +3,7 @@ import time
 
 from flask import Blueprint, current_app, request, session, jsonify, redirect, render_template
 import core.config
+from core.session_security import establish_authenticated_session
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -16,9 +17,7 @@ def _restore_admin_session():
     session.pop("impersonation_expires_at", None)
     session.pop("impersonation_expired", None)
     if str(admin_id) == "1":
-        session["user_id"] = 1
-        session["logged_in"] = True
-        session.permanent = True
+        establish_authenticated_session(1)
         return True
     return False
 
@@ -148,9 +147,7 @@ def api_admin_impersonate():
     session["impersonator_user_id"] = 1
     session["impersonated_user_id"] = target_id
     session["impersonation_expires_at"] = expires_at
-    session["user_id"] = target_id
-    session["logged_in"] = True
-    session.permanent = True
+    establish_authenticated_session(target_id)
     current_app.logger.warning(
         "Admin impersonation started: admin=1 target=%s ip=%s",
         target_id,
