@@ -48,33 +48,25 @@ def test_user_directive_accepts_fullwidth_brackets():
     assert directive == {"type": "user"}
 
 
-def test_safety_alert_returns_frontend_event_and_cleans_text():
+def test_legacy_safety_alert_is_saved_as_fixed_marker_without_event():
     cleaned, _, directive, events = process_agent_actions(
         "speaker",
-        "先陪你待一会儿\n[SAFETY_ALERT: 请立刻联系身边可信任的人或当地紧急服务]",
+        "先陪你待一会儿\n[SAFETY_ALERT: 模型自定义提示语]",
         return_events=True,
     )
-
-    assert cleaned == "先陪你待一会儿"
+    assert cleaned == "先陪你待一会儿\n[SAFETY_ALERT]"
     assert directive is None
-    assert events == [
-        {
-            "type": "safety_alert",
-            "message": "请立刻联系身边可信任的人或当地紧急服务",
-        }
-    ]
+    assert events == []
 
 
-def test_bare_safety_alert_returns_default_frontend_event():
-    cleaned, _, directive, events = process_agent_actions(
-        "speaker",
-        "我在这里\n【SAFETY_ALERT】",
-        return_events=True,
-    )
-
-    assert cleaned == "我在这里"
+def test_bare_safety_alert_survives_action_cleanup_and_reprocessing():
+    raw = "我在这里\n【SAFETY_ALERT】\n[NONE]"
+    cleaned, _, directive, events = process_agent_actions("speaker", raw, return_events=True)
+    assert cleaned == "我在这里\n[SAFETY_ALERT]"
     assert directive is None
-    assert events == [{"type": "safety_alert", "message": ""}]
+    assert events == []
+    assert process_agent_actions("speaker", cleaned)[0] == cleaned
+    assert process_agent_actions("speaker", "[SAFETY_ALERT]")[0] == "[SAFETY_ALERT]"
 
 
 def test_web_click_ref_directive_is_preserved_for_browser_agent():

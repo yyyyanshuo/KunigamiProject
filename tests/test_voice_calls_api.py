@@ -223,3 +223,155 @@ def test_character_decision_accepts_with_natural_tone(tmp_path, monkeypatch):
     assert payload["opening_turn"]["tone"] == "压低声音（像刚醒）"
     assert prompt_options["call_mode"] is True
     assert voice_calls.get_call(91, CALL_ID)["status"] == "active"
+
+
+def test_user_accepting_incoming_call_triggers_one_spoken_opening(
+    tmp_path, monkeypatch
+):
+    import blueprints.calls as calls
+
+    monkeypatch.setattr(voice_calls, "USERS_ROOT", str(tmp_path))
+    voice_calls.create_call(91, call_id=CALL_ID, char_id="rin", initiator="assistant")
+    monkeypatch.setattr(calls, "_recent_chat_text", lambda *args, **kwargs: [])
+    monkeypatch.setattr(calls, "build_system_prompt_v2", lambda *args, **kwargs: "persona")
+    monkeypatch.setattr(calls, "get_ai_language", lambda *args, **kwargs: "ja")
+    monkeypatch.setattr(
+        calls, "process_agent_actions", lambda char_id, text, uid: (text, None, None)
+    )
+    monkeypatch.setattr(calls, "_set_call_chat_mode", lambda *args: None)
+    model_calls = []
+
+    def fake_model(uid, char_id, messages):
+        model_calls.append(messages)
+        return "[CALL_TONE](嬉しそうに)もしもし、出てくれたんだ。", "relay", "call-model"
+
+    monkeypatch.setattr(calls, "_run_call_model", fake_model)
+    client = _logged_in_client(monkeypatch)
+    response = client.post(
+        f"/api/calls/{CALL_ID}/accept",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["call"]["status"] == "active"
+    assert payload["opening_turn"]["content"] == "もしもし、出てくれたんだ"
+    assert payload["opening_turn"]["tone"] == "嬉しそうに"
+    assert "必须使用日语" in model_calls[0][0]["content"]
+    assert [message["role"] for message in model_calls[0]] == ["system", "user"]
+    assert "用户刚刚接听" in model_calls[0][1]["content"]
+
+    repeated = client.post(
+        f"/api/calls/{CALL_ID}/accept",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+    assert repeated.status_code == 200
+    assert repeated.get_json()["opening_turn"]["id"] == payload["opening_turn"]["id"]
+    assert len(model_calls) == 1
+
+
+def test_user_rejecting_incoming_call_triggers_chat_reaction(tmp_path, monkeypatch):
+    import blueprints.calls as calls
+
+    monkeypatch.setattr(voice_calls, "USERS_ROOT", str(tmp_path))
+    voice_calls.create_call(91, call_id=CALL_ID, char_id="rin", initiator="assistant")
+    monkeypatch.setattr(calls, "_recent_chat_text", lambda *args, **kwargs: [])
+    monkeypatch.setattr(calls, "build_system_prompt_v2", lambda *args, **kwargs: "persona")
+    monkeypatch.setattr(calls, "get_ai_language", lambda *args, **kwargs: "zh")
+    monkeypatch.setattr(
+        calls, "process_agent_actions", lambda char_id, text, uid: (text, None, None)
+    )
+    monkeypatch.setattr(
+        calls, "_run_call_model",
+        lambda *args, **kwargs: ("好吧，等你方便再说。", "relay", "call-model"),
+    )
+    inserted = []
+    monkeypatch.setattr(
+        calls, "_insert_chat_message",
+        lambda uid, char_id, role, content: inserted.append(
+            (uid, char_id, role, content)
+        ) or 73,
+    )
+
+    response = _logged_in_client(monkeypatch).post(
+        f"/api/calls/{CALL_ID}/reject",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["call"]["status"] == "ended"
+    assert payload["call"]["end_reason"] == "rejected"
+    assert payload["message"] == "好吧，等你方便再说"
+    assert payload["message_id"] == 73
+    assert inserted == [(91, "rin", "assistant", "好吧，等你方便再说")]
+
+
+def test_incoming_action_model_failure_does_not_rollback_user_action(
+    tmp_path, monkeypatch
+):
+    import blueprints.calls as calls
+
+    monkeypatch.setattr(voice_calls, "USERS_ROOT", str(tmp_path))
+    voice_calls.create_call(91, call_id=CALL_ID, char_id="rin", initiator="assistant")
+    monkeypatch.setattr(calls, "_set_call_chat_mode", lambda *args: None)
+    monkeypatch.setattr(
+        calls, "_generate_incoming_action_reply",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("model down")),
+    )
+
+    response = _logged_in_client(monkeypatch).post(
+        f"/api/calls/{CALL_ID}/accept",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["call"]["status"] == "active"
+    assert "response_warning" in response.get_json()
+
+
+def test_incoming_action_api_error_is_not_saved_as_spoken_opening(
+    tmp_path, monkeypatch
+):
+    import blueprints.calls as calls
+
+    monkeypatch.setattr(voice_calls, "USERS_ROOT", str(tmp_path))
+    voice_calls.create_call(91, call_id=CALL_ID, char_id="rin", initiator="assistant")
+    monkeypatch.setattr(calls, "_recent_chat_text", lambda *args, **kwargs: [])
+    monkeypatch.setattr(calls, "build_system_prompt_v2", lambda *args, **kwargs: "persona")
+    monkeypatch.setattr(calls, "get_ai_language", lambda *args, **kwargs: "zh")
+    monkeypatch.setattr(calls, "_set_call_chat_mode", lambda *args: None)
+    monkeypatch.setattr(
+        calls,
+        "_run_call_model",
+        lambda *args, **kwargs: (
+            "（系统提示：请求参数异常（400），请联系管理员检查配置。）",
+            "gemini",
+            "call-model",
+        ),
+    )
+
+    response = _logged_in_client(monkeypatch).post(
+        f"/api/calls/{CALL_ID}/accept",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["call"]["status"] == "active"
+    assert payload["opening_turn"] is None
+    assert "response_warning" in payload
+    assert voice_calls.list_turns(91, CALL_ID) == []
+
+
+def test_call_character_info_uses_shared_language_resolver(tmp_path, monkeypatch):
+    import blueprints.calls as calls
+
+    config_file = tmp_path / "characters.json"
+    config_file.write_text(json.dumps({"rin": {"name": "凛"}}), encoding="utf-8")
+    monkeypatch.setattr(
+        calls, "_get_characters_config_file", lambda *args, **kwargs: str(config_file)
+    )
+    monkeypatch.setattr(calls, "get_ai_language", lambda *args, **kwargs: "en")
+
+    assert calls._character_info(91, "rin")["language"] == "en"

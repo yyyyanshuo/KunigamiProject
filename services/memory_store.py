@@ -162,3 +162,47 @@ def append_short_memory_events(
             current_data[date_str] = {"events": existing, "last_id": last_id}
             atomic_write_json(short_file, current_data)
         return added
+
+
+def replace_short_memory_events_by_prefix(
+    short_file: str,
+    date_str: str,
+    prefix: str,
+    events: list[dict[str, str]],
+) -> int:
+    """Replace one external source's events without touching other memories."""
+    with memory_file_lock(short_file):
+        current_data = load_json_object(short_file)
+        day_data = current_data.get(date_str, {})
+        if isinstance(day_data, list):
+            existing = list(day_data)
+            last_id = 0
+        elif isinstance(day_data, dict):
+            existing = list(day_data.get("events", []))
+            last_id = int(day_data.get("last_id", 0) or 0)
+        else:
+            existing = []
+            last_id = 0
+
+        retained = [
+            item for item in existing
+            if not str((item or {}).get("event", "")).lstrip().startswith(prefix)
+        ]
+        normalized = []
+        seen = set()
+        for event in events:
+            item = {
+                "time": str(event.get("time", ""))[:5],
+                "event": str(event.get("event", "")).strip(),
+            }
+            key = (item["time"], item["event"])
+            if item["event"] and key not in seen:
+                seen.add(key)
+                normalized.append(item)
+        final_events = retained + normalized
+        final_events.sort(
+            key=lambda item: (str(item.get("time", "")), str(item.get("event", "")))
+        )
+        current_data[date_str] = {"events": final_events, "last_id": last_id}
+        atomic_write_json(short_file, current_data)
+        return len(normalized)

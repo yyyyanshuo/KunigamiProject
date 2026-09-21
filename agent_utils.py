@@ -5,6 +5,16 @@ import sqlite3
 import unicodedata
 from datetime import datetime
 from core.utils import auto_toggle_chat_mode_on_move
+from services.content_actions import (
+    PERSONA_ACTIONS,
+    PLAN_ACTIONS,
+    RELATION_ACTIONS,
+    apply_persona_action,
+    apply_plan_action,
+    apply_relation_action,
+    extract_content_actions,
+)
+from services.memory_store import atomic_write_json, load_json_object, memory_file_lock
 
 def process_agent_actions(char_id, raw_text, user_id=None, return_events=False):
     """
@@ -17,6 +27,10 @@ def process_agent_actions(char_id, raw_text, user_id=None, return_events=False):
     [SET_SLEEP_TIME: "HH:MM-HH:MM"]
     [SET_RELATION: {"target": "角色名称(非ID)", "value": 0-5}]
     [ADD_SCHEDULE: {"date": "YYYY-MM-DD", "content": "内容"}]
+    [ADD_SCHEDULE: {"content": "无明确日期的计划"}]
+    [ADD/DELETE/EDIT/REWRITE_PERSONA: JSON]
+    [ADD/DELETE/EDIT/REWRITE_RELATION: JSON]
+    [ADD/DELETE/EDIT/REWRITE_PLAN: JSON]
     [MOOD: 预设情绪值]  (仅限: 平静 开心 悲伤 愤怒 兴奋 害羞 温柔 冷淡)
     [DIRECT_TO_GROUP: 角色1, 角色2, +user]  /  [DIRECT_TO_GROUP: 群名 | 角色1, 角色2]
     [DIRECT_TO_USER]
@@ -40,13 +54,21 @@ def process_agent_actions(char_id, raw_text, user_id=None, return_events=False):
     directive = None
     agent_events = []
 
+    # 人设 / 关系 / 计划的结构化增删改重写。这里先用完整 JSON
+    # 解析器提取，避免传统 {.*?} 正则在嵌套对象处提前截断。
+    content_actions, cleaned_text = extract_content_actions(cleaned_text)
+    if content_actions:
+        agent_events.extend(
+            _execute_content_actions(char_id, content_actions, user_id=user_id)
+        )
+
     # 1. 提取情绪指数 (Emotion)
     emotion_pattern = r'\[SET_EMOTION:\s*(\d+(?:\.\d+)?)\]'
     for match in re.finditer(emotion_pattern, raw_text):
         try:
             emotion_val = float(match.group(1))
-            _update_persona_param(char_id, "emotion", emotion_val, user_id=user_id)
-            print(f"[Agent Action] {char_id} 情绪指数设置为 {emotion_val}")
+            if _update_persona_param(char_id, "emotion", emotion_val, user_id=user_id):
+                print(f"[Agent Action] {char_id} 情绪指数设置为 {emotion_val}")
         except Exception as e:
             print(f"[Agent Action Error] 解析 Emotion 失败: {e}")
     cleaned_text = re.sub(emotion_pattern, '', cleaned_text)
@@ -56,8 +78,8 @@ def process_agent_actions(char_id, raw_text, user_id=None, return_events=False):
     for match in re.finditer(personality_pattern, raw_text):
         try:
             personality_val = float(match.group(1))
-            _update_persona_param(char_id, "personality", personality_val, user_id=user_id)
-            print(f"[Agent Action] {char_id} 性格指数设置为 {personality_val}")
+            if _update_persona_param(char_id, "personality", personality_val, user_id=user_id):
+                print(f"[Agent Action] {char_id} 性格指数设置为 {personality_val}")
         except Exception as e:
             print(f"[Agent Action Error] 解析 Personality 失败: {e}")
     cleaned_text = re.sub(personality_pattern, '', cleaned_text)
@@ -107,9 +129,13 @@ def process_agent_actions(char_id, raw_text, user_id=None, return_events=False):
             sched_data = json.loads(match.group(1))
             date_str = sched_data.get("date")
             content = sched_data.get("content")
-            if date_str and content:
-                _add_schedule(char_id, date_str, content, user_id=user_id)
-                print(f"[Agent Action] {char_id} 增加日程 {date_str}: {content}")
+            if content:
+                changed, category = _add_schedule(
+                    char_id, date_str, content, user_id=user_id
+                )
+                label = date_str if category == "dated" else "无时间计划"
+                action = "增加" if changed else "跳过重复"
+                print(f"[Agent Action] {char_id} {action}日程 {label}: {content}")
         except Exception as e:
             print(f"[Agent Action Error] 解析 Schedule 失败: {e}")
     cleaned_text = re.sub(schedule_pattern, '', cleaned_text)
@@ -140,13 +166,10 @@ def process_agent_actions(char_id, raw_text, user_id=None, return_events=False):
             print(f"[Agent Action Error] 解析 Mood 失败: {e}")
     cleaned_text = re.sub(mood_pattern, '', cleaned_text)
 
-    # 8.5. 提取安全提醒。该标签不会写进聊天正文，但会返回给前端显示。
+    # 安全提示是持久化展示标识，不作为一次性动作事件消费。
+    # 兼容旧版带提示语的标签，统一保存固定标识，文案交由前端管理。
     safety_pattern = r'[\[【]\s*SAFETY_ALERT\s*(?:[:：]\s*(.*?))?[\]】]'
-    for match in re.finditer(safety_pattern, raw_text, re.IGNORECASE | re.DOTALL):
-        message = re.sub(r'\s+', ' ', match.group(1) or '').strip()
-        agent_events.append({"type": "safety_alert", "message": message})
-        print(f"[Agent Action] {char_id} 安全提醒: {message or '默认提示'}")
-    cleaned_text = re.sub(safety_pattern, '', cleaned_text, flags=re.IGNORECASE | re.DOTALL)
+    cleaned_text = re.sub(safety_pattern, '[SAFETY_ALERT]', cleaned_text, flags=re.IGNORECASE | re.DOTALL)
 
     # 9. 提取对话转向指令 (Direct To Group)
     direct_pattern = r'[\[【]\s*DIRECT_TO_GROUP\s*[:：]\s*(.+?)[\]】]'
@@ -220,11 +243,11 @@ def process_agent_actions(char_id, raw_text, user_id=None, return_events=False):
     # 清理多余的空白字符，如果标签单独占一行，删除后可能会留下空行
     # 13.5 兜底清理任何残留、畸形或大写下划线的 Agent 动作指令标签，例如 [UPDATE_AFFINITY:user,-1] 或 [SET_EMOTION:arrogant] 等
     # 只要包含了预定义的命令关键字或大写加下划线标签，均彻底清除。
-    robust_agent_pattern = r'[\[【]\s*(?:UPDATE_AFFINITY|SET_EMOTION|SET_PERSONALITY|SET_SLEEP_TIME|SET_RELATION|ADD_SCHEDULE|MOOD|SAFETY_ALERT|DIRECT_TO_GROUP|DIRECT_TO_USER|DIRECT_END|NONE|MOVE_TO|MOVE_TO_COORD|EXPLORE|SET_CHAT_MODE|MUSIC_[A-Z0-9_]+)(?::|：)?\s*.*?[\]】]'
+    robust_agent_pattern = r'[\[【]\s*(?:UPDATE_AFFINITY|SET_EMOTION|SET_PERSONALITY|SET_SLEEP_TIME|SET_RELATION|ADD_SCHEDULE|ADD_PERSONA|DELETE_PERSONA|EDIT_PERSONA|REWRITE_PERSONA|ADD_RELATION|DELETE_RELATION|EDIT_RELATION|REWRITE_RELATION|ADD_PLAN|DELETE_PLAN|EDIT_PLAN|REWRITE_PLAN|MOOD|DIRECT_TO_GROUP|DIRECT_TO_USER|DIRECT_END|NONE|MOVE_TO|MOVE_TO_COORD|EXPLORE|SET_CHAT_MODE|MUSIC_[A-Z0-9_]+)(?::|：)?\s*.*?[\]】]'
     cleaned_text = re.sub(robust_agent_pattern, '', cleaned_text, flags=re.IGNORECASE | re.DOTALL)
 
-    # 额外兜底清理所有全大写加下划线的指令标签，避免未定义或畸形的指令流出（不清理 SEARCH_IMG 和 GENERATE_IMAGE 标签，交由媒体解析器专门处理；THOUGHTS 为内心独白展示标签，需保留）
-    general_pattern = r'[\[【]\s*(?!(?:VOICE|SEARCH_IMG|GENERATE_IMAGE|CLICK_REF|CLICK|TYPE|GOTO|BACK|FINISH|ASK|WAIT|WEB_CRUISE|STOP|REPLY|THOUGHTS)\b)(?:[A-Z_][A-Z0-9_]*)(?::|：)?\s*.*?[\]】]'
+    # 额外兜底清理所有全大写加下划线的指令标签，避免未定义或畸形的指令流出（不清理 SEARCH_IMG 和 GENERATE_IMAGE 标签，交由媒体解析器专门处理；THOUGHTS 和 SAFETY_ALERT 为持久化展示标签，需保留）
+    general_pattern = r'[\[【]\s*(?!(?:SAFETY_ALERT|VOICE|SEARCH_IMG|GENERATE_IMAGE|CLICK_REF|CLICK|TYPE|GOTO|BACK|FINISH|ASK|WAIT|WEB_CRUISE|STOP|REPLY|THOUGHTS)\b)(?:[A-Z_][A-Z0-9_]*)(?::|：)?\s*.*?[\]】]'
     cleaned_text = re.sub(general_pattern, '', cleaned_text, flags=re.IGNORECASE | re.DOTALL)
 
     cleaned_text = re.sub(r'\n\s*\n', '\n', cleaned_text).strip()
@@ -233,30 +256,118 @@ def process_agent_actions(char_id, raw_text, user_id=None, return_events=False):
         return (*result, agent_events)
     return result
 
+
+def _execute_content_actions(char_id, actions, user_id=None):
+    """Apply each document's actions as one atomic transaction."""
+
+    from app import get_paths
+
+    _, prompts_dir = get_paths(char_id, user_id=user_id)
+    os.makedirs(prompts_dir, exist_ok=True)
+    events = []
+
+    def record(action, status, code=None, message=None):
+        event = {
+            "type": "content_action",
+            "action": action.name,
+            "status": status,
+        }
+        if code:
+            event["code"] = code
+        if message:
+            event["message"] = message
+        events.append(event)
+
+    persona_actions = [action for action in actions if action.name in PERSONA_ACTIONS]
+    if persona_actions:
+        json_path = os.path.join(prompts_dir, "1_base_persona.json")
+        try:
+            with memory_file_lock(json_path):
+                data = load_json_object(json_path) if os.path.exists(json_path) else {}
+                current = data.get("system_prompt", "")
+                if not isinstance(current, str):
+                    raise ValueError("system_prompt 必须是文本")
+                updated = current
+                for action in persona_actions:
+                    updated = apply_persona_action(updated, action.name, action.payload)
+                # 核心人设只保留 system_prompt，同时清除旧外貌和无效设置字段。
+                atomic_write_json(json_path, {"system_prompt": updated})
+            for action in persona_actions:
+                record(action, "success")
+        except Exception as exc:
+            code = getattr(exc, "code", "storage_error")
+            for action in persona_actions:
+                record(action, "failed", code, str(exc))
+            print(f"[Agent Action Error] Persona transaction rolled back: {exc}")
+
+    relation_actions = [action for action in actions if action.name in RELATION_ACTIONS]
+    if relation_actions:
+        path = os.path.join(prompts_dir, "2_relationship.json")
+        try:
+            with memory_file_lock(path):
+                updated = load_json_object(path)
+                for action in relation_actions:
+                    updated = apply_relation_action(updated, action.name, action.payload)
+                atomic_write_json(path, updated)
+            for action in relation_actions:
+                record(action, "success")
+        except Exception as exc:
+            code = getattr(exc, "code", "storage_error")
+            for action in relation_actions:
+                record(action, "failed", code, str(exc))
+            print(f"[Agent Action Error] Relation transaction rolled back: {exc}")
+
+    plan_actions = [action for action in actions if action.name in PLAN_ACTIONS]
+    if plan_actions:
+        path = os.path.join(prompts_dir, "7_schedule.json")
+        try:
+            with memory_file_lock(path):
+                updated = load_json_object(path)
+                for action in plan_actions:
+                    updated = apply_plan_action(updated, action.name, action.payload)
+                atomic_write_json(path, updated)
+            for action in plan_actions:
+                record(action, "success")
+        except Exception as exc:
+            code = getattr(exc, "code", "invalid_schedule")
+            for action in plan_actions:
+                record(action, "failed", code, str(exc))
+            print(f"[Agent Action Error] Plan transaction rolled back: {exc}")
+
+    for event in events:
+        print(
+            f"[Agent Action] {char_id} {event['action']} -> {event['status']}"
+            + (f" ({event.get('code')}: {event.get('message')})" if event.get("code") else "")
+        )
+    return events
+
 def _update_persona_param(char_id, param_name, value, user_id=None):
-    """更新 characters.json 中的行为参数（emotion / moments_index）"""
+    """Apply an AI index update only if the user has not locked that index."""
+    field = {"emotion": "emotion", "personality": "moments_index"}.get(param_name)
+    if field is None:
+        return False
     try:
-        from app import _get_characters_config_file, safe_save_json
+        from core.utils import _get_characters_config_file
         cfg_file = _get_characters_config_file(user_id=user_id)
         if not os.path.exists(cfg_file):
             print(f"[Agent Action] WARNING: config file not found: {cfg_file}")
-            return
-        with open(cfg_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        if char_id not in data:
-            print(f"[Agent Action] WARNING: char_id '{char_id}' not found in {cfg_file}, keys: {list(data.keys())[:5]}")
-            return
-
-        if param_name == "emotion":
-            data[char_id]["emotion"] = float(value)
-            print(f"[Agent Action] {char_id} emotion -> {value} written to {cfg_file}")
-        elif param_name == "personality":
-            data[char_id]["moments_index"] = float(value)
-            print(f"[Agent Action] {char_id} moments_index -> {value} written to {cfg_file}")
-        safe_save_json(cfg_file, data)
+            return False
+        # Read the latest lock inside the same transaction as the value write.
+        with memory_file_lock(cfg_file):
+            data = load_json_object(cfg_file, missing_ok=False)
+            info = data.get(char_id)
+            if not isinstance(info, dict):
+                print(f"[Agent Action] WARNING: char_id '{char_id}' not found in {cfg_file}")
+                return False
+            if info.get(f"{field}_locked", False):
+                print(f"[Agent Action] {char_id} {field} 已锁定，跳过自动修改")
+                return False
+            info[field] = float(value)
+            atomic_write_json(cfg_file, data)
+        return True
     except Exception as e:
         print(f"[Agent Action Error] Update Persona Param: {e}")
+        return False
 
 def _update_user_affinity(char_id, delta, current_user_id=None):
     """累加亲密度到 characters.json 中"""
@@ -347,24 +458,13 @@ def _update_relationship(char_id, target, value, user_id=None):
             print(f"Update Relationship Error: {e}")
 
 def _add_schedule(char_id, date_str, content, user_id=None):
-    """追加日程到 7_schedule.json"""
-    from app import get_paths, safe_save_json
+    """追加有日期或无时间计划到 7_schedule.json。"""
+    from app import get_paths
+    from services.schedule import append_schedule_item
+
     _, prompts_dir = get_paths(char_id, user_id=user_id)
     sched_path = os.path.join(prompts_dir, "7_schedule.json")
-    if os.path.exists(sched_path):
-        try:
-            with open(sched_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            # 追加逻辑：如果不存该日期，新建；如果存在，用分号隔开拼接
-            if date_str in data:
-                data[date_str] = f"{data[date_str]}; {content}"
-            else:
-                data[date_str] = content
-
-            safe_save_json(sched_path, data)
-        except Exception as e:
-            print(f"Add Schedule Error: {e}")
+    return append_schedule_item(sched_path, date_str, content)
 
 def _update_chat_mode(char_id, mode, user_id=None):
     """更新角色的聊天模式 (online/offline) 到 characters.json"""
@@ -464,6 +564,7 @@ def _process_location_tags(char_id, raw_text, user_id=None):
         save_locations,
         calc_distance,
         get_location_by_id,
+        get_location_at_exact_coord,
         move_character_position,
         normalize_map_state,
     )
@@ -559,12 +660,33 @@ def _process_location_tags(char_id, raw_text, user_id=None):
             current_positions = load_character_positions(user_id=user_id)
             current_pos = current_positions[char_id]
             d = calc_distance(current_pos["x"], current_pos["y"], target_x, target_y)
-            if d > 1.0:
-                error = f"EXPLORE ({target_x},{target_y}): distance {round(d,2)} exceeds 1.0"
+            if d >= 1.0:
+                error = f"EXPLORE ({target_x},{target_y}): distance {round(d,2)} is not below 1.0"
                 errors.append(error)
                 print(f"[Agent Action] {char_id} {error}")
                 continue
             locs = load_locations(user_id=user_id)
+            existing_location = get_location_at_exact_coord(
+                target_x,
+                target_y,
+                user_id=user_id,
+            )
+            if existing_location:
+                _, pos = move_character_position(
+                    char_id,
+                    target_x,
+                    target_y,
+                    location_id=existing_location["id"],
+                    user_id=user_id,
+                )
+                existing_name = existing_location.get("name", existing_location["id"])
+                action_desc = f"{get_char_name(char_id)}移动到了已有地点{existing_name}"
+                moved = True
+                print(
+                    f"[Agent Action] {char_id} EXPLORE matched existing "
+                    f"location -> {existing_location['id']}"
+                )
+                continue
             loc_id = "loc_" + str(len(locs.get("locations", [])))
             existing_ids = {l["id"] for l in locs.get("locations", [])}
             counter = 1

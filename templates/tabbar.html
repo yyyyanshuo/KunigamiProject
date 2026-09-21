@@ -106,28 +106,38 @@
         }
 
         const today = announcement?.server_date || localDateKey();
-        const announcementActive = !!announcement?.active;
-        const announcementSeenKey = announcementActive
-            ? `announcement_seen:${announcement.id}:${today}`
-            : '';
+        const announcements = Array.isArray(announcement?.announcements)
+            ? announcement.announcements : (announcement?.active ? [announcement] : []);
+        const voiceAnnouncement = announcements.find(item => item.kind === 'voice') || null;
+        const personaAnnouncement = announcements.find(item => item.kind === 'persona_lock') || null;
+        const voiceSeenKey = voiceAnnouncement
+            ? `announcement_seen:${voiceAnnouncement.id}:${today}` : '';
+        const personaSeenKey = personaAnnouncement
+            ? `announcement_seen:${personaAnnouncement.id}` : '';
         const shouldShowDonate = localStorage.getItem('last_donate_show') !== today;
-        const shouldShowAnnouncement = announcementActive && !localStorage.getItem(announcementSeenKey);
+        const shouldShowVoice = !!voiceAnnouncement && !localStorage.getItem(voiceSeenKey);
+        const shouldShowPersona = !!personaAnnouncement && !localStorage.getItem(personaSeenKey);
+        const shouldShowAnnouncement = shouldShowVoice || shouldShowPersona;
 
         const announcementSection = document.getElementById('voice-announcement-section');
         if (announcementSection) {
-            announcementSection.style.display = announcementActive ? 'block' : 'none';
+            announcementSection.style.display = voiceAnnouncement ? 'block' : 'none';
             const cta = document.getElementById('voice-announcement-cta');
-            if (cta && announcement?.cta_url) cta.href = announcement.cta_url;
+            if (cta && voiceAnnouncement?.cta_url) cta.href = voiceAnnouncement.cta_url;
             const deleteDate = document.getElementById('voice-announcement-delete-date');
-            if (deleteDate && announcement?.legacy_voice_deletes_on) {
-                deleteDate.textContent = announcement.legacy_voice_deletes_on;
+            if (deleteDate && voiceAnnouncement?.legacy_voice_deletes_on) {
+                deleteDate.textContent = voiceAnnouncement.legacy_voice_deletes_on;
             }
         }
+
+        const personaSection = document.getElementById('persona-lock-announcement-section');
+        if (personaSection) personaSection.style.display = shouldShowPersona ? 'block' : 'none';
 
         if (shouldShowDonate || shouldShowAnnouncement) {
             modal.style.display = 'flex';
             localStorage.setItem('last_donate_show', today);
-            if (shouldShowAnnouncement) localStorage.setItem(announcementSeenKey, '1');
+            if (shouldShowVoice) localStorage.setItem(voiceSeenKey, '1');
+            if (shouldShowPersona) localStorage.setItem(personaSeenKey, '1');
         }
     }
 
@@ -142,6 +152,13 @@
 <!-- 打赏弹窗 (每日首次) -->
 <div class="modal-overlay" id="daily-donate-modal" style="position:fixed; display:none; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); backdrop-filter:blur(4px); z-index:3000; align-items:center; justify-content:center;">
   <div style="background:#fff; padding:20px; border-radius:18px; width:90%; max-width:380px; box-shadow:0 10px 30px rgba(0,0,0,0.15); max-height:85vh; overflow-y:auto;">
+    <div id="persona-lock-announcement-section" style="display:none; margin-bottom:18px; padding:16px; border-radius:14px; background:#f4f7ff; border:1px solid #d8e2fa; color:#42516d;">
+      <div style="font-size:30px; text-align:center; margin-bottom:6px;">🔒</div>
+      <h3 style="margin:0 0 10px; text-align:center; font-size:18px; color:#526fa7;">人设 AI 编辑保护上线</h3>
+      <p style="font-size:13px; line-height:1.7; margin:0 0 8px;">在人设中用独占一行的 <code>[[LOCK]]</code> 和 <code>[[/LOCK]]</code> 包住核心设定，模型以后编辑人设时会逐字保留。</p>
+      <p style="font-size:13px; line-height:1.7; margin:0 0 12px; font-weight:700; color:#3f5f96;">标签只约束模型，不限制你本人；编辑框仍是普通文本，你随时可以修改内容或移除标签。</p>
+      <a href="/guide#persona-lock" style="display:block; text-align:center; padding:9px 12px; border-radius:10px; background:#6f8fc9; color:#fff; text-decoration:none; font-size:13px; font-weight:600;">查看使用方法</a>
+    </div>
     <div id="voice-announcement-section" style="display:none; margin-bottom:18px; padding:16px; border-radius:14px; background:#fff7f8; border:1px solid #ffd8df; color:#5a4650;">
       <div style="font-size:30px; text-align:center; margin-bottom:6px;">🔊</div>
       <h3 style="margin:0 0 10px; text-align:center; font-size:18px; color:#d94f70;">语音功能调整通知</h3>

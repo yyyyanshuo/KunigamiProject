@@ -221,6 +221,11 @@ def test_memory_template_has_copyable_ai_prompt_with_schema_and_current_json():
     assert "只允许新增下方列表中的角色，不要虚构其他角色" in source
     assert "原名：${name}；ID：${contact.id}" in source
     assert "请在以下当前完整 JSON 基础上修改" in source
+    assert "function relationshipGraphForPrompt" in source
+    assert "relationshipGraphForPrompt(perspective, contacts)" in source
+    assert "（备注：${contact.remark}）" not in source
+    assert "；备注：${contact.remark}" not in source
+    assert "return current?.name || charId" in source
     assert "navigator.clipboard?.writeText" in source
     assert "function showToast(message)" in source
     assert "let copied = false" in source

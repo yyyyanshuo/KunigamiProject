@@ -12,12 +12,12 @@ from core.config import (
     GLOBAL_SYSTEM_RULES_JA_AGENT_BRIEF, GLOBAL_SYSTEM_RULES_EN_AGENT_BRIEF, GLOBAL_SYSTEM_RULES_ZH_AGENT_BRIEF,
 )
 from core.context import get_current_user_id
+from core.content_action_rules import get_content_action_rules
 from core.memory_periods import parse_week_key_to_dates
 from core.time_utils import (
     BEIJING_TZ,
     beijing_now,
     get_character_timezone,
-    get_user_timezone,
     get_zone,
     parse_beijing_timestamp,
     utc_now,
@@ -31,6 +31,23 @@ from core.utils import (
 )
 from services.voice_messages import voice_message_for_ai
 from services.voice_calls import voice_call_for_ai
+from services.schedule import UNDATED_SCHEDULE_KEY, normalize_schedule_data
+from services.persona_locks import LOCK_OPEN, PERSONA_LOCK_MODEL_INSTRUCTION
+
+
+def _upcoming_schedule_lines(schedule, today, days=7):
+    """Return dated plans from today through the configured future window."""
+    future_end = today + timedelta(days=days)
+    lines = []
+    for date_str in sorted(key for key in schedule if key != UNDATED_SCHEDULE_KEY):
+        try:
+            event_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            continue
+        if today <= event_date <= future_end:
+            for event in schedule[date_str]:
+                lines.append(f"- {date_str}: {event}")
+    return lines
 
 
 def get_ai_language(target_id=None, group_id=None, user_id=None):
@@ -175,6 +192,28 @@ def _get_settings_for_user(user_id=None):
             except Exception:
                 pass
     return _load_user_settings()
+
+
+def _filter_locked_index_rules(content, char_id, user_id=None):
+    """Omit locked index instructions from outgoing rules, preserving templates."""
+    try:
+        with open(_get_characters_config_file(user_id=user_id), "r", encoding="utf-8") as f:
+            info = json.load(f).get(char_id, {})
+        tags = [
+            tag for field, tag in (
+                ("emotion_locked", "SET_EMOTION"),
+                ("moments_index_locked", "SET_PERSONALITY"),
+            ) if info.get(field, False)
+        ]
+    except (OSError, ValueError, AttributeError, TypeError):
+        return content
+    if not tags:
+        return content
+    # Both the full and brief localized rules keep one action per line.
+    return "".join(
+        line for line in content.splitlines(keepends=True)
+        if not any(f"[{tag}:" in line for tag in tags)
+    )
 
 
 def build_agent_current_state_section(char_id, prompts_dir, target_char_id=None, group_id=None, user_id=None):
@@ -945,7 +984,13 @@ def extract_short_memory_with_timeline_ts(char_id, user_id=None) -> list:
     return result
 
 
-def extract_recent_messages_with_labels(char_id, limit=20, group_id=None, user_id=None) -> list:
+def extract_recent_messages_with_labels(
+    char_id,
+    limit=20,
+    group_id=None,
+    user_id=None,
+    exclude_bedtime_diaries=False,
+) -> list:
     from core.utils import get_paths as _get_paths
     import os as _os
 
@@ -969,10 +1014,17 @@ def extract_recent_messages_with_labels(char_id, limit=20, group_id=None, user_i
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        cursor.execute(
-            "SELECT role, content, timestamp FROM messages ORDER BY id DESC LIMIT ?",
-            (limit,)
-        )
+        if exclude_bedtime_diaries:
+            cursor.execute(
+                "SELECT role, content, timestamp FROM messages "
+                "WHERE content NOT LIKE ? ORDER BY id DESC LIMIT ?",
+                ("%[THOUGHTS]%", limit),
+            )
+        else:
+            cursor.execute(
+                "SELECT role, content, timestamp FROM messages ORDER BY id DESC LIMIT ?",
+                (limit,),
+            )
         rows = cursor.fetchall()
 
         print(f"[DEBUG] extract_recent_messages: 查询到 {len(rows)} 条消息")
@@ -1053,17 +1105,33 @@ def build_timeline_section(timeline_events) -> str:
     return "【时间线 / Timeline】\n" + "\n".join(lines)
 
 
-def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=None, user_latest_input=None, target_char_id=None, group_id=None, include_long_memory=True, include_recent_messages=True, user_id=None, call_mode=False):
+def build_system_prompt_v2(
+    char_id,
+    include_global_format=True,
+    recent_messages=None,
+    user_latest_input=None,
+    target_char_id=None,
+    group_id=None,
+    include_long_memory=True,
+    include_recent_messages=True,
+    user_id=None,
+    call_mode=False,
+    include_all_relationships=False,
+    include_general_agent_rules=True,
+    exclude_bedtime_diaries_from_timeline=False,
+    read_only=False,
+):
     if user_id is None:
         from core.context import get_current_user_id
         user_id = get_current_user_id()
     prompt_parts = []
 
     _, prompts_dir = get_paths(char_id, user_id=user_id)
-    try:
-        normalize_map_state(user_id=user_id)
-    except Exception:
-        pass
+    if not read_only:
+        try:
+            normalize_map_state(user_id=user_id)
+        except Exception:
+            pass
     _, character_timezone, now = _get_character_time_info(
         char_id, user_id=user_id
     )
@@ -1081,7 +1149,6 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
         name_age_prefix = "\n".join(parts) + "\n\n"
 
     path_json = os.path.join(prompts_dir, "1_base_persona.json")
-    path_md = os.path.join(prompts_dir, "1_base_persona.md")
 
     content = ""
     if os.path.exists(path_json):
@@ -1091,17 +1158,15 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
                 content = data.get("system_prompt", "").strip()
         except Exception as e:
             print(f"Error reading {path_json}: {e}")
-    elif os.path.exists(path_md):
-        try:
-            with open(path_md, "r", encoding="utf-8-sig") as f:
-                content = f.read().strip()
-        except Exception:
-            pass
 
     if content:
         if name_age_prefix:
             content = name_age_prefix + content
         prompt_parts.append(f"【キャラクター / 角色人设】\n{content}")
+        if LOCK_OPEN in content:
+            prompt_parts.append(
+                f"【Persona Lock / 人设锁定规则】\n{PERSONA_LOCK_MODEL_INSTRUCTION}"
+            )
 
     try:
         user_name = _get_username_for_user(user_id)
@@ -1153,17 +1218,18 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
             target_rel = None
             display_name = current_user_name
 
-            if target_char_id and target_char_id != "user":
-                target_name = get_char_name(target_char_id, user_id=user_id)
-                target_rel = rel_data.get(target_name) or rel_data.get(target_char_id)
-                if target_rel:
-                    display_name = target_name
-            else:
-                target_rel = rel_data.get(current_user_name)
-                if not target_rel:
-                    user_id = get_current_user_id()
-                    if user_id:
-                        target_rel = rel_data.get(str(user_id))
+            if not include_all_relationships:
+                if target_char_id and target_char_id != "user":
+                    target_name = get_char_name(target_char_id, user_id=user_id)
+                    target_rel = rel_data.get(target_name) or rel_data.get(target_char_id)
+                    if target_rel:
+                        display_name = target_name
+                else:
+                    current_user_id = user_id or get_current_user_id()
+                    if current_user_id:
+                        target_rel = rel_data.get(str(current_user_id))
+                    if not target_rel:
+                        target_rel = rel_data.get(current_user_name)
 
             if target_rel:
                 rel_str = (f"対话相手：{display_name}\n"
@@ -1190,7 +1256,11 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
                     rel_lines.append(f"- {disp_name}: {role} (关系度:{score}) {desc}")
                 if rel_lines:
                     rel_text = "\n".join(rel_lines)
-                    prompt_parts.append(f"【関係 / 关系】\n{rel_text}")
+                    section_title = (
+                        "【完整关系图谱 / Complete Relationship Graph】"
+                        if include_all_relationships else "【関係 / 关系】"
+                    )
+                    prompt_parts.append(f"{section_title}\n{rel_text}")
     except Exception:
         pass
 
@@ -1198,22 +1268,25 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
     if os.path.exists(path):
         try:
             with open(path, "r", encoding="utf-8-sig") as f:
-                schedule = json.load(f) or {}
+                schedule = normalize_schedule_data(json.load(f) or {})
             if schedule:
-                today = now.date()
-                future_end = today + timedelta(days=7)
-                filtered_schedule = {}
-                for date_str, event in sorted(schedule.items()):
-                    try:
-                        event_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-                        if today <= event_date <= future_end:
-                            filtered_schedule[date_str] = event
-                    except ValueError:
-                        pass
+                dated_lines = _upcoming_schedule_lines(schedule, now.date())
+                if dated_lines:
+                    prompt_parts.append(
+                        "【未来 7 天计划 / Plans for the Next 7 Days】\n"
+                        + "\n".join(dated_lines)
+                    )
 
-                if filtered_schedule:
-                    sched_text = "- " + "\n- ".join([f"{k}: {v}" for k, v in filtered_schedule.items()])
-                    prompt_parts.append(f"【スケジュール / 日程表】\n{sched_text}")
+                undated_plans = schedule.get(UNDATED_SCHEDULE_KEY, [])
+                if undated_plans:
+                    undated_text = "- " + "\n- ".join(undated_plans)
+                    prompt_parts.append(
+                        "【尚未确定时间的计划 / Undated Plans】\n"
+                        f"{undated_text}\n"
+                        "这些是已经形成但尚无明确日期的计划。请自然地记住和推进它们，"
+                        "不要机械复述、不要擅自编造日期，也不要重复添加已有计划。"
+                        "删除、修改或重写时必须逐字复制这里显示的完整内容。"
+                    )
         except Exception:
             pass
 
@@ -1227,10 +1300,16 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
     if current_state_section:
         prompt_parts.append(current_state_section)
 
-    if include_global_format and not call_mode:
-        lang = get_ai_language(char_id, group_id=group_id, user_id=user_id)
+    lang = get_ai_language(char_id, group_id=group_id, user_id=user_id)
+
+    if include_global_format and include_general_agent_rules and not call_mode:
         chat_mode = _get_char_chat_mode(char_id, user_id=user_id)
-        content = get_global_system_rules(lang, chat_mode=chat_mode)
+        content = get_global_system_rules(
+            lang,
+            chat_mode=chat_mode,
+            include_proactive_voice_call=group_id is None,
+        )
+        content = _filter_locked_index_rules(content, char_id, user_id=user_id)
         if content:
             prompt_parts.append(f"【システムルール / 系统规则】\n{content}")
 
@@ -1307,16 +1386,19 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
                     "- 撤回：可在非首条分段中加入 `[recall]`，表示撤回上一段内容（如故意打错字后撤回，增加真实感）。"
                 )
 
-    if not include_global_format:
-        lang = get_ai_language(char_id, group_id=group_id, user_id=user_id)
+    if not include_global_format and include_general_agent_rules:
         if lang == "ja":
             agent_rules = GLOBAL_SYSTEM_RULES_JA_AGENT_BRIEF
         elif lang == "en":
             agent_rules = GLOBAL_SYSTEM_RULES_EN_AGENT_BRIEF
         else:
             agent_rules = GLOBAL_SYSTEM_RULES_ZH_AGENT_BRIEF
+        agent_rules = _filter_locked_index_rules(agent_rules, char_id, user_id=user_id)
         if agent_rules:
             prompt_parts.append(f"【Agent Actions / 智能体动作】\n{agent_rules}")
+
+    if not call_mode and include_general_agent_rules:
+        prompt_parts.append(get_content_action_rules(lang))
 
     timeline_events = []
 
@@ -1340,7 +1422,13 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
         timeline_events.append(("short_memory", content, ts))
 
     if include_recent_messages:
-        msg_events = extract_recent_messages_with_labels(char_id, limit=20, group_id=group_id, user_id=user_id)
+        msg_events = extract_recent_messages_with_labels(
+            char_id,
+            limit=20,
+            group_id=group_id,
+            user_id=user_id,
+            exclude_bedtime_diaries=exclude_bedtime_diaries_from_timeline,
+        )
         print(f"[DEBUG v2] extract_recent_messages_with_labels() 返回 {len(msg_events)} 条事件")
         for i, (_, content, ts) in enumerate(msg_events):
             print(f"  [{i}] {ts.strftime('%Y-%m-%d %H:%M')} - 消息: {content[:100]}")
@@ -1373,21 +1461,24 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
     else:
         period = "深夜 (late night)"
 
-    user_settings = _get_settings_for_user(user_id)
-    user_now = utc_now().astimezone(get_zone(get_user_timezone(user_settings)))
-    beijing_time = beijing_now()
     time_info = (
         f"現在は {now.strftime('%Y-%m-%d %H:%M')} （{period}）です。\n"
         f"- 角色当前时区：{character_timezone}\n"
-        f"- 用户当地时间：{user_now.strftime('%Y-%m-%d %H:%M')}\n"
-        f"- 系统北京时间：{beijing_time.strftime('%Y-%m-%d %H:%M')}\n"
+        "- 提醒：上述当前时间仅代表你所在地域的当地时间，并不代表用户所在地域的时间。\n"
         "- “今天、昨天、明天”和日程日期均以角色当地日期理解。"
     )
     prompt_parts.append(f"【現在時刻】\n{time_info}")
 
     # ===== location context / 地点感知 =====
     try:
-        char_positions, user_pos, locs = normalize_map_state(user_id=user_id)
+        if read_only:
+            # Assessment/export callers must not initialize or normalize map
+            # files as a side effect of merely building a prompt.
+            char_positions = {}
+            user_pos = {"x": 0.0, "y": 0.0, "location_id": None}
+            locs = {"locations": []}
+        else:
+            char_positions, user_pos, locs = normalize_map_state(user_id=user_id)
         locs_by_id = {l["id"]: l for l in locs.get("locations", [])}
 
         if char_id in char_positions:
@@ -1419,31 +1510,43 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
             else:
                 location_lines.append(f"- 此处只有你一个人")
 
-            known_ids = cp.get("known_location_ids", [])
-            known_list = []
-            known_id_set = set(known_ids)
-            for lid in known_ids:
-                if lid in locs_by_id:
-                    l = locs_by_id[lid]
-                    dist = calc_distance(cx, cy, l["x"], l["y"])
-                    known_list.append(f"  {l['name']} [id={l['id']}]（坐标 {l['x']},{l['y']}，距离 {round(dist,2)}）")
-            if known_list:
-                location_lines.append(f"- 你去过的认知地点：\n" + "\n".join(known_list))
-            else:
-                location_lines.append(f"- 你去过的认知地点：无")
-
-            nearby_list = []
+            destination_locations = []
+            destination_ids = set()
             all_locs = locs.get("locations", [])
+            for known_id in cp.get("known_location_ids", []) or []:
+                if known_id == loc_id or known_id in destination_ids:
+                    continue
+                known_loc = locs_by_id.get(known_id)
+                if known_loc:
+                    destination_locations.append(known_loc)
+                    destination_ids.add(known_id)
+
+            nearby_locations = []
             for loc in all_locs:
-                if loc["id"] in known_id_set:
+                candidate_id = loc.get("id")
+                if candidate_id == loc_id or candidate_id in destination_ids:
                     continue
                 d = calc_distance(cx, cy, loc["x"], loc["y"])
                 if d < 1.0:
-                    nearby_list.append(f"  {loc['name']} [id={loc['id']}]（坐标 {loc['x']},{loc['y']}，距离 {round(d,2)}）")
-            if nearby_list:
-                location_lines.append(f"- 附近可感知的地点（距离<1格，但尚未去过）：\n" + "\n".join(nearby_list))
+                    nearby_locations.append((d, loc))
+            nearby_locations.sort(
+                key=lambda item: (item[0], str(item[1].get("name", "")))
+            )
+            for _, nearby_loc in nearby_locations:
+                destination_locations.append(nearby_loc)
+                destination_ids.add(nearby_loc.get("id"))
+
+            if destination_locations:
+                destination_lines = [
+                    f"  {loc['name']} [id={loc['id']}]"
+                    for loc in destination_locations
+                ]
+                location_lines.append(
+                    "- 可前往地点（已认知地点，以及当前距离<1的地点）：\n"
+                    + "\n".join(destination_lines)
+                )
             else:
-                location_lines.append(f"- 附近可感知的地点：无")
+                location_lines.append("- 可前往地点：无")
 
             prompt_parts.append(f"【現在の場所 / 当前环境与位置】\n" + "\n".join(location_lines))
     except Exception as e:
@@ -1451,7 +1554,7 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
 
     # ===== weather / 天气感知 =====
     try:
-        char_positions = load_character_positions(user_id=user_id)
+        char_positions = {} if read_only else load_character_positions(user_id=user_id)
         if char_id in char_positions:
             cp = char_positions[char_id]
             loc_id = cp.get("location_id")
@@ -1473,35 +1576,38 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
 
     # ===== location movement commands / 位置移动指令 =====
     lang = get_ai_language(char_id, group_id=group_id, user_id=user_id)
-    if call_mode:
+    if call_mode or not include_general_agent_rules:
         pass
     elif lang == "ja":
         prompt_parts.append(
             "【位置移動コマンド / Location Movement Commands】\n"
-            "距離<1の任意の地点/座標に移動できます。到着後その地点は「認知地点」に追加されます：\n"
-            "- [MOVE_TO:地点ID] ※認知/知覚リストに**既に存在する地点**への移動にのみ使用可能\n"
-            "- [MOVE_TO_COORD:x,y] 指定座標に単純移動（新地点は作らない）\n"
-            "- [EXPLORE:x,y,\"名称\",\"説明\"] 未探索の地点に移動して新地点を確立\n"
+            "上の移動可能地点へ移動できます。認知済み地点には距離制限がなく、未認知地点/座標は現在地から距離<1の場合のみ移動できます。"
+            "名前付き地点は実際に到着した時だけ認知地点に追加され、近くにあるだけでは追加されません。\n"
+            "- [MOVE_TO:地点ID] 上の移動可能地点へ移動\n"
+            "- [MOVE_TO_COORD:x,y] 距離<1の座標へ単純移動（新地点は作らない）\n"
+            "- [EXPLORE:x,y,\"名称\",\"説明\"] 距離<1の未探索座標へ移動して新地点を確立。同一座標に既存地点があれば新規作成せず、その地点へ移動\n"
             "⚠️ 「出発する・離れる・到着する・別の場所へ行く」と本文で述べる場合、同じ返答に必ず対応する移動タグを付けてください。"
             "移動タグなしで現在地と矛盾する場所にいると主張してはいけません。現在地と座標は上の状態を唯一の基準にしてください。"
         )
     elif lang == "en":
         prompt_parts.append(
             "【Location Movement Commands / 位置移动指令】\n"
-            "Move to any location/coordinate within distance<1. On arrival the location is added to your known list:\n"
-            "- [MOVE_TO:location_id] ※ Only usable for locations that **already exist** in your known/perceived list\n"
-            "- [MOVE_TO_COORD:x,y] Simple move to coordinates (does not create a new location)\n"
-            "- [EXPLORE:x,y,\"name\",\"desc\"] Move to an unknown coordinate and establish a new location\n"
+            "You may move to any destination listed above. Known locations have no distance limit; unknown locations or coordinates must be within distance<1. "
+            "A named location becomes known only after you actually arrive; merely being nearby does not add it.\n"
+            "- [MOVE_TO:location_id] Move to a destination listed above\n"
+            "- [MOVE_TO_COORD:x,y] Move to a coordinate within distance<1 without creating a location\n"
+            "- [EXPLORE:x,y,\"name\",\"desc\"] Establish a new location at an unexplored coordinate within distance<1. If that exact coordinate already has a location, move to the existing one instead\n"
             "⚠️ If your message says you leave, depart, arrive, or go somewhere else, include the matching movement tag in the same reply. "
             "Never claim to be somewhere inconsistent with Current State without moving; Current State coordinates are authoritative."
         )
     else:
         prompt_parts.append(
             "【位置移动指令 / Location Movement Commands】\n"
-            "距离<1格内的任意地点或坐标都可以移动过去，到达后该地点会自动加入你的认知列表：\n"
-            "- [MOVE_TO:地点ID] ※只能在目标地点**已经存在**于你的认知/感知列表中时使用\n"
-            "- [MOVE_TO_COORD:x,y] 移动到指定坐标，单纯移动，不建立新地点\n"
-            "- [EXPLORE:x,y,\"名称\",\"描述\"] 前往一个不在认知/感知中存在的地点并建立新地点\n"
+            "你可以前往上方列出的任一地点。已认知地点不受距离限制；尚未认知的地点或坐标只有在距当前位置<1时才能前往。"
+            "只有实际到达命名地点后才会将其加入认知地点，仅仅位于附近不会加入。\n"
+            "- [MOVE_TO:地点ID] 前往上方列出的地点\n"
+            "- [MOVE_TO_COORD:x,y] 前往距离<1的坐标，不建立新地点\n"
+            "- [EXPLORE:x,y,\"名称\",\"描述\"] 前往距离<1的未探索坐标并建立新地点；如果同一坐标已有地点，则不新建并前往旧地点\n"
             "⚠️ 如果正文说自己出发、离开、到达或去了别处，必须在同一轮附上对应的位置移动标签。"
             "不得在没有移动标签时声称自己位于与“当前状态”不一致的地点；当前状态中的地点和坐标是唯一准确信息。"
         )
@@ -1539,42 +1645,11 @@ def build_system_prompt_v2(char_id, include_global_format=True, recent_messages=
             f"在保留角色语气、口癖和性格特征的前提下，自然地转化为{lang_display}表达。"
         )
 
-    if not call_mode:
+    if not call_mode and include_general_agent_rules:
         chat_mode = _get_char_chat_mode(char_id, user_id=user_id)
         mode_context = get_mode_context(lang, chat_mode=chat_mode)
         if mode_context:
             prompt_parts.append(f"【Mode Context / 模式上下文】\n{mode_context}")
-
-    lang = get_ai_language(char_id, group_id=group_id, user_id=user_id)
-    if not call_mode and lang == "ja":
-        agent_enforce = (
-            "\n\n【Agent Output Requirement / エージェント出力要件】\n"
-            "【最重要】毎回の返信末尾（改行して）に、**必ず 1〜3 個**の Agent Action Tag を出力してください。\n"
-            "上記プロトコルに記載されているタグ形式を厳守してください。\n"
-            "⚠️ 複数タグの場合、それぞれの `[]` を改行で並べてください（例：`[SET_EMOTION:5]\\n[UPDATE_AFFINITY:+2]`）。\n"
-            "単一の `[]` 内にカンマ区切りで複数指令を詰め込まないでください。\n"
-            "今回のターンでパラメータ変更やアクションが本当に何もない場合は、代わりに `[NONE]` と出力してください。"
-        )
-    elif not call_mode and lang == "en":
-        agent_enforce = (
-            "\n\n【Agent Output Requirement / 智能体输出要件】\n"
-            "【CRITICAL】At the end of every reply (on a new line), you MUST output **1~3** Agent Action Tags.\n"
-            "Strictly follow the tag formats described in the protocol above.\n"
-            "⚠️ Multiple tags must each appear on their own line (e.g. `[SET_EMOTION:5]\\n[UPDATE_AFFINITY:+2]`).\n"
-            "Do NOT cram multiple commands into a single `[]` separated by commas.\n"
-            "If there is genuinely nothing to change or execute this turn, output `[NONE]` instead."
-        )
-    elif not call_mode:
-        agent_enforce = (
-            "\n\n【Agent Output Requirement / 智能体输出要件】\n"
-            "【最重要】每轮回复末尾（另起一行），必须输出 **1~3 条** Agent Action Tag。\n"
-            "严格按照上述协议中描述的标签格式输出。\n"
-            "⚠️ 多条标签时，每条 `[]` 独占一行换行并列（例：`[SET_EMOTION:5]\\n[UPDATE_AFFINITY:+2]`）。\n"
-            "不要在单个 `[]` 内用逗号分隔多条指令。\n"
-            "如果当前轮次确实没有任何参数需要调整、没有任何动作需要执行，则输出 `[NONE]` 作为占位。"
-        )
-    if not call_mode:
-        prompt_parts.append(agent_enforce)
 
     return "\n\n".join(prompt_parts)
 
@@ -1601,7 +1676,7 @@ def build_messages_for_chat_v2(char_id, user_input, recent_messages=None, user_i
     return messages
 
 
-def build_system_prompt(char_id, include_global_format=True, recent_messages=None, user_latest_input=None, include_long_memory=True, target_char_id=None, user_id=None):
+def build_system_prompt(char_id, include_global_format=True, recent_messages=None, user_latest_input=None, include_long_memory=True, target_char_id=None, user_id=None, include_all_relationships=False):
     if user_id is None:
         from core.context import get_current_user_id
         user_id = get_current_user_id()
@@ -1630,7 +1705,6 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
         name_age_prefix = "\n".join(parts) + "\n\n"
 
     path_json = os.path.join(prompts_dir, "1_base_persona.json")
-    path_md = os.path.join(prompts_dir, "1_base_persona.md")
 
     content = ""
     try:
@@ -1638,14 +1712,15 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
             with open(path_json, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 content = data.get("system_prompt", "").strip()
-        elif os.path.exists(path_md):
-            with open(path_md, "r", encoding="utf-8-sig") as f:
-                content = f.read().strip()
 
         if content:
             if name_age_prefix:
                 content = name_age_prefix + content
             prompt_parts.append(f"【Role / キャラクター設定】\n{content}")
+            if LOCK_OPEN in content:
+                prompt_parts.append(
+                    f"【Persona Lock / 人设锁定规则】\n{PERSONA_LOCK_MODEL_INSTRUCTION}"
+                )
     except Exception:
         pass
 
@@ -1690,17 +1765,18 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
             target_rel = None
             display_name = current_user_name
 
-            if target_char_id and target_char_id != "user":
-                target_name = get_char_name(target_char_id, user_id=user_id)
-                target_rel = rel_data.get(target_name) or rel_data.get(target_char_id)
-                if target_rel:
-                    display_name = target_name
-            else:
-                target_rel = rel_data.get(current_user_name)
-                if not target_rel:
-                    user_id = get_current_user_id()
-                    if user_id:
-                        target_rel = rel_data.get(str(user_id))
+            if not include_all_relationships:
+                if target_char_id and target_char_id != "user":
+                    target_name = get_char_name(target_char_id, user_id=user_id)
+                    target_rel = rel_data.get(target_name) or rel_data.get(target_char_id)
+                    if target_rel:
+                        display_name = target_name
+                else:
+                    current_user_id = user_id or get_current_user_id()
+                    if current_user_id:
+                        target_rel = rel_data.get(str(current_user_id))
+                    if not target_rel:
+                        target_rel = rel_data.get(current_user_name)
 
             if target_rel:
                 rel_str = (f"対話相手：{display_name}\n"
@@ -1725,7 +1801,11 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
                     rel_lines.append(f"- {disp_name}: {role} (关系度:{score}) {desc}")
                 if rel_lines:
                     rel_text = "\n".join(rel_lines)
-                    prompt_parts.append(f"【Relationship / 関係設定】\n{rel_text}")
+                    section_title = (
+                        "【Complete Relationship Graph / 完整关系图谱】"
+                        if include_all_relationships else "【Relationship / 関係設定】"
+                    )
+                    prompt_parts.append(f"{section_title}\n{rel_text}")
     except Exception:
         pass
 
@@ -1796,19 +1876,24 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
         path = os.path.join(prompts_dir, "7_schedule.json")
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8-sig") as f:
-                schedule = json.load(f)
-                future_plans = []
+                schedule = normalize_schedule_data(json.load(f) or {})
+                dated_plans = _upcoming_schedule_lines(schedule, now.date())
 
-                limit_date = now + timedelta(days=7)
-                limit_date_str = limit_date.strftime("%Y-%m-%d")
+                if dated_plans:
+                    prompt_parts.append(
+                        "【Plans for the Next 7 Days / 未来 7 天计划】\n"
+                        + "\n".join(dated_plans)
+                    )
 
-                sorted_dates = sorted(schedule.keys())
-                for date_key in sorted_dates:
-                    if today_str <= date_key <= limit_date_str:
-                        future_plans.append(f"- {date_key}: {schedule[date_key]}")
-
-                if future_plans:
-                    prompt_parts.append(f"【Schedule / 今後の予定】\n" + "\n".join(future_plans))
+                undated_plans = schedule.get(UNDATED_SCHEDULE_KEY, [])
+                if undated_plans:
+                    prompt_parts.append(
+                        "【Undated Plans / 尚未确定时间的计划】\n- "
+                        + "\n- ".join(undated_plans)
+                        + "\nThese plans are real intentions without a fixed date. Remember and "
+                        "advance them naturally; do not invent dates or add duplicates. Copy the "
+                        "complete displayed content verbatim when deleting, editing, or rewriting."
+                    )
     except Exception:
         pass
 
@@ -1825,6 +1910,7 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
         lang = get_ai_language(char_id, user_id=user_id)
         chat_mode = _get_char_chat_mode(char_id, user_id=user_id)
         content = get_global_system_rules(lang, chat_mode=chat_mode)
+        content = _filter_locked_index_rules(content, char_id, user_id=user_id)
         if content:
             prompt_parts.append(f"【System Rules / 出力ルール】\n{content}")
         if chat_mode != "offline":
@@ -1844,8 +1930,11 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
             agent_rules = GLOBAL_SYSTEM_RULES_EN_AGENT_BRIEF
         else:
             agent_rules = GLOBAL_SYSTEM_RULES_ZH_AGENT_BRIEF
+        agent_rules = _filter_locked_index_rules(agent_rules, char_id, user_id=user_id)
         if agent_rules:
             prompt_parts.append(f"【Agent Actions / 智能体动作】\n{agent_rules}")
+
+    prompt_parts.append(get_content_action_rules(lang))
 
     hour = now.hour
     if 5 <= hour < 11:

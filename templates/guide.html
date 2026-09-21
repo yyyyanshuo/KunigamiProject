@@ -349,6 +349,7 @@
         <nav class="top-nav-panel" aria-label="快捷切换章节">
           <a href="#account">登录 / 注册</a>
           <a href="#profile-settings">个人信息</a>
+          <a href="#persona-lock">人设 AI 编辑保护</a>
           <a href="#notifications">接收通知</a>
           <a href="#models">线路与模型</a>
           <a href="#voice">私有音色</a>
@@ -381,6 +382,7 @@
       <nav class="quick-nav" aria-label="文档目录">
         <a href="#account">登录 / 注册</a>
         <a href="#profile-settings">配置个人信息</a>
+        <a href="#persona-lock">人设 AI 编辑保护</a>
         <a href="#notifications">接收通知</a>
         <a href="#models">线路与模型</a>
         <a href="#voice">ElevenLabs 私有音色</a>
@@ -408,6 +410,22 @@
         <li><span class="path">个人主页 → 账号与通知设置</span>：设置年龄、拍一拍后缀和语言。</li>
         <li><span class="path">个人主页 → 全局用户设定 → 编辑 Edit</span>：填入你自己的人设，完成后保存设定。</li>
       </ol>
+
+      <div id="persona-lock" style="scroll-margin-top:90px; margin-top:24px;">
+        <h3>使用 LOCK 为核心设定添加 AI 编辑保护</h3>
+        <p>进入<span class="path">角色记忆 → 角色人设 → 编辑</span>，用独占一行的 <code>[[LOCK]]</code> 和 <code>[[/LOCK]]</code> 包住原作核心设定：</p>
+        <pre><code>[[LOCK]]
+# 原作核心设定
+- 官方身份、外貌、经历与固定性格
+[[/LOCK]]
+
+# 可以让模型继续调整的补充设定
+- 与用户相处时的习惯</code></pre>
+        <div class="notice">
+          LOCK 标签只约束模型以后编辑、重写人设时不得改动区块内容，不会限制用户本人。编辑框始终是普通文本：你可修改区块内任何文字、移动或删除标签、重新划分范围；保存后以你的新版本为准。标签保留时必须成对、独占一行，并且不能嵌套。
+        </div>
+        <p>AI 自动生成人设会为官方或原作明确资料添加 LOCK 标签，把推测、创作补充和互动偏好留在标签外。普通聊天时角色会读取锁定内容，但不会主动向你解释这些标签。</p>
+      </div>
     </section>
 
     <section class="doc-section" id="notifications">

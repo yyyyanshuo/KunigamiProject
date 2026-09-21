@@ -702,12 +702,12 @@
         <div style="margin-bottom: 20px;">
           <div class="input-label" style="font-weight:600; color:var(--text-main);">1. 选择 API 线路 (Route)</div>
           <div style="display:flex; gap:12px; margin-top:8px;">
-            <label class="radio-card" onclick="selectRoute('gemini')">
-              <input type="radio" name="route" value="gemini" id="radio-gemini">
+            <label class="radio-card">
+              <input type="radio" name="route" value="gemini" id="radio-gemini" onchange="selectRoute('gemini')">
               <span>🚀 Gemini 直连</span>
             </label>
-            <label class="radio-card" onclick="selectRoute('relay')">
-              <input type="radio" name="route" value="relay" id="radio-relay">
+            <label class="radio-card">
+              <input type="radio" name="route" value="relay" id="radio-relay" onchange="selectRoute('relay')">
               <span>⚡ 国内中转</span>
             </label>
           </div>
@@ -717,16 +717,16 @@
         <div id="relay-provider-settings" style="margin-bottom: 20px; display:none;">
           <div class="input-label" style="font-weight:600; color:var(--text-main);">2. 中转商选择 (Relay Provider)</div>
           <div style="display:flex; gap:12px; margin-top:8px; flex-wrap: wrap;">
-            <label class="radio-card" onclick="selectRelayProvider('new')">
-              <input type="radio" name="relay_provider" value="new" id="relay_new">
+            <label class="radio-card">
+              <input type="radio" name="relay_provider" value="new" id="relay_new" onchange="selectRelayProvider('new')">
               <span>🆕 新中转商 (api2d)</span>
             </label>
-            <label class="radio-card" onclick="selectRelayProvider('old')">
-              <input type="radio" name="relay_provider" value="old" id="relay_old">
+            <label class="radio-card">
+              <input type="radio" name="relay_provider" value="old" id="relay_old" onchange="selectRelayProvider('old')">
               <span>📡 旧中转商 (vg)</span>
             </label>
-            <label class="radio-card" onclick="selectRelayProvider('custom')">
-              <input type="radio" name="relay_provider" value="custom" id="relay_custom">
+            <label class="radio-card">
+              <input type="radio" name="relay_provider" value="custom" id="relay_custom" onchange="selectRelayProvider('custom')">
               <span>🔧 自定义网址</span>
             </label>
           </div>
@@ -858,6 +858,47 @@
   </div>
 </div>
 
+<!-- 模块: 协议与隐私 -->
+<div class="section-container collapsed" id="legal-section">
+  <div class="section-header" onclick="toggleSectionByHeader(this)">
+    <div class="section-header-main">
+      <div class="section-title">📄 协议与隐私</div>
+    </div>
+    <span class="section-arrow">▾</span>
+  </div>
+  <div class="section-body">
+    <div class="config-card">
+      <div style="display:grid; gap:10px;">
+        <a href="{{ legal_documents.terms.path }}" target="_blank" rel="noopener noreferrer"
+           style="display:flex; justify-content:space-between; gap:12px; padding:12px; border:1px solid var(--border-color); border-radius:12px; color:var(--text-main); text-decoration:none; background:var(--card-bg);">
+          <span>
+            <strong style="display:block; font-size:14px;">用户协议</strong>
+            <small style="color:var(--text-muted);">版本 {{ legal_documents.terms.version }} · {{ legal_documents.terms.effective_date }}</small>
+          </span>
+          <span style="color:var(--primary-color); align-self:center;">查看全文 ›</span>
+        </a>
+        <a href="{{ legal_documents.privacy.path }}" target="_blank" rel="noopener noreferrer"
+           style="display:flex; justify-content:space-between; gap:12px; padding:12px; border:1px solid var(--border-color); border-radius:12px; color:var(--text-main); text-decoration:none; background:var(--card-bg);">
+          <span>
+            <strong style="display:block; font-size:14px;">隐私政策</strong>
+            <small style="color:var(--text-muted);">版本 {{ legal_documents.privacy.version }} · {{ legal_documents.privacy.effective_date }}</small>
+          </span>
+          <span style="color:var(--primary-color); align-self:center;">查看全文 ›</span>
+        </a>
+      </div>
+
+      <div id="legal-consent-status" style="margin-top:14px; padding:12px; border-radius:12px; background:var(--bg-color); color:var(--text-muted); font-size:12px; line-height:1.7;">
+        正在读取你的协议确认记录…
+      </div>
+      <button id="legal-consent-button" class="btn btn-save" type="button"
+              style="display:none; width:100%; margin-top:10px;" onclick="confirmCurrentLegalDocuments()">
+        确认同意当前版本
+      </button>
+      <div id="legal-consent-error" style="display:none; margin-top:8px; color:#c62828; font-size:12px;"></div>
+    </div>
+  </div>
+</div>
+
 <!-- 模块: 问题反馈 (Feedback) -->
 <div class="section-container collapsed">
   <div class="section-header" onclick="toggleSectionByHeader(this)">
@@ -968,6 +1009,82 @@
 </div>
 
 <!-- 打赏弹窗已移至 tabbar.html -->
+
+  <script>
+    let currentLegalVersions = {
+      terms: {{ legal_documents.terms.version | tojson }},
+      privacy: {{ legal_documents.privacy.version | tojson }}
+    };
+
+    function formatLegalConsentTime(value) {
+      if (!value) return '尚未确认';
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) return value;
+      return parsed.toLocaleString('zh-CN', { hour12: false });
+    }
+
+    function renderLegalConsentStatus(payload) {
+      const statusEl = document.getElementById('legal-consent-status');
+      const button = document.getElementById('legal-consent-button');
+      const documents = payload && payload.documents ? payload.documents : {};
+      const terms = documents.terms || {};
+      const privacy = documents.privacy || {};
+
+      statusEl.innerHTML = [
+        '<strong style="color:var(--text-main);">你的确认记录</strong>',
+        '用户协议：' + (terms.is_current ? '已确认当前版本' : '尚未确认当前版本') + '（' + formatLegalConsentTime(terms.accepted_at) + '）',
+        '隐私政策：' + (privacy.is_current ? '已确认当前版本' : '尚未确认当前版本') + '（' + formatLegalConsentTime(privacy.accepted_at) + '）'
+      ].join('<br>');
+      button.style.display = payload.current ? 'none' : 'block';
+    }
+
+    async function loadLegalConsentStatus() {
+      const statusEl = document.getElementById('legal-consent-status');
+      const errorEl = document.getElementById('legal-consent-error');
+      if (!statusEl) return;
+      try {
+        const response = await fetch('/api/legal/status', { credentials: 'same-origin' });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.message || '读取失败');
+        renderLegalConsentStatus(payload);
+      } catch (error) {
+        statusEl.textContent = '暂时无法读取协议确认记录。';
+        errorEl.textContent = error.message || '读取失败';
+        errorEl.style.display = 'block';
+      }
+    }
+
+    async function confirmCurrentLegalDocuments() {
+      const button = document.getElementById('legal-consent-button');
+      const errorEl = document.getElementById('legal-consent-error');
+      button.disabled = true;
+      button.textContent = '正在确认…';
+      errorEl.style.display = 'none';
+      try {
+        const response = await fetch('/api/legal/consent', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            legal_accepted: true,
+            terms_version: currentLegalVersions.terms,
+            privacy_version: currentLegalVersions.privacy
+          })
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.message || '确认失败');
+        renderLegalConsentStatus(payload);
+      } catch (error) {
+        errorEl.textContent = error.message || '确认失败，请稍后重试';
+        errorEl.style.display = 'block';
+      } finally {
+        button.disabled = false;
+        button.textContent = '确认同意当前版本';
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', loadLegalConsentStatus);
+  </script>
 
   <!-- AI巡航悬浮球 -->
   <div id="delete-account-modal" class="modal-overlay">
@@ -1602,6 +1719,9 @@
 
   // --- 全局配置缓存 ---
   let apiConfig = {};
+  let apiEditConfig = null;
+  let apiEditRoute = null;
+  let apiSaving = false;
 
   // 1. 加载配置并初始化
   async function loadApiConfig() {
@@ -1623,6 +1743,7 @@
       renderApiView();
 
       // 预渲染编辑模式 (但不显示)
+      apiEditConfig = JSON.parse(JSON.stringify(apiConfig));
       const active = apiConfig.active_route;
       document.getElementById(`radio-${active}`).checked = true;
       refreshEditUI(active);
@@ -1661,26 +1782,46 @@
       viewMode.style.display = 'none';
       editMode.style.display = 'block';
       // 进入编辑时，重置为当前生效的配置
+      apiEditConfig = JSON.parse(JSON.stringify(apiConfig));
       const active = apiConfig.active_route;
-      document.getElementById(`radio-${active}`).click(); // 触发点击来刷新UI
+      document.getElementById(`radio-${active}`).checked = true;
+      refreshEditUI(active);
     } else {
       viewMode.style.display = 'block';
       editMode.style.display = 'none';
     }
   }
 
+  // 在重建下拉框或切换线路前，将当前表单收集到同一份编辑草稿。
+  function captureApiEdits() {
+    if (!apiEditConfig || !apiEditRoute) return;
+    const route = apiEditConfig.routes[apiEditRoute];
+    const fields = {chat: 'chat', call: 'call', translation: 'translation',
+      moments: 'moments', vision: 'vision', summary: 'summary',
+      gen_persona: 'gen', image: 'image', forum: 'forum'};
+    Object.entries(fields).forEach(([key, id]) => {
+      route.models[key] = document.getElementById(`model-${id}`).value;
+    });
+    if (apiEditRoute === 'relay') {
+      route.relay_provider = document.querySelector('input[name="relay_provider"]:checked').value;
+      route.relay_custom_url = document.getElementById('relay_custom_url').value.trim();
+    }
+  }
+
   // 4. 编辑模式：切换线路触发
   function selectRoute(route) {
+    captureApiEdits();
     refreshEditUI(route);
   }
 
   // 【新增】中转商选择处理
   function selectRelayProvider(provider) {
+    captureApiEdits();
     // 更新内存中的配置
-    if (!apiConfig.routes.relay) {
-      apiConfig.routes.relay = {};
+    if (!apiEditConfig.routes.relay) {
+      apiEditConfig.routes.relay = {};
     }
-    apiConfig.routes.relay.relay_provider = provider;
+    apiEditConfig.routes.relay.relay_provider = provider;
     // 选中对应的 radio
     document.getElementById(`relay_${provider}`).checked = true;
     
@@ -1690,16 +1831,16 @@
     if (provider === 'custom') {
       customUrlContainer.style.display = 'block';
       // 加载保存的自定义网址
-      customUrlInput.value = apiConfig.routes.relay?.relay_custom_url || '';
+      customUrlInput.value = apiEditConfig.routes.relay?.relay_custom_url || '';
       customUrlInput.focus();
     } else {
       customUrlContainer.style.display = 'none';
-      customUrlInput.value = '';
     }
   }
 
   // 5. 刷新编辑界面 UI (下拉框 + 标签列表)
   function refreshEditUI(route) {
+    apiEditRoute = route;
     // 更新标题
     document.getElementById('manage-route-name').textContent = (route === 'gemini') ? '[Gemini]' : '[中转]';
 
@@ -1708,7 +1849,7 @@
     if (route === 'relay') {
       relayProviderSettings.style.display = 'block';
       // 加载保存的中转商选择
-      const savedProvider = apiConfig.routes.relay?.relay_provider || 'old';
+      const savedProvider = apiEditConfig.routes.relay?.relay_provider || 'old';
       document.getElementById(`relay_${savedProvider}`).checked = true;
       
       // 如果之前选择的是自定义网址，显示输入框并加载值
@@ -1716,17 +1857,17 @@
       const customUrlInput = document.getElementById('relay_custom_url');
       if (savedProvider === 'custom') {
         customUrlContainer.style.display = 'block';
-        customUrlInput.value = apiConfig.routes.relay?.relay_custom_url || '';
+        customUrlInput.value = apiEditConfig.routes.relay?.relay_custom_url || '';
       } else {
         customUrlContainer.style.display = 'none';
-        customUrlInput.value = '';
+        customUrlInput.value = apiEditConfig.routes.relay?.relay_custom_url || '';
       }
     } else {
       relayProviderSettings.style.display = 'none';
     }
 
     // A. 渲染下拉框选项
-    const options = apiConfig.model_options[route] || [];
+    const options = apiEditConfig.model_options[route] || [];
     // 如果列表为空，给个提示
     const optionsHtml = options.length > 0
             ? options.map(m => `<option value="${m}">${m}</option>`).join('')
@@ -1743,8 +1884,8 @@
     document.getElementById('model-forum').innerHTML = optionsHtml;
 
     // B. 选中当前(或默认)值
-    // 注意：这里我们优先显示配置文件里存的值。如果那个值不在列表里了(被删了)，就选列表第一个。
-    const savedModels = apiConfig.routes[route].models;
+    // 使用编辑草稿中的选择；不在选项列表里的已选模型由 setSelectValue 补齐。
+    const savedModels = apiEditConfig.routes[route].models;
 
     setSelectValue('model-chat', savedModels.chat);
     setSelectValue('model-call', savedModels.call != null ? savedModels.call : 'gemini-3.6-flash');
@@ -1796,18 +1937,16 @@
     const newVal = input.value.trim();
     if (!newVal) return;
 
-    const currentRoute = document.querySelector('input[name="route"]:checked').value;
+    captureApiEdits();
+    const currentRoute = apiEditRoute;
 
-    if (!apiConfig.model_options[currentRoute]) apiConfig.model_options[currentRoute] = [];
+    if (!apiEditConfig.model_options[currentRoute]) apiEditConfig.model_options[currentRoute] = [];
 
-    if (!apiConfig.model_options[currentRoute].includes(newVal)) {
-      apiConfig.model_options[currentRoute].push(newVal);
+    if (!apiEditConfig.model_options[currentRoute].includes(newVal)) {
+      apiEditConfig.model_options[currentRoute].push(newVal);
 
       // 刷新 UI
       refreshEditUI(currentRoute);
-
-      // 自动选中新加的模型到第一个下拉框(方便用户)
-      // document.getElementById('model-chat').value = newVal;
 
       input.value = '';
     } else {
@@ -1817,9 +1956,10 @@
 
   // 7. 删除模型
   function deleteModel(val) {
-    const currentRoute = document.querySelector('input[name="route"]:checked').value;
+    captureApiEdits();
+    const currentRoute = apiEditRoute;
     if (confirm(`确定删除模型 "${val}" 吗？`)) {
-      const list = apiConfig.model_options[currentRoute];
+      const list = apiEditConfig.model_options[currentRoute];
       const index = list.indexOf(val);
       if (index > -1) {
         list.splice(index, 1);
@@ -1832,38 +1972,16 @@
   async function saveApiConfig() {
     const activeRoute = document.querySelector('input[name="route"]:checked').value;
 
-    // 更新内存中的配置对象
-    apiConfig.active_route = activeRoute;
-    apiConfig.routes[activeRoute].models.chat = document.getElementById('model-chat').value;
-    apiConfig.routes[activeRoute].models.call = document.getElementById('model-call').value;
-    apiConfig.routes[activeRoute].models.translation = document.getElementById('model-translation').value;
-    apiConfig.routes[activeRoute].models.moments = document.getElementById('model-moments').value;
-    apiConfig.routes[activeRoute].models.vision = document.getElementById('model-vision').value;
-    apiConfig.routes[activeRoute].models.summary = document.getElementById('model-summary').value;
-    apiConfig.routes[activeRoute].models.gen_persona = document.getElementById('model-gen').value;
-    apiConfig.routes[activeRoute].models.image = document.getElementById('model-image').value;
-    apiConfig.routes[activeRoute].models.forum = document.getElementById('model-forum').value;
-
-    // 【新增】保存 relay 中转商选择
-    if (activeRoute === 'relay') {
-      const relayProvider = document.querySelector('input[name="relay_provider"]:checked').value;
-      if (!apiConfig.routes.relay) {
-        apiConfig.routes.relay = {};
-      }
-      apiConfig.routes.relay.relay_provider = relayProvider;
-      
-      // 如果是自定义网址，保存输入的网址
-      if (relayProvider === 'custom') {
-        const customUrl = document.getElementById('relay_custom_url').value.trim();
-        if (!customUrl) {
-          alert('请输入自定义API网址');
-          btn.textContent = originalText;
-          btn.disabled = false;
-          return;
-        }
-        apiConfig.routes.relay.relay_custom_url = customUrl;
-      }
+    if (apiSaving) return;
+    captureApiEdits();
+    apiEditConfig.active_route = activeRoute;
+    if (activeRoute === 'relay' && apiEditConfig.routes.relay.relay_provider === 'custom'
+        && !apiEditConfig.routes.relay.relay_custom_url) {
+      alert('请输入自定义API网址');
+      return;
     }
+    const submittedConfig = JSON.parse(JSON.stringify(apiEditConfig));
+    apiSaving = true;
 
     const btn = document.querySelector('#module-api .btn-save');
     const originalText = btn.textContent;
@@ -1874,9 +1992,11 @@
       const res = await fetchWithAuthGuard('/api/system_config', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(apiConfig)
+        body: JSON.stringify(submittedConfig)
       });
+      if (handleApiUnauthorized(res)) return;
       if(res.ok) {
+        apiConfig = submittedConfig;
         // 重新渲染查看模式
         renderApiView();
         toggleApiEdit(false);
@@ -1887,6 +2007,7 @@
     } catch(e) {
       alert('网络或异常错误: ' + e.message); console.error(e);
     } finally {
+      apiSaving = false;
       btn.textContent = originalText;
       btn.disabled = false;
     }

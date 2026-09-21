@@ -150,6 +150,25 @@ class TestSystemRules:
         assert "個別チャットのみ" in GLOBAL_SYSTEM_RULES_JA_MODE_ONLINE
         assert "private chat with the user only" in GLOBAL_SYSTEM_RULES_EN_MODE_ONLINE
 
+    def test_chat_rules_do_not_offer_legacy_audio_call_bubbles(self):
+        from core.config import get_global_system_rules
+
+        legacy_tags = ("[语音通话]", "[音声通話]", "[Audio Call]")
+        for lang in ("zh", "ja", "en"):
+            rules = get_global_system_rules(lang, "online")
+            assert all(tag not in rules for tag in legacy_tags)
+
+    def test_group_rules_omit_real_proactive_voice_call_action(self):
+        from core.config import get_global_system_rules
+
+        for lang in ("zh", "ja", "en"):
+            private_rules = get_global_system_rules(lang, "online")
+            group_rules = get_global_system_rules(
+                lang, "online", include_proactive_voice_call=False
+            )
+            assert "[CALL_USER]" in private_rules
+            assert "[CALL_USER]" not in group_rules
+
 
 class TestConfigConstants:
     def test_max_context_lines(self):

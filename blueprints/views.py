@@ -4,6 +4,7 @@ from datetime import datetime
 from flask import Blueprint, render_template, make_response, send_from_directory, request, jsonify
 
 from core.time_utils import BEIJING_TZ, beijing_now
+from core.legal import get_legal_document, get_legal_documents
 
 views_bp = Blueprint('views', __name__)
 
@@ -21,6 +22,15 @@ VOICE_LEGACY_DELETE_AT = os.getenv(
     VOICE_ANNOUNCEMENT_END,
 )
 ELEVENLABS_REFERRAL_URL = "https://try.elevenlabs.io/8f8ks0unlqsw"
+PERSONA_LOCK_ANNOUNCEMENT_ID = "persona-lock-2026-08"
+PERSONA_LOCK_ANNOUNCEMENT_START = os.getenv(
+    "PERSONA_LOCK_ANNOUNCEMENT_START",
+    "2026-08-10T00:00:00+08:00",
+)
+PERSONA_LOCK_ANNOUNCEMENT_END = os.getenv(
+    "PERSONA_LOCK_ANNOUNCEMENT_END",
+    "2026-08-24T00:00:00+08:00",
+)
 
 
 def _parse_announcement_time(value):
@@ -35,7 +45,7 @@ def _voice_announcement_payload(now=None):
     start = _parse_announcement_time(VOICE_ANNOUNCEMENT_START)
     end = _parse_announcement_time(VOICE_ANNOUNCEMENT_END)
     delete_at = _parse_announcement_time(VOICE_LEGACY_DELETE_AT)
-    return {
+    payload = {
         "id": VOICE_ANNOUNCEMENT_ID,
         "active": start <= current < end,
         "server_date": current.strftime("%Y-%m-%d"),
@@ -46,6 +56,26 @@ def _voice_announcement_payload(now=None):
         "title": "语音功能调整通知",
         "cta_url": ELEVENLABS_REFERRAL_URL,
     }
+    persona_start = _parse_announcement_time(PERSONA_LOCK_ANNOUNCEMENT_START)
+    persona_end = _parse_announcement_time(PERSONA_LOCK_ANNOUNCEMENT_END)
+    announcements = []
+    if payload["active"]:
+        announcements.append({**payload, "kind": "voice", "show_once": False})
+    if persona_start <= current < persona_end:
+        announcements.append({
+            "id": PERSONA_LOCK_ANNOUNCEMENT_ID,
+            "kind": "persona_lock",
+            "active": True,
+            "show_once": True,
+            "starts_at": persona_start.isoformat(),
+            "ends_at": persona_end.isoformat(),
+            "title": "人设 AI 编辑保护功能上线",
+            "body": "使用 [[LOCK]] 和 [[/LOCK]] 标记核心设定。模型以后编辑人设时必须保留，用户本人仍可随时修改。",
+            "cta_url": "/guide#persona-lock",
+            "cta_label": "查看使用方法",
+        })
+    payload["announcements"] = announcements
+    return payload
 
 
 @views_bp.route('/manifest.json')
@@ -73,13 +103,36 @@ def contact_list_view():
 
 @views_bp.route("/profile")
 def profile_view():
-    return render_template("profile.html")
+    return render_template(
+        "profile.html",
+        legal_documents=get_legal_documents(),
+    )
 
 
 @views_bp.route("/guide")
 def guide_view():
     """Public getting-started guide. This page intentionally requires no login."""
     return render_template("guide.html")
+
+
+@views_bp.route("/terms")
+def terms_view():
+    """Public user agreement; authentication is intentionally not required."""
+    return render_template(
+        "terms.html",
+        document=get_legal_document("terms"),
+        legal_documents=get_legal_documents(),
+    )
+
+
+@views_bp.route("/privacy")
+def privacy_view():
+    """Public privacy policy; authentication is intentionally not required."""
+    return render_template(
+        "privacy.html",
+        document=get_legal_document("privacy"),
+        legal_documents=get_legal_documents(),
+    )
 
 
 @views_bp.route("/chat/<char_id>")

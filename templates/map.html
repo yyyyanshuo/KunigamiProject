@@ -1057,6 +1057,14 @@
         alert(e.error || '创建失败');
         return;
       }
+      let result = await res.json();
+      if (result.existing && result.location) {
+        closeAddLocationModal();
+        await loadData();
+        draw();
+        alert(`该坐标已有地点“${result.location.name}”[${result.location.id}]，未重复创建。`);
+        return;
+      }
       closeAddLocationModal();
       await loadData();
       draw();
@@ -1635,9 +1643,12 @@
 
     for (let loc of locations) {
       let checked = knownSet.has(loc.id) ? 'checked' : '';
+      let isCurrent = p.location_id === loc.id;
+      let disabled = isCurrent ? 'disabled' : '';
+      let title = isCurrent ? 'title="当前所在地不能取消认知"' : '';
       listDiv.innerHTML += `
         <label style="display:flex;align-items:center;margin-bottom:8px;cursor:pointer;">
-          <input type="checkbox" class="known-cb" value="${loc.id}" ${checked} style="width:16px;margin:0 8px 0 0;">
+          <input type="checkbox" class="known-cb" value="${loc.id}" ${checked} ${disabled} ${title} style="width:16px;margin:0 8px 0 0;">
           <span style="font-size:14px;">${loc.name}</span>
           <span style="font-size:11px;color:var(--text-muted);margin-left:6px;">(${loc.x}, ${loc.y})</span>
         </label>
@@ -1656,7 +1667,7 @@
     let cbs = document.querySelectorAll('.known-cb');
     let checkState = invert ? false : !document.getElementById('known-select-all').checked;
     document.getElementById('known-select-all').checked = checkState;
-    cbs.forEach(cb => { cb.checked = checkState; });
+    cbs.forEach(cb => { if (!cb.disabled) cb.checked = checkState; });
   };
 
   window.saveKnownLocations = async function() {

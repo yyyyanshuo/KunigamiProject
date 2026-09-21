@@ -177,14 +177,24 @@ NCM_APP_SECRET=your_ncm_app_secret
 | 文件 | 说明 |
 |------|------|
 | `chat.db` | SQLite 聊天记录 |
-| `prompts/1_base_persona.md` | 核心人设（不含姓名年龄） |
+| `prompts/1_base_persona.json` | 核心人设（仅 `system_prompt`，不含姓名年龄） |
 | `prompts/2_relationship.json` | 角色关系图谱 |
-| `prompts/3_user_persona.md` | 用户档案 |
 | `prompts/4_memory_long.json` | 长期记忆 (周/月总结) |
 | `prompts/5_memory_medium.json` | 中期记忆 (日记式) |
 | `prompts/6_memory_short.json` | 短期记忆 (事件日志) |
 | `prompts/7_schedule.json` | 日程表 |
-| `prompts/8_system_prompt.json` | 自定义 Prompt 覆盖 |
+
+核心人设 JSON 只包含 `system_prompt` 字段。升级旧服务器数据时，请先停止 Web/Worker
+进程并备份 `users` 目录，然后先预检、再显式执行：
+
+```bash
+python scripts/migrate_base_persona.py --users-root /actual/server/users --dry-run
+python scripts/migrate_base_persona.py --users-root /actual/server/users --apply
+```
+
+迁移脚本默认只预检；`--apply` 会在 `users` 同级的
+`persona_migration_backups/<UTC timestamp>/` 中保留原文件。脚本不会删除旧
+Markdown 或备份。
 
 ## 🚀 快速开始 (Quick Start)
 

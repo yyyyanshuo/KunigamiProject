@@ -43,6 +43,16 @@
     button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(255,182,185,0.4); }
     .error-msg { color: red; font-size: 12px; margin-bottom: 10px; display: none; }
     .hint-msg { color: #777; font-size: 12px; line-height: 1.5; margin: -4px 0 12px; }
+    .legal-consent {
+      display: flex; align-items: flex-start; gap: 8px; margin: 2px 0 14px;
+      color: #666; font-size: 12px; line-height: 1.6; text-align: left;
+    }
+    .legal-consent input {
+      flex: 0 0 auto; width: 16px; height: 16px; margin: 2px 0 0;
+      padding: 0; accent-color: #d81b60; cursor: pointer;
+    }
+    .legal-consent a { color: #d81b60; font-weight: 600; text-decoration: none; }
+    .legal-consent a:hover, .legal-consent a:focus { text-decoration: underline; }
     button:disabled { opacity: 0.65; cursor: not-allowed; transform: none; box-shadow: none; }
     .age-modal-overlay {
       position: fixed; inset: 0; background: rgba(0,0,0,0.28);
@@ -76,6 +86,16 @@
   <input type="text" id="display_name" name="display_name" placeholder="昵称 / 显示名 (可选)">
   <input type="password" id="password" name="password" placeholder="密码 (Password)">
 
+  <label class="legal-consent" for="legal_accepted">
+    <input type="checkbox" id="legal_accepted" name="legal_accepted">
+    <span>
+      我已阅读并同意
+      <a href="{{ legal_documents.terms.path }}" target="_blank" rel="noopener noreferrer">《用户协议》</a>
+      和
+      <a href="{{ legal_documents.privacy.path }}" target="_blank" rel="noopener noreferrer">《隐私政策》</a>
+    </span>
+  </label>
+
   <button id="registerBtn" onclick="doRegister()">注 册</button>
 
   <div class="switch-link">
@@ -95,6 +115,7 @@
 </div>
 
 <script>
+  const LEGAL_VERSIONS = {{ legal_versions | tojson }};
   let pendingRegisterPayload = null;
 
   function setError(message) {
@@ -124,7 +145,7 @@
       confirmBtn.onclick = () => showAgeModal(2);
     } else {
       title.textContent = '再次确认';
-      text.textContent = '继续注册即表示你确认自己已年满18周岁，并同意遵守用户协议和隐私政策。';
+      text.textContent = '请再次确认你已年满18周岁。确认后将使用当前填写的信息创建账号。';
       confirmBtn.textContent = '确认并注册';
       cancelBtn.textContent = '取消';
       confirmBtn.onclick = () => {
@@ -148,7 +169,13 @@
       const res = await fetch('/api/register', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ ...pendingRegisterPayload, adult_confirmed: true })
+        body: JSON.stringify({
+          ...pendingRegisterPayload,
+          adult_confirmed: true,
+          legal_accepted: true,
+          terms_version: LEGAL_VERSIONS.terms,
+          privacy_version: LEGAL_VERSIONS.privacy
+        })
       });
       const result = await res.json();
 
@@ -174,6 +201,11 @@
 
     if (!email || !password) {
       setError('请输入邮箱和密码');
+      return;
+    }
+
+    if (!document.getElementById('legal_accepted').checked) {
+      setError('请先阅读并同意用户协议与隐私政策');
       return;
     }
 

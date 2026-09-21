@@ -1,6 +1,7 @@
 import os
 import json
 import random
+import time
 import requests
 import traceback
 from datetime import datetime
@@ -24,14 +25,82 @@ from core.utils import get_effective_gemini_key, get_effective_openrouter_key
 API_CONFIG_FILE = os.path.join(BASE_DIR, "configs", "api_settings.json")
 
 
-class AIResponseText(str):
-    """String-compatible response carrying transport completeness metadata."""
+def _positive_timeout_from_env(name, default):
+    try:
+        value = float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return float(default)
+    return value if value > 0 else float(default)
 
-    def __new__(cls, value, *, complete=True, finish_reason=""):
+
+GEMINI_CONNECT_TIMEOUT_SECONDS = _positive_timeout_from_env(
+    "GEMINI_CONNECT_TIMEOUT_SECONDS", 15
+)
+GEMINI_READ_TIMEOUT_SECONDS = _positive_timeout_from_env(
+    "GEMINI_READ_TIMEOUT_SECONDS", 180
+)
+
+
+class AIResponseText(str):
+    """String-compatible response carrying transport and error metadata."""
+
+    def __new__(
+        cls,
+        value,
+        *,
+        complete=True,
+        finish_reason="",
+        error_code="",
+        error_message="",
+        retryable=False,
+        provider="",
+        status_code=0,
+    ):
         obj = super().__new__(cls, value or "")
         obj.complete = bool(complete)
         obj.finish_reason = finish_reason or ""
+        obj.error_code = error_code or ""
+        obj.error_message = error_message or ""
+        obj.retryable = bool(retryable)
+        obj.provider = provider or ""
+        obj.status_code = int(status_code or 0)
         return obj
+
+
+def ai_error_text(
+    message,
+    *,
+    code="ai_provider_error",
+    retryable=False,
+    provider="",
+    status_code=502,
+):
+    """Return a legacy-compatible string with machine-readable error metadata."""
+    display_message = str(message or "AI 服务暂时不可用，请稍后重试").strip()
+    return AIResponseText(
+        f"（系统提示：{display_message}）",
+        error_code=code,
+        error_message=display_message,
+        retryable=retryable,
+        provider=provider,
+        status_code=status_code,
+    )
+
+
+def is_ai_error_response(value):
+    return bool(getattr(value, "error_code", ""))
+
+
+def ai_error_payload(value):
+    if not is_ai_error_response(value):
+        return None
+    return {
+        "error": value.error_code,
+        "message": value.error_message or str(value),
+        "retryable": bool(value.retryable),
+        "provider": value.provider or "",
+        "status_code": int(value.status_code or 0),
+    }
 
 
 def _write_user_log(user_id, text):
@@ -43,7 +112,10 @@ def _write_user_log(user_id, text):
     log_file = os.path.join(log_dir, "api.log")
 
     if os.path.exists(log_file):
-        with open(log_file, "r", encoding="utf-8") as f:
+        # Historical logs may contain bytes written under an older system
+        # encoding. Preserve readable content instead of breaking the actual
+        # AI request merely because the optional diagnostic log is malformed.
+        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
     else:
         lines = []
@@ -256,14 +328,26 @@ def call_openrouter(
     gcb = check_relay_global_pause()
     if gcb:
         set_circuit_breaker_info(gcb)
-        return f"（系统提示：{gcb['message']}）"
+        return ai_error_text(
+            gcb["message"],
+            code="circuit_breaker",
+            retryable=True,
+            provider="relay",
+            status_code=503,
+        )
 
     _uid = user_id or get_current_user_id()
     if _uid:
         cb = check_circuit_breaker(_uid, "relay")
         if cb:
             set_circuit_breaker_info(cb)
-            return f"（系统提示：{cb['message']}）"
+            return ai_error_text(
+                cb["message"],
+                code="circuit_breaker",
+                retryable=True,
+                provider="relay",
+                status_code=503,
+            )
 
     try:
         r = requests.post(url, json=payload, headers=headers, timeout=300)
@@ -279,7 +363,13 @@ def call_openrouter(
                     "message": "中转服务器触发安全拦截（Cloudflare），已暂停所有中转请求 3 分钟。",
                     "remaining_seconds": 180,
                 })
-                return "（系统提示：中转服务器触发安全拦截，已暂停所有中转请求 3 分钟，请稍后重试。）"
+                return ai_error_text(
+                    "中转服务器触发安全拦截，已暂停所有中转请求 3 分钟，请稍后重试。",
+                    code="circuit_breaker",
+                    retryable=True,
+                    provider="relay",
+                    status_code=503,
+                )
 
             if r.status_code in RELAY_FATAL_CODES:
                 mark_api_fatal_error("relay", r.status_code)
@@ -289,15 +379,15 @@ def call_openrouter(
                         set_circuit_breaker_info(cb)
 
             if r.status_code == 401:
-                return "（系统提示：身份验证失败。请检查是否在【个人主页-账号与通知设置-openrouter】中正确填写了 API Key。）"
+                return ai_error_text("身份验证失败。请检查是否在【个人主页-账号与通知设置-openrouter】中正确填写了 API Key。", code="authentication_failed", provider="relay", status_code=401)
             elif r.status_code == 402:
-                return "（系统提示：账户点数不足，请前往 API 网站充值。）"
+                return ai_error_text("账户点数不足，请前往 API 网站充值。", code="insufficient_credits", provider="relay", status_code=402)
             elif r.status_code == 403:
-                return "（系统提示：请正确填写模型代码，或检查 API Key 权限范围。）"
+                return ai_error_text("请正确填写模型代码，或检查 API Key 权限范围。", code="access_denied", provider="relay", status_code=403)
             elif r.status_code == 524:
-                return "（系统提示：请求超时，AI 思考时间过长。请尝试缩短当前聊天内容或精简人设设定。）"
+                return ai_error_text("请求超时，AI 思考时间过长。请尝试缩短当前聊天内容或精简人设设定。", code="relay_timeout", retryable=True, provider="relay", status_code=524)
             elif r.status_code == 525:
-                return "（系统提示：中转服务器连接异常，请稍后再试或联系管理员。）"
+                return ai_error_text("中转服务器连接异常，请稍后再试或联系管理员。", code="relay_connection_error", retryable=True, provider="relay", status_code=525)
 
             # 非致命错误：提取 JSON 报错详情附加到提示中（不影响熔断计数）
             api_detail = None
@@ -309,24 +399,24 @@ def call_openrouter(
                 pass
 
             if r.status_code == 429:
-                return "（系统提示：请求过于频繁，AI 累了，请休息一分钟再聊哦。）"
+                return ai_error_text("请求过于频繁，AI 累了，请休息一分钟再聊哦。", code="rate_limited", retryable=True, provider="relay", status_code=429)
             elif r.status_code >= 500:
                 detail = api_detail or f"AI 服务商目前繁忙（{r.status_code}），请稍后再试。"
-                return f"（系统提示：{detail}）"
+                return ai_error_text(detail, code="relay_server_error", retryable=True, provider="relay", status_code=r.status_code)
             else:
                 detail = api_detail or f"服务连接异常，错误码: {r.status_code}"
-                return f"（系统提示：{detail}）"
+                return ai_error_text(detail, code="relay_http_error", provider="relay", status_code=r.status_code)
 
         try:
             result = r.json()
         except Exception as parse_err:
             log_api_error(f"OpenRouter ({model_name})", "JSON_PARSE_ERROR", r.text, messages=messages)
-            return "（系统提示：AI 返回了无法解析的异常信号，请重试。）"
+            return ai_error_text("AI 返回了无法解析的异常信号，请重试。", code="invalid_response", retryable=True, provider="relay", status_code=502)
 
         if "error" in result:
             err_msg = result["error"].get("message", "Unknown error")
             log_api_error(f"OpenRouter ({model_name})", "API_INTERNAL_ERROR", str(result["error"]), messages=messages)
-            return f"（系统提示：AI 服务返回内部错误: {err_msg}）"
+            return ai_error_text(f"AI 服务返回内部错误: {err_msg}", code="api_internal_error", retryable=True, provider="relay", status_code=502)
 
         if 'usage' in result:
             usage = result['usage']
@@ -340,7 +430,7 @@ def call_openrouter(
 
         if "choices" not in result or len(result["choices"]) == 0:
             print(f"⚠️ [Empty Response] API 返回了空列表。")
-            return "（系统提示：AI 暂时陷入了沉思，请换个话题试试。）"
+            return ai_error_text("AI 暂时陷入了沉思，请换个话题试试。", code="empty_response", retryable=True, provider="relay", status_code=502)
 
         import json as _json
         print("🔍 [DEBUG] API 原始完整响应:")
@@ -350,7 +440,7 @@ def call_openrouter(
             content = result["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as e:
             print(f"⚠️ [Parse Error] 无法解析响应结构: {e}")
-            return "（系统提示：数据结构解析失败，请重试。）"
+            return ai_error_text("数据结构解析失败，请重试。", code="response_parse_error", retryable=True, provider="relay", status_code=502)
 
         finish_reason = result["choices"][0].get("finish_reason", "")
         if finish_reason and finish_reason != "stop":
@@ -367,10 +457,10 @@ def call_openrouter(
         )
 
     except requests.exceptions.Timeout:
-        return "（系统提示：连接 AI 服务器超时，对方思考得太久了，请稍后重试。）"
+        return ai_error_text("连接 AI 服务器超时，对方思考得太久了，请稍后重试。", code="ai_timeout", retryable=True, provider="relay", status_code=504)
     except Exception as e:
         print(f"[ERROR] API 调用异常: {e}\n{traceback.format_exc()}")
-        return "（系统提示：网络链路不稳定，请稍后再试。）"
+        return ai_error_text("网络链路不稳定，请稍后再试。", code="network_error", retryable=True, provider="relay", status_code=502)
 
 
 def call_gemini(
@@ -379,6 +469,7 @@ def call_gemini(
     model_name="gemini-2.0-flash",
     user_id=None,
     temperature=1,
+    max_tokens=4096,
 ):
     base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
     api_key = get_effective_gemini_key(user_id=user_id)
@@ -408,7 +499,7 @@ def call_gemini(
         "contents": gemini_contents,
         "generationConfig": {
             "temperature": temperature,
-            "maxOutputTokens": 4096
+            "maxOutputTokens": max_tokens
         },
         "safetySettings": [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
@@ -420,7 +511,6 @@ def call_gemini(
     if system_instruction:
         payload["systemInstruction"] = system_instruction
 
-    import time
     max_retries = 3
     r = None
 
@@ -430,18 +520,34 @@ def call_gemini(
         cb = check_circuit_breaker(_uid, "gemini")
         if cb:
             set_circuit_breaker_info(cb)
-            return f"（系统提示：{cb['message']}）"
+            return ai_error_text(
+                cb["message"],
+                code="circuit_breaker",
+                retryable=True,
+                provider="gemini",
+                status_code=503,
+            )
 
     for attempt in range(max_retries):
         try:
-            r = requests.post(url, json=payload, headers=headers, proxies={"http": None, "https": None}, timeout=30)
+            r = requests.post(
+                url,
+                json=payload,
+                headers=headers,
+                proxies={"http": None, "https": None},
+                timeout=(
+                    GEMINI_CONNECT_TIMEOUT_SECONDS,
+                    GEMINI_READ_TIMEOUT_SECONDS,
+                ),
+            )
 
             if r.status_code == 200:
                 break
 
-            # 429 is often a short per-minute burst limit.  Memory generation
-            # is safe to retry because it commits only after a complete result.
-            if r.status_code in [429, 500, 503, 504]:
+            # Only Gemini 503 is retried automatically. A long read timeout is
+            # surfaced to the caller instead of restarting an expensive
+            # generation several times and overrunning the browser timeout.
+            if r.status_code == 503:
                 if attempt < max_retries - 1:
                     sleep_time = min(8, 2 ** attempt)
                     print(f"⚠️ [Gemini {r.status_code}] 谷歌服务端临时故障。第 {attempt+1}/{max_retries} 次尝试失败，{sleep_time} 秒后自动重试...")
@@ -459,33 +565,29 @@ def call_gemini(
                         set_circuit_breaker_info(cb)
 
             if r.status_code == 400:
-                return "（系统提示：请求参数异常（400），请联系管理员检查配置。）"
+                return ai_error_text("请求参数异常（400），请联系管理员检查配置。", code="bad_request", provider="gemini", status_code=400)
             elif r.status_code == 403:
-                return "（系统提示：访问被拒绝（403）。请检查是否在【个人主页-账号与通知设置-gemini】中正确填写了 API Key。）"
+                return ai_error_text("访问被拒绝（403）。请检查是否在【个人主页-账号与通知设置-gemini】中正确填写了 API Key。", code="access_denied", provider="gemini", status_code=403)
             elif r.status_code == 429:
-                return "（系统提示：请求过于频繁（429），谷歌端限制了访问频率，请发慢一点哦。）"
+                return ai_error_text("请求过于频繁（429），谷歌端限制了访问频率，请发慢一点哦。", code="rate_limited", retryable=True, provider="gemini", status_code=429)
             elif r.status_code in [500, 504]:
-                return f"（系统提示：服务器响应超时或内部错误（{r.status_code}），请尝试精简聊天内容或缩减人设设定。）"
+                return ai_error_text(f"服务器响应超时或内部错误（{r.status_code}），请稍后重试。", code=f"gemini_{r.status_code}", retryable=True, provider="gemini", status_code=r.status_code)
             elif r.status_code == 503:
-                return "（系统提示：谷歌服务端当前过载（503），请稍后再试。）"
+                return ai_error_text("谷歌服务端当前过载（503），请稍后再试。", code="gemini_503", retryable=True, provider="gemini", status_code=503)
             else:
-                return f"（系统提示：AI 暂时无法连接，错误码: {r.status_code}）"
+                return ai_error_text(f"AI 暂时无法连接，错误码: {r.status_code}", code="gemini_http_error", retryable=r.status_code >= 500, provider="gemini", status_code=502 if r.status_code >= 500 else r.status_code)
 
-        except requests.exceptions.Timeout as t_err:
-            if attempt < max_retries - 1:
-                sleep_time = min(8, 2 ** attempt)
-                print(f"⚠️ [Gemini Timeout] 连接超时。第 {attempt+1}/{max_retries} 次尝试失败，{sleep_time} 秒后自动重试...")
-                time.sleep(sleep_time)
-                continue
-            return "（系统提示：AI 思考太久啦，连接超时，请重试。）"
+        except requests.exceptions.Timeout:
+            return ai_error_text(
+                "AI 生成回复超时，请重试。",
+                code="ai_timeout",
+                retryable=True,
+                provider="gemini",
+                status_code=504,
+            )
         except Exception as e:
-            if attempt < max_retries - 1:
-                sleep_time = min(8, 2 ** attempt)
-                print(f"⚠️ [Gemini Exception] {type(e).__name__}。第 {attempt+1}/{max_retries} 次尝试失败，{sleep_time} 秒后自动重试...")
-                time.sleep(sleep_time)
-                continue
             print(f"🔥 [Gemini 未知异常]: {type(e).__name__}")
-            return "（系统提示：网络连接波动，请稍后再试。）"
+            return ai_error_text("网络连接波动，请稍后再试。", code="network_error", retryable=True, provider="gemini", status_code=502)
 
     # 如果成功获取到了 200 响应
     if r and r.status_code == 200:
@@ -493,12 +595,12 @@ def call_gemini(
             result = r.json()
         except Exception as parse_err:
             log_api_error(f"Gemini {model_name}", "JSON_PARSE_ERROR", r.text, messages=messages)
-            return "（系统提示：接收到了异常信号，请重试。）"
+            return ai_error_text("接收到了异常信号，请重试。", code="invalid_response", retryable=True, provider="gemini", status_code=502)
 
         if "error" in result:
             err_info = str(result["error"])
             log_api_error(f"Gemini {model_name}", "API_INTERNAL_ERROR", err_info, messages=messages)
-            return f"（系统提示：API 内部错误: {result['error'].get('message', 'Unknown')}）"
+            return ai_error_text(f"API 内部错误: {result['error'].get('message', 'Unknown')}", code="api_internal_error", retryable=True, provider="gemini", status_code=502)
 
         token_usage = result.get('usageMetadata', {})
         if token_usage:
@@ -511,7 +613,7 @@ def call_gemini(
             )
 
         if 'candidates' not in result or not result['candidates']:
-            return "（AI 陷入了沉默，没有给出回复。）"
+            return ai_error_text("AI 没有给出回复，请重试。", code="empty_response", retryable=True, provider="gemini", status_code=502)
 
         candidate = result['candidates'][0]
         text = ""
@@ -528,7 +630,7 @@ def call_gemini(
                 text = f"（由于系统限制，AI 无法生成此段对话。原因: {finish_reason}）"
         except (KeyError, IndexError, TypeError) as e:
             print(f"⚠️ [Gemini 解析错误]: {e}")
-            return "（系统提示：回复解析失败。）"
+            return ai_error_text("回复解析失败，请重试。", code="response_parse_error", retryable=True, provider="gemini", status_code=502)
 
         log_full_prompt(f"Gemini Interaction ({model_name})", messages, response_text=text, usage=token_usage)
 

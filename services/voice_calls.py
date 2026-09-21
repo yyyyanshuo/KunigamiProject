@@ -378,6 +378,32 @@ def get_live_call(user_id) -> dict | None:
         conn.close()
 
 
+def get_latest_ended_call(user_id, char_id: str | None = None) -> dict | None:
+    """Return the most recently ended call, optionally limited to one character."""
+    conn = _connect(user_id)
+    try:
+        if char_id is None:
+            row = conn.execute(
+                """
+                SELECT * FROM voice_calls
+                WHERE status = 'ended' AND ended_at IS NOT NULL
+                ORDER BY ended_at DESC LIMIT 1
+                """
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT * FROM voice_calls
+                WHERE status = 'ended' AND ended_at IS NOT NULL AND char_id = ?
+                ORDER BY ended_at DESC LIMIT 1
+                """,
+                (str(char_id),),
+            ).fetchone()
+        return _row_dict(row)
+    finally:
+        conn.close()
+
+
 def set_opening(user_id, call_id: str, *, text: str = "", tone: str = "") -> dict:
     conn = _connect(user_id)
     try:

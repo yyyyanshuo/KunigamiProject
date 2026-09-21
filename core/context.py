@@ -67,6 +67,8 @@ def init_users_db():
         cur.execute("ALTER TABLE users ADD COLUMN auth_version INTEGER DEFAULT 1")
     except sqlite3.OperationalError:
         pass
+    from core.legal import init_legal_consents_table
+    init_legal_consents_table(conn)
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS circuit_breaker (

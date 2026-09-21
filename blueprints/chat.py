@@ -8,6 +8,7 @@ import sqlite3
 import shutil
 import threading
 import tempfile
+import unicodedata
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
@@ -19,12 +20,12 @@ from PIL import Image
 from core.config import COS_BASE_URL, CHARACTERS_DIR, USERS_ROOT
 from core.context import get_current_user_id, set_background_user
 from core.circuit_breaker import get_circuit_breaker_info
-from core.memory_periods import parse_week_key_to_dates
+from core.system_messages import should_suppress_reply_for_deep_sleep
 from core.utils import (
     get_paths, safe_save_json, _add_furigana_to_japanese,
     _get_characters_config_file, _get_read_status_file,
     _get_groups_config_file, _get_character_positions_file,
-    _load_user_settings,
+    _load_user_settings, get_group_dir,
 )
 from core.time_utils import (
     default_character_timezone,
@@ -40,11 +41,15 @@ from core.time_utils import (
 )
 from services import (
     call_gemini, call_openrouter, get_model_config, build_system_prompt_v2,
-    call_ai_to_summarize, generate_medium_memory_for_date,
+    call_ai_to_summarize, generate_long_memory_for_week, generate_medium_memory_for_date,
     update_short_memory_for_date,
 )
+from services.ai_client import ai_error_payload, is_ai_error_response
 from services.prompt_builder import build_messages_for_chat_v2, get_ai_language
-from services.memory_store import atomic_write_json, memory_file_lock
+from services.memory_store import atomic_write_json, load_json_object, memory_file_lock
+from services.read_state import mark_conversations_read, remove_read_state
+from services.schedule import ScheduleValidationError, normalize_schedule_data
+from services.persona_locks import PersonaLockError, validate_persona_locks
 from services.image_tags import split_message_bubbles
 from services.voice_messages import (
     VoiceMessageError,
@@ -68,7 +73,6 @@ def _create_character_call_if_requested(user_id, char_id, requested):
 
 
 TRANSFER_MAX_AMOUNT = Decimal("999999999.99")
-TRANSFER_PREFIX_SYMBOLS = "$€£₩₹₽฿₫₺₴₪₱"
 TRANSFER_RESOLVED_KINDS = {
     "accept": ("领取转账", "已领取转账", "accepted"),
     "return": ("退回转账", "已退回转账", "returned"),
@@ -93,21 +97,21 @@ class TransferActionError(ValueError):
 
 
 def normalize_transfer_amount(raw_amount):
-    """Validate and normalize a visible amount token such as 88.00元 or $12.50."""
+    """Validate an amount with optional currency text or symbols on either side."""
     amount = re.sub(r"\s+", "", str(raw_amount or ""))
     if not amount:
         raise TransferActionError("转账金额不能为空")
 
-    number_text = None
-    if amount[-1:] in {"元", "円"}:
-        number_text = amount[:-1]
-    elif amount[:1] in TRANSFER_PREFIX_SYMBOLS:
-        number_text = amount[1:]
-    else:
-        raise TransferActionError("人民币请使用“元”，日元请使用“円”，其他货币请使用货币符号")
-
-    if not re.fullmatch(r"(?:0|[1-9]\d{0,8})(?:\.\d{1,2})?", number_text or ""):
+    match = re.fullmatch(
+        r"([^0-9]*?)((?:0|[1-9][0-9]{0,8})(?:\.[0-9]{1,2})?)([^0-9]*)",
+        amount,
+    )
+    if not match or any(
+        not (ch.isalpha() or unicodedata.category(ch) == "Sc")
+        for ch in match[1] + match[3]
+    ):
         raise TransferActionError("转账金额格式无效")
+    number_text = match[2]
     try:
         numeric = Decimal(number_text)
     except InvalidOperation as exc:
@@ -137,7 +141,9 @@ def parse_transfer_tag(content):
     }
 
 
-def apply_transfer_action(cursor, payload, user_message):
+def apply_transfer_action(
+    cursor, payload, user_message, *, allow_group_character_source=False
+):
     """Resolve an incoming transfer and return the canonical user-visible tag."""
     action = str(payload.get("transfer_action") or "").strip().lower()
     source_id = payload.get("transfer_source_id")
@@ -162,7 +168,13 @@ def apply_transfer_action(cursor, payload, user_message):
 
     cursor.execute("SELECT role, content FROM messages WHERE id = ?", (source_id,))
     source = cursor.fetchone()
-    if source is None or source[0] != "assistant":
+    source_role = source[0] if source is not None else None
+    valid_source = (
+        source_role not in (None, "user")
+        if allow_group_character_source
+        else source_role == "assistant"
+    )
+    if not valid_source:
         raise TransferActionError("找不到对应的角色转账", 404, "transfer_not_found")
 
     try:
@@ -434,33 +446,91 @@ def _circuit_breaker_json_response(user_msg_id=None, model=None):
     return jsonify(resp)
 
 
+def _ai_error_json_response(reply, user_msg_id=None, model=None):
+    """Convert provider failures into JSON before they can become chat messages."""
+    if not is_ai_error_response(reply):
+        return None
+    resp = ai_error_payload(reply)
+    resp["replies"] = []
+    if user_msg_id is not None:
+        resp["user_id"] = user_msg_id
+    if model:
+        resp["model"] = model
+    return jsonify(resp), (getattr(reply, "status_code", 0) or 502)
+
+
 def get_char_db_path(char_id) -> str:
     """获取指定角色的 DB 路径（内部复用 get_paths，确保与多用户命名空间一致）。"""
     db_path, _ = get_paths(char_id)
     return db_path
 
 
-def mark_char_as_read(char_id):
-    """更新某个角色/群聊的最后阅读时间（写入当前用户的 read_status.json）"""
-    try:
-        status_file = _get_read_status_file()
-        data = {}
-        if os.path.exists(status_file):
-            with open(status_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+def _resolve_read_targets(items):
+    characters = load_json_object(_get_characters_config_file())
+    groups = load_json_object(_get_groups_config_file())
+    targets = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("Invalid conversation")
+        conversation_id = item.get("id")
+        if not isinstance(conversation_id, str) or not conversation_id:
+            raise ValueError("Invalid conversation ID")
+        kind = item.get("type")
+        if kind is None:  # Compatibility for old callers.
+            kind = "chat" if conversation_id in characters else "group"
+        if kind == "char":
+            kind = "chat"
+        allowed = characters if kind == "chat" else groups if kind == "group" else {}
+        if conversation_id not in allowed:
+            raise ValueError("Conversation not found")
+        db_path = (get_paths(conversation_id)[0] if kind == "chat" else
+                   os.path.join(get_group_dir(conversation_id), "chat.db"))
+        targets.append((kind, conversation_id, db_path, item.get("last_message_id")))
+    return targets
 
-        # 记录当前时间（char_id 或 group_id 均可用作 key）
-        data[char_id] = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
 
-        with open(status_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except: pass
+def mark_char_as_read(char_id, kind=None, last_message_id=None):
+    targets = _resolve_read_targets([{"id": char_id, "type": kind, "last_message_id": last_message_id}])
+    return mark_conversations_read(_get_read_status_file(), targets)
 
 
 @chat_bp.route("/api/<char_id>/mark_read", methods=["POST"])
 def mark_read_api(char_id):
-    mark_char_as_read(char_id)
-    return jsonify({"status": "success"})
+    if not get_current_user_id():
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        data = request.get_json(silent=True)
+        if data is None and not request.data:
+            data = {}
+        if not isinstance(data, dict):
+            raise ValueError("Invalid request")
+        results = mark_char_as_read(char_id, data.get("type"), data.get("last_message_id"))
+        return jsonify({"status": "success", "conversations": results})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        print(f"Mark read failed: {exc}")
+        return jsonify({"error": "已读状态保存失败，请重试"}), 500
+
+
+@chat_bp.route("/api/contacts/mark_read", methods=["POST"])
+def mark_contacts_read_api():
+    if not get_current_user_id():
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        data = request.get_json(silent=True)
+        items = data.get("conversations") if isinstance(data, dict) else None
+        if not isinstance(items, list) or not items or len(items) > 2000:
+            raise ValueError("conversations must contain 1-2000 items")
+        if any(not isinstance(item, dict) or item.get("last_message_id") is None for item in items):
+            raise ValueError("last_message_id is required")
+        results = mark_conversations_read(_get_read_status_file(), _resolve_read_targets(items))
+        return jsonify({"status": "success", "conversations": results})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        print(f"Batch mark read failed: {exc}")
+        return jsonify({"error": "已读状态保存失败，请重试"}), 500
 
 
 
@@ -533,6 +603,50 @@ def get_history(char_id):
     })
 
 
+@chat_bp.route("/api/<char_id>/messages", methods=["POST"])
+def create_user_message(char_id):
+    """Persist a user message and return its real ID before reply generation starts."""
+    from app import init_char_db
+
+    user_id = get_current_user_id()
+    data = request.json or {}
+    user_msg = str(data.get("message", "")).strip()
+    if not user_msg:
+        return jsonify({"error": "empty message"}), 400
+    try:
+        validate_voice_message_for_scope(
+            user_id, user_msg, scope_type="chat", scope_id=char_id
+        )
+    except VoiceMessageError as exc:
+        return jsonify({"error": "voice_message_invalid", "message": str(exc)}), 400
+
+    db_path, _ = get_paths(char_id, user_id=user_id)
+    if not os.path.exists(db_path):
+        init_char_db(char_id)
+
+    user_ts = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
+            ("user", user_msg, user_ts),
+        )
+        user_msg_id = cursor.lastrowid
+        conn.commit()
+    finally:
+        conn.close()
+
+    attach_voice_message(
+        user_id,
+        user_msg,
+        scope_type="chat",
+        scope_id=char_id,
+        message_id=user_msg_id,
+    )
+    return jsonify({"user_id": user_msg_id, "timestamp": user_ts}), 201
+
+
 @chat_bp.route("/api/<char_id>/chat", methods=["POST"])
 def chat(char_id):
     from app import init_char_db, sync_memory_before_single_chat, _memory_context_changed, process_ai_media_tags, _execute_directive, _check_consecutive_tickle, _strip_consecutive_tickle, _extract_tickle_target, _sticker_content_from_ai
@@ -602,7 +716,7 @@ def chat(char_id):
     )
 
     # --- 5. 如果在深睡眠，直接返回空回复，不调 AI ---
-    if is_deep_sleep:
+    if should_suppress_reply_for_deep_sleep(is_deep_sleep, user_msg_raw):
         print(f"--- [Deep Sleep] {char_id} 正在熟睡，不回复消息 ---")
 
         # 即使不回复，也把 user_id 传回去，这样用户发的气泡才有删除按钮
@@ -705,6 +819,14 @@ def chat(char_id):
         if cb_resp:
             return cb_resp
 
+        error_resp = _ai_error_json_response(
+            reply_text_raw,
+            user_msg_id=user_msg_id,
+            model=current_model,
+        )
+        if error_resp:
+            return error_resp
+
         # 清理时间戳
         timestamp_pattern = r'\[(?:(?:\d{2}-\d{2}\s+)?\d{1,2}:\d{2})\]\s*'
         cleaned_reply_text = re.sub(timestamp_pattern, '', reply_text_raw).strip()
@@ -791,9 +913,6 @@ def chat(char_id):
             resp["memory_sync_warning"] = memory_sync_warning
         if agent_events:
             resp["agent_events"] = agent_events
-            safety_alerts = [ev.get("message") for ev in agent_events if ev.get("type") == "safety_alert" and ev.get("message")]
-            if safety_alerts:
-                resp["safety_alert"] = "\n".join(safety_alerts)
         if incoming_call:
             resp["incoming_call"] = incoming_call
         elif incoming_call_error:
@@ -826,9 +945,13 @@ def chat_v2(char_id):
         return jsonify({"error": "empty message"}), 400
     try:
         validate_voice_message_for_scope(
-            user_id, user_msg_raw, scope_type="chat", scope_id=char_id
+            user_id,
+            user_msg_raw,
+            scope_type="chat",
+            scope_id=char_id,
+            message_id=data.get("user_message_id"),
         )
-    except VoiceMessageError as exc:
+    except (VoiceMessageError, TypeError, ValueError) as exc:
         return jsonify({"error": "voice_message_invalid", "message": str(exc)}), 400
 
     # 3. 检查深睡眠状态
@@ -848,33 +971,52 @@ def chat_v2(char_id):
     if chat_mode == "offline":
         is_deep_sleep = False
 
-    # 4. 存入用户消息；领取/退回转账时先在同一事务中更新原角色消息。
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    user_ts = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
+    # 4. 新发送链路会先单独落库并传入 user_message_id；旧客户端仍兼容在此落库。
+    pre_saved_message_id = data.get("user_message_id")
     transfer_update = None
-    try:
-        conn.execute("BEGIN IMMEDIATE")
-        user_msg_raw, transfer_update = apply_transfer_action(cursor, data, user_msg_raw)
-        cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", ("user", user_msg_raw, user_ts))
-        user_msg_id = cursor.lastrowid
-        conn.commit()
-    except TransferActionError as exc:
-        conn.rollback()
+    if pre_saved_message_id is not None:
+        try:
+            user_msg_id = int(pre_saved_message_id)
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid user_message_id"}), 400
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT role, content FROM messages WHERE id = ?",
+            (user_msg_id,),
+        )
+        saved_message = cursor.fetchone()
         conn.close()
-        return jsonify({"error": exc.code, "message": exc.message}), exc.status_code
-    except Exception:
-        conn.rollback()
+        if not saved_message or saved_message[0] != "user":
+            return jsonify({"error": "user message not found"}), 404
+        # 数据库内容为准，可接住落库后、生成前发生的快速编辑。
+        user_msg_raw = saved_message[1]
+    else:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        user_ts = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            user_msg_raw, transfer_update = apply_transfer_action(cursor, data, user_msg_raw)
+            cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", ("user", user_msg_raw, user_ts))
+            user_msg_id = cursor.lastrowid
+            conn.commit()
+        except TransferActionError as exc:
+            conn.rollback()
+            conn.close()
+            return jsonify({"error": exc.code, "message": exc.message}), exc.status_code
+        except Exception:
+            conn.rollback()
+            conn.close()
+            raise
         conn.close()
-        raise
-    conn.close()
-    attach_voice_message(
-        user_id,
-        user_msg_raw,
-        scope_type="chat",
-        scope_id=char_id,
-        message_id=user_msg_id,
-    )
+        attach_voice_message(
+            user_id,
+            user_msg_raw,
+            scope_type="chat",
+            scope_id=char_id,
+            message_id=user_msg_id,
+        )
 
     # 【Agent】若该用户的浏览器 Agent 正在等待用户回复（[ASK]/[WAIT] 暂停中），
     # 则把本条消息作为 Agent 回复写入 IPC 唤醒它，由 Agent 重新截取页面快照后续跑，
@@ -902,7 +1044,7 @@ def chat_v2(char_id):
             print(f"[Chat v2] Agent 转交检查失败: {e}")
 
     # 5. 检查深睡眠
-    if is_deep_sleep:
+    if should_suppress_reply_for_deep_sleep(is_deep_sleep, user_msg_raw):
         print(f"--- [Deep Sleep v2] {char_id} 正在熟睡，不回复消息 ---")
         return jsonify({
             "replies": [],
@@ -1001,6 +1143,14 @@ def chat_v2(char_id):
         if cb_resp:
             return cb_resp
 
+        error_resp = _ai_error_json_response(
+            reply_text_raw,
+            user_msg_id=user_msg_id,
+            model=current_model,
+        )
+        if error_resp:
+            return error_resp
+
         # 清理回复
         timestamp_pattern = r'\[(?:(?:\d{2}-\d{2}\s+)?\d{1,2}:\d{2})\]\s*'
         cleaned_reply = re.sub(timestamp_pattern, '', reply_text_raw).strip()
@@ -1085,9 +1235,6 @@ def chat_v2(char_id):
             resp["memory_sync_warning"] = memory_sync_warning
         if agent_events:
             resp["agent_events"] = agent_events
-            safety_alerts = [ev.get("message") for ev in agent_events if ev.get("type") == "safety_alert" and ev.get("message")]
-            if safety_alerts:
-                resp["safety_alert"] = "\n".join(safety_alerts)
         if incoming_call:
             resp["incoming_call"] = incoming_call
         elif incoming_call_error:
@@ -1262,6 +1409,10 @@ def regenerate_message(char_id):
         cb_resp = _circuit_breaker_json_response()
         if cb_resp:
             return cb_resp
+
+        error_resp = _ai_error_json_response(reply_text_raw, model=current_model)
+        if error_resp:
+            return error_resp
 
         # 8. 清理 & 存入
         timestamp_pattern = r'\[(?:(?:\d{2}-\d{2}\s+)?\d{1,2}:\d{2})\]\s*'
@@ -1632,57 +1783,20 @@ def regenerate_medium_memory(char_id):
 def regenerate_long_memory(char_id):
     week_key = request.json.get("week_key") # 例如 "2025-12-Week2"
     if not week_key: return jsonify({"error": "Week Key 不能为空"}), 400
-
-    _, prompts_dir = get_paths(char_id)
-    medium_file = os.path.join(prompts_dir, "5_memory_medium.json")
-    long_file = os.path.join(prompts_dir, "4_memory_long.json")
-
-    try:
-        # 1. WeekN 表示以该月第 N 个周日结束的完整周一至周日。
-        date_range = parse_week_key_to_dates(week_key)
-        if not date_range or "-Week" not in week_key:
-            return jsonify({"error": "Week Key 格式无法解析"}), 400
-        start_date, _ = date_range
-        target_dates = [
-            (start_date + timedelta(days=offset)).strftime("%Y-%m-%d")
-            for offset in range(7)
-        ]
-
-        # 2. 读取中期记忆作为素材
-        if not os.path.exists(medium_file): return jsonify({"error": "中期记忆文件不存在"}), 404
-        with open(medium_file, "r", encoding="utf-8") as f:
-            medium_data = json.load(f)
-
-        summary_buffer = []
-        for d_str in target_dates:
-            if d_str in medium_data:
-                summary_buffer.append(f"【{d_str}】: {medium_data[d_str]}")
-
-        if not summary_buffer:
-            return jsonify({"error": f"该周 ({target_dates[0]}~{target_dates[-1]}) 没有任何中期日记素材"}), 400
-
-        full_text = "\n".join(summary_buffer)
-
-        # 3. 调用 AI (使用 long 模式)
-        long_summary = call_ai_to_summarize(full_text, "long", char_id)
-        if not long_summary: return jsonify({"error": "AI 生成失败"}), 500
-
-        # 4. 更新 Long 文件
-        long_data = {}
-        if os.path.exists(long_file):
-            with open(long_file, "r", encoding="utf-8") as f:
-                try: long_data = json.load(f)
-                except: pass
-
-        long_data[week_key] = long_summary
-
-        with open(long_file, "w", encoding="utf-8") as f:
-            json.dump(long_data, f, ensure_ascii=False, indent=2)
-
-        return jsonify({"status": "success", "content": long_summary})
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    result = generate_long_memory_for_week(char_id, week_key)
+    if result.status != "success":
+        if result.status in {"invalid_request", "no_messages"}:
+            code = 400
+        elif result.status == "busy":
+            code = 503
+        else:
+            code = 502
+        return jsonify({"status": result.status, "error": result.message}), code
+    return jsonify({
+        "status": "success",
+        "content": result.content,
+        "count": result.count,
+    })
 
 
 @chat_bp.route("/api/<char_id>/debug/force_maintenance")
@@ -1694,14 +1808,9 @@ def force_maintenance(char_id):
 
 @chat_bp.route("/api/<char_id>/prompts_data")
 def get_prompts_data(char_id):
-    from app import migrate_persona_extract_age
-    # 每次加载时尝试迁移（若尚未迁移）
-    migrate_persona_extract_age(char_id)
-
     data = {}
-    # 修改 base 的映射，使其支持 JSON 或 MD
     files = {
-        "base": ["1_base_persona.json", "1_base_persona.md"],
+        "base": "1_base_persona.json",
         "relation": "2_relationship.json",
         "long": "4_memory_long.json",
         "medium": "5_memory_medium.json",
@@ -1727,15 +1836,9 @@ def get_prompts_data(char_id):
     for key, filename in files.items():
         content = "（文件不存在或为空）"
 
-        # 处理可能的多个文件名（针对 base 迁移）
-        candidate_files = filename if isinstance(filename, list) else [filename]
-        found_path = None
-        for f_name in candidate_files:
-            p = os.path.join(prompts_dir, f_name)
-            if os.path.exists(p):
-                found_path = p
-                filename = f_name # 锁定实际找到的文件名
-                break
+        found_path = os.path.join(prompts_dir, filename)
+        if not os.path.exists(found_path):
+            found_path = None
 
         if found_path:
             try:
@@ -1747,8 +1850,8 @@ def get_prompts_data(char_id):
                             # 如果是 base 模块，需要提取里面的文本给前端编辑器
                             if key == "base" and isinstance(json_content, dict):
                                 content = json_content.get("system_prompt", "")
-                                # 顺便存入视觉设定
-                                data["visual_descriptions"] = json_content.get("visual_descriptions", {})
+                            elif key == "schedule":
+                                content = normalize_schedule_data(json_content)
                             else:
                                 content = json_content
                         except Exception as e:
@@ -1831,22 +1934,14 @@ def parse_relationship_reverse(char_id):
 
 def _load_base_persona_excerpt(char_id, user_id, limit=2500):
     _, prompts_dir = get_paths(char_id, user_id=user_id)
-    for filename in ("1_base_persona.json", "1_base_persona.md"):
-        path = os.path.join(prompts_dir, filename)
-        if not os.path.exists(path):
-            continue
-        try:
-            with open(path, "r", encoding="utf-8-sig") as f:
-                if filename.endswith(".json"):
-                    value = json.load(f)
-                    if isinstance(value, dict):
-                        value = value.get("system_prompt") or value
-                    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-                else:
-                    text = f.read()
-            return str(text or "")[:limit]
-        except Exception:
-            continue
+    path = os.path.join(prompts_dir, "1_base_persona.json")
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            value = json.load(f)
+        if isinstance(value, dict) and isinstance(value.get("system_prompt"), str):
+            return value["system_prompt"][:limit]
+    except (OSError, json.JSONDecodeError):
+        pass
     return ""
 
 
@@ -2068,21 +2163,19 @@ def save_relationship_reverse(char_id):
 def save_prompt_file(char_id):
     payload = request.json or {}
     key = payload.get("key")
-    new_content = payload.get("content") # 可以是字符串(md)或对象(json)
+    new_content = payload.get("content")
 
     # 获取该角色的 Prompt 目录
     db_path, prompts_dir = get_paths(char_id)
 
     # 映射 Key 到 文件名
     files_map = {
-        "base": "1_base_persona.md",
+        "base": "1_base_persona.json",
         "relation": "2_relationship.json",
-        "user": "3_user_persona.md",
         "long": "4_memory_long.json",
         "medium": "5_memory_medium.json",
         "short": "6_memory_short.json",
         "schedule": "7_schedule.json",
-        "format": "8_format.md"
     }
 
     filename = files_map.get(key)
@@ -2094,29 +2187,22 @@ def save_prompt_file(char_id):
     try:
         if key == "relation":
             new_content = normalize_relationship_graph(new_content)
+        elif key == "schedule":
+            new_content = normalize_schedule_data(new_content)
 
         if key == "base":
-            # 如果是 base，我们要存为 JSON
             json_path = os.path.join(prompts_dir, "1_base_persona.json")
-            old_data = {
-                "system_prompt": "",
-                "visual_descriptions": {"tags": "", "description": ""},
-                "custom_settings": {"reply_style": "默认", "interaction_rules": ""}
-            }
-            if os.path.exists(json_path):
-                try:
-                    with open(json_path, "r", encoding="utf-8") as f:
-                        old_data = json.load(f)
-                except Exception: pass
-
-            # 更新字段 (由前端传来的可能是纯文本或带 visual 的对象)
+            # LOCK 标签只约束模型编辑，不限制用户本人修改。
             if isinstance(new_content, dict):
-                old_data.update(new_content)
+                persona_text = new_content.get("system_prompt")
             else:
-                old_data["system_prompt"] = str(new_content)
+                persona_text = new_content
+            if not isinstance(persona_text, str):
+                return jsonify({"status": "error", "message": "system_prompt 必须是文本"}), 400
+            validate_persona_locks(persona_text)
 
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(old_data, f, ensure_ascii=False, indent=2)
+            with memory_file_lock(json_path):
+                atomic_write_json(json_path, {"system_prompt": persona_text})
             return jsonify({"status": "success"})
 
         # --- 【核心新增】如果是保存短期记忆，自动校准 last_id ---
@@ -2171,7 +2257,7 @@ def save_prompt_file(char_id):
             conn.close()
         # ----------------------------------------------------
 
-        if key == "short" and isinstance(new_content, dict):
+        if key in {"short", "schedule"} and isinstance(new_content, dict):
             with memory_file_lock(path):
                 atomic_write_json(path, new_content)
         else:
@@ -2181,6 +2267,10 @@ def save_prompt_file(char_id):
                 else:
                     f.write(str(new_content))
         return jsonify({"status": "success"})
+    except ScheduleValidationError as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+    except PersonaLockError as e:
+        return jsonify({"status": "error", "code": e.code, "message": str(e)}), 400
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
@@ -2237,6 +2327,8 @@ def get_char_details(char_id):
             defaults = {
                 "emotion": 1,
                 "moments_index": 1,
+                "emotion_locked": False,
+                "moments_index_locked": False,
                 "intimacy": 60,
                 "light_sleep": True,
                 "deep_sleep": False,
@@ -2276,6 +2368,15 @@ def update_char_meta(char_id):
         return jsonify({"error": "Config file not found"}), 404
 
     try:
+        with memory_file_lock(CONFIG_FILE):
+            return _update_char_meta_locked(char_id, CONFIG_FILE)
+    except Exception as e:
+        print(f"Update Meta Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+def _update_char_meta_locked(char_id, CONFIG_FILE):
+    try:
         # 1. 读取现有配置
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             all_config = json.load(f)
@@ -2285,6 +2386,9 @@ def update_char_meta(char_id):
 
         # 2. 更新字段 (只更新前端传过来的字段)
         data = request.json or {}
+        for field in ("emotion_locked", "moments_index_locked"):
+            if field in data and not isinstance(data[field], bool):
+                return jsonify({"error": f"{field} must be a boolean"}), 400
         info = all_config[char_id]
         ensure_character_time_defaults(info, existing_character=True)
         print(f"[update_meta] char={char_id} file={CONFIG_FILE} data={data}")
@@ -2343,6 +2447,11 @@ def update_char_meta(char_id):
             all_config[char_id]["chat_mode"] = data["chat_mode"]
 
         # --- 【新增】生理节律状态 ---
+        # Locks restrict AI actions only; direct user edits remain available.
+        for field in ("emotion_locked", "moments_index_locked"):
+            if field in data:
+                info[field] = data[field]
+
         # 情绪 (0-100)
         if data.get("emotion") is not None:
             all_config[char_id]["emotion"] = float(data["emotion"])
@@ -2379,9 +2488,10 @@ def update_char_meta(char_id):
                 return jsonify({"error": "Sleep start and end cannot be equal"}), 400
             info["ds_start"] = proposed_start
             info["ds_end"] = proposed_end
-            info["ds_time_basis"] = "user"
+            # 手动输入的 HH:MM 同样按角色当地时间解释；设置人不决定时区。
+            info["ds_time_basis"] = "character"
             info["ds_set_by"] = "user"
-            info["ds_timezone_at_set"] = get_user_timezone(_load_user_settings())
+            info["ds_timezone_at_set"] = get_character_timezone(info)
             info["sleep_last_event_key"] = None
             info["sleep_manual_override"] = False
 
@@ -2406,8 +2516,8 @@ def update_char_meta(char_id):
                 pass
 
         # 3. 写回文件
-        # 【修改】使用安全保存
-        safe_save_json(CONFIG_FILE, all_config)
+        # Propagate write failures so the lock switch cannot report false success.
+        atomic_write_json(CONFIG_FILE, all_config)
 
         # 调试：立即读回确认写入
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -2522,14 +2632,16 @@ def copy_other_schedule(target_char_id):
     try:
         # 2. 读取源文件
         with open(source_path, "r", encoding="utf-8-sig") as f:
-            source_data = json.load(f)
+            source_data = normalize_schedule_data(json.load(f))
 
         # 3. 写入目标文件 (覆盖)
-        with open(target_path, "w", encoding="utf-8") as f:
-            json.dump(source_data, f, ensure_ascii=False, indent=2)
+        with memory_file_lock(target_path):
+            atomic_write_json(target_path, source_data)
 
         return jsonify({"status": "success", "data": source_data})
 
+    except ScheduleValidationError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -2668,13 +2780,6 @@ def delete_character_api(char_id):
             if cleaned_groups != groups:
                 updates[groups_file] = cleaned_groups
 
-        read_status_file = _get_read_status_file()
-        read_status = load_json(read_status_file, {})
-        if isinstance(read_status, dict) and char_id in read_status:
-            read_status = dict(read_status)
-            del read_status[char_id]
-            updates[read_status_file] = read_status
-
         for other_char_id in new_config:
             _, other_prompts_dir = get_paths(other_char_id, user_id=user_id)
             relation_file = os.path.join(other_prompts_dir, "2_relationship.json")
@@ -2715,6 +2820,7 @@ def delete_character_api(char_id):
         char_dir = os.path.dirname(db_path)
         if os.path.exists(char_dir):
             shutil.rmtree(char_dir)
+        remove_read_state(_get_read_status_file(), "chat", char_id)
         if str(user_id or "").isdigit():
             from services.voice_calls import delete_calls_for_character
             delete_calls_for_character(user_id, char_id)

@@ -43,6 +43,22 @@ def upload_to_cos(local_path, cos_path):
         return None
 
 
+def download_from_cos(cos_path):
+    """Read one COS object and return its bytes, or None when it is unavailable."""
+    object_key = str(cos_path or "").lstrip("/")
+    if not bucket or not object_key:
+        return None
+    try:
+        response = client.get_object(Bucket=bucket, Key=object_key)
+        body = response.get("Body")
+        if body is None:
+            return None
+        return body.get_raw_stream().read()
+    except Exception as e:
+        print(f"❌ COS 下载失败 ({object_key}): {e}")
+        return None
+
+
 def delete_from_cos(cos_path):
     """Delete one exact COS object key. Returns True when the request succeeds."""
     if not bucket or not region or not cos_path:

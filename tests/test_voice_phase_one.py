@@ -29,6 +29,19 @@ def test_voice_announcement_is_active_for_exactly_configured_window(monkeypatch)
     assert after["active"] is False
 
 
+def test_persona_lock_announcement_coexists_and_is_marked_show_once(monkeypatch):
+    monkeypatch.setattr(views, "PERSONA_LOCK_ANNOUNCEMENT_START", "2026-08-10T00:00:00+08:00")
+    monkeypatch.setattr(views, "PERSONA_LOCK_ANNOUNCEMENT_END", "2026-08-24T00:00:00+08:00")
+
+    payload = views._voice_announcement_payload(datetime(2026, 8, 12, 12, 0, tzinfo=BEIJING))
+    persona = next(item for item in payload["announcements"] if item["kind"] == "persona_lock")
+
+    assert persona["id"] == "persona-lock-2026-08"
+    assert persona["show_once"] is True
+    assert "[[LOCK]]" in persona["body"]
+    assert persona["cta_url"] == "/guide#persona-lock"
+
+
 def test_clone_requires_private_key_without_forwarding_to_elevenlabs(monkeypatch):
     def fail_request(*args, **kwargs):
         raise AssertionError("missing private key must not call ElevenLabs")
@@ -152,6 +165,7 @@ def test_templates_keep_private_voice_keys_without_square_voice_ids():
     assert "https://try.elevenlabs.io/8f8ks0unlqsw" in memory
     assert tabbar.count('id="daily-donate-modal"') == 1
     assert "voice-announcement-section" in tabbar
+    assert "persona-lock-announcement-section" in tabbar
     assert "自己的 ElevenLabs API Key" in tabbar
     assert "不需要开通 Speech-to-Text 权限" in tabbar
     assert 'id="daily-donate-modal"' not in contacts

@@ -389,6 +389,104 @@
         }
         .btn-clear-top:hover { background: #ffcdd2; }
 
+        /* 日程分区标题：标题与局部操作按钮保持清晰层级 */
+        .schedule-section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+            margin: 10px 0 12px;
+            padding: 10px 12px;
+            background: linear-gradient(135deg, #f7fbff 0%, #eef6ff 100%);
+            border: 1px solid #dbeafe;
+            border-radius: 10px;
+        }
+
+        .schedule-section-title {
+            min-width: 0;
+            color: #425466;
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+        }
+
+        .schedule-section-add {
+            flex: 0 0 auto;
+            padding: 6px 13px;
+            border: 1px solid #bfdbfe;
+            border-radius: 999px;
+            background: #fff;
+            color: #2563a6;
+            box-shadow: 0 1px 3px rgba(37, 99, 166, 0.08);
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 700;
+            line-height: 1.4;
+            white-space: nowrap;
+            transition: background 0.2s, border-color 0.2s, transform 0.2s;
+        }
+
+        .schedule-section-add:hover {
+            background: #eaf4ff;
+            border-color: #93c5fd;
+            transform: translateY(-1px);
+        }
+
+        .persona-lock-card {
+            margin: 10px 0;
+            padding: 13px 14px;
+            border: 1px solid #c9d8f2;
+            border-left: 4px solid #6f8fc9;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #f5f8ff 0%, #edf3ff 100%);
+            color: #34445f;
+        }
+
+        .persona-lock-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            margin-bottom: 8px;
+            padding: 3px 9px;
+            border-radius: 999px;
+            background: #dfe9fb;
+            color: #496a9f;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .persona-lock-help {
+            margin-bottom: 12px;
+            padding: 12px 13px;
+            border: 1px solid #dbe7fa;
+            border-radius: 10px;
+            background: #f7faff;
+            color: #52647f;
+            font-size: 12px;
+            line-height: 1.65;
+        }
+
+        .persona-lock-status {
+            min-height: 18px;
+            margin: 6px 2px 0;
+            color: #718096;
+            font-size: 11px;
+        }
+
+        .persona-lock-status.invalid { color: #c62828; font-weight: 600; }
+        .persona-lock-status.valid { color: #3f7b5a; }
+
+        @media (max-width: 600px) {
+            .schedule-section-header {
+                gap: 14px;
+                padding: 9px 10px;
+            }
+
+            .schedule-section-add {
+                padding: 6px 11px;
+            }
+        }
+
         /* JSON 编辑器模式 */
         .json-editor-container {
             display: none; /* 默认隐藏 */
@@ -742,6 +840,10 @@
                                style="width:70px;"
                                oninput="syncEmotion('num'); triggerAutoSave()">
                     </div>
+                    <label class="status-desc" style="display:block; margin-top:6px; cursor:pointer;">
+                        <input type="checkbox" id="emotion-locked-chk" onchange="saveStatusDirect()">
+                        锁定情绪指数（禁止角色自动修改，你仍可手动调整）
+                    </label>
                 </div>
 
                 <!-- 1.5 性格指数 (朋友圈主动发送概率) -->
@@ -755,6 +857,10 @@
                                style="width:80px;"
                                oninput="triggerAutoSave()">
                     </div>
+                    <label class="status-desc" style="display:block; margin-top:6px; cursor:pointer;">
+                        <input type="checkbox" id="moments-index-locked-chk" onchange="saveStatusDirect()">
+                        锁定性格指数（禁止角色自动修改，你仍可手动调整）
+                    </label>
                 </div>
 
                 <!-- 1.6 亲密度 (用户发朋友圈后该角色点赞/评论概率) -->
@@ -820,7 +926,7 @@
 	                    <div>
 	                        <div class="status-label">💤 深睡眠 (Deep Sleep)</div>
                         <div class="status-desc" style="display: flex; align-items: center; flex-wrap: wrap; gap: 5px;">
-                            <span id="sleep-time-basis-label">用户当地时间:</span>
+                            <span id="sleep-time-basis-label">按角色当地时间设置:</span>
                             <!-- 【修改】加了一个不换行的容器 time-group -->
                             <span class="time-group">
                                 <input type="time" id="ds-start" class="time-input" value="23:00" onchange="saveStatusDirect()">
@@ -1401,10 +1507,12 @@
                 updateEmotionUI(emo);
                 document.getElementById('emotion-range').value = emo;
                 document.getElementById('emotion-num').value = emo;
+                document.getElementById('emotion-locked-chk').checked = data.emotion_locked === true;
 
                 // 性格指数
                 const momentsIdx = data.moments_index !== undefined ? data.moments_index : 1;
                 document.getElementById('moments-index-num').value = momentsIdx;
+                document.getElementById('moments-index-locked-chk').checked = data.moments_index_locked === true;
 
                 // 亲密度
                 const intimacyVal = data.intimacy !== undefined ? data.intimacy : 60;
@@ -1798,12 +1906,35 @@
     // ================= 渲染视图逻辑 (View Mode) =================
 
     function renderView(key, data) {
-        // 【防御】如果传入了对象（如base的{system_prompt,visual_descriptions}），自动提取文本
+        // 防御性兼容对象形式，编辑器始终只处理 system_prompt 文本。
         if (data && typeof data === 'object' && data.system_prompt !== undefined) {
             data = data.system_prompt || '';
         }
 
         const container = document.querySelector(`#module-${key} .view-mode`);
+
+        if (key === 'base') {
+            try {
+                const segments = parsePersonaLockSegments(data || '');
+                let html = '';
+                segments.forEach(segment => {
+                    if (!segment.text) return;
+                    if (segment.locked) {
+                        html += `<div class="persona-lock-card">
+                          <div class="persona-lock-badge">🔒 AI 编辑保护</div>
+                          <div style="white-space:pre-wrap;">${escapeRelationHtml(segment.text)}</div>
+                        </div>`;
+                    } else if (segment.text.trim()) {
+                        html += `<div style="padding:15px; white-space:pre-wrap;">${escapeRelationHtml(segment.text)}</div>`;
+                    }
+                });
+                container.innerHTML = html || '<div class="empty-state">暂无数据</div>';
+            } catch (error) {
+                container.innerHTML = `<div style="padding:12px; color:#c62828; font-size:12px;">⚠️ ${escapeRelationHtml(error.message)}</div>
+                  <div style="padding:15px; white-space:pre-wrap;">${escapeRelationHtml(data || '')}</div>`;
+            }
+            return;
+        }
         
         // 1. Markdown 渲染
         if(CONFIG[key].method === 'renderMD') {
@@ -1933,25 +2064,34 @@
             return;
         }
 
-        // --- Schedule 渲染 (只显示未来 7 天) ---
+        // --- Schedule 渲染（无时间计划 + 未来 7 天） ---
         if(key === 'schedule') {
-            // 计算今天和7天后的日期字符串
             const now = new Date();
             const todayStr = beijingDateString(now);
             const limitStr = shiftBeijingDate(todayStr, 7);
-
-            const dates = Object.keys(data).sort();
             let html = '';
 
-            dates.forEach(d => {
-                // 【修改】只显示范围内的数据
+            const undatedPlans = Array.isArray(data._undated) ? data._undated : [];
+            if (undatedPlans.length > 0) {
+                html += '<div class="mem-item"><div class="mem-header">🗒️ 无时间计划</div>';
+                undatedPlans.forEach(plan => {
+                    html += `<div class="mem-text" style="margin-top:8px;">• ${escapeRelationHtml(plan)}</div>`;
+                });
+                html += '</div>';
+            }
+
+            Object.keys(data).filter(d => d !== '_undated').sort().forEach(d => {
                 if (d >= todayStr && d <= limitStr) {
-                    html += `<div class="mem-item"><div class="mem-header">📌 ${d}</div><div class="mem-text">${data[d]}</div></div>`;
+                    const plans = Array.isArray(data[d]) ? data[d] : [data[d]];
+                    html += `<div class="mem-item"><div class="mem-header">📌 ${escapeRelationHtml(d)}</div>`;
+                    plans.filter(Boolean).forEach(plan => {
+                        html += `<div class="mem-text" style="margin-top:8px;">• ${escapeRelationHtml(plan)}</div>`;
+                    });
+                    html += '</div>';
                 }
             });
 
-            // 如果没有数据，或者数据都在范围外
-            container.innerHTML = html || '<div class="empty-state">未来7天暂无日程</div>';
+            container.innerHTML = html || '<div class="empty-state">暂无无时间计划，未来7天也暂无日程</div>';
             return;
         }
 
@@ -2110,24 +2250,21 @@
             // 【新增】只在角色人设(base)模块显示 AI生成按钮
             if (key === 'base') {
                 extraHtml = `
-                <div class="base-meta-editor" style="background:#f9f9f9; padding:15px; border-radius:12px; margin-bottom:15px; border:1px solid #eee;">
-                    <div style="font-size:13px; font-weight:bold; margin-bottom:10px; color:var(--primary-color);">🎨 生图外貌设定 (Visual Descriptions)</div>
-                    <div style="margin-bottom:10px;">
-                        <label style="font-size:12px; color:#666;">生图 Tags (英文):</label>
-                        <input type="text" id="visual-tags" class="field-input" style="width:100%; margin-top:5px;" value="${(GLOBAL_DATA.visual_descriptions && GLOBAL_DATA.visual_descriptions.tags) || ''}" placeholder="e.g. 1girl, black hair, glasses">
-                    </div>
-                    <div>
-                        <label style="font-size:12px; color:#666;">中文外貌简述:</label>
-                        <input type="text" id="visual-desc" class="field-input" style="width:100%; margin-top:5px;" value="${(GLOBAL_DATA.visual_descriptions && GLOBAL_DATA.visual_descriptions.description) || ''}" placeholder="用于识图或简单描述...">
-                    </div>
+                <div class="persona-lock-help">
+                    <div style="font-weight:700; margin-bottom:4px;">🔒 设置人设的 AI 编辑保护</div>
+                    用独占行的 <code>[[LOCK]]</code> 和 <code>[[/LOCK]]</code> 包住核心设定。角色和模型会读取标签，并在以后由 AI 编辑人设时保留其中内容。<strong>这不会限制你本人</strong>：编辑框仍是普通文本，你可以改区块内任何文字、移动或删除标签；保存后以你的新版本为准。
                 </div>
                 <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
-                    <button class="btn" style="background:#e1bee7; color:#4a148c; flex:1; min-width:180px;" onclick="openGenModal('generate')">✨ AI 自动编写人设 (JSON版)</button>
+                    <button class="btn" style="background:#e1bee7; color:#4a148c; flex:1; min-width:180px;" onclick="openGenModal('generate')">✨ AI 自动编写人设</button>
                     <button class="btn" style="background:#fff3d6; color:#7a541d; flex:1; min-width:150px;" onclick="openGenModal('copy')">📋 复制生成人设 Prompt</button>
                 </div>`;
             }
 
-            container.innerHTML = `${extraHtml}<textarea class="md-editor">${data || ''}</textarea>`;
+            const editorClass = key === 'base' ? 'md-editor persona-editor' : 'md-editor';
+            const editorInput = key === 'base' ? ' oninput="updatePersonaLockHint(this)"' : '';
+            const lockStatus = key === 'base' ? '<div class="persona-lock-status" id="persona-lock-status"></div>' : '';
+            container.innerHTML = `${extraHtml}<textarea class="${editorClass}"${editorInput}>${escapeRelationHtml(data || '')}</textarea>${lockStatus}`;
+            if (key === 'base') updatePersonaLockHint(container.querySelector('.persona-editor'));
             return;
         }
 
@@ -2250,6 +2387,53 @@
                 // ====================================================================
             }
             // ========================================================
+
+            if (key === 'schedule') {
+                const topBtns = document.createElement('div');
+                topBtns.className = 'editor-top-actions';
+                topBtns.innerHTML = `
+                  <button class="btn-action-top btn-add-top" onclick="addScheduleDatedRow(this)">+ 添加日期计划</button>
+                  <button class="btn-action-top btn-clear-top" onclick="clearScheduleDatedItems(this)">🗑️ 清空日期计划</button>
+                `;
+                container.appendChild(topBtns);
+
+                const wrapper = document.createElement('div');
+                wrapper.id = 'schedule-list-wrapper';
+
+                const undatedPlans = Array.isArray(data._undated) ? data._undated : [];
+                const undatedRows = undatedPlans.map(plan => `
+                  <div class="input-group undated-plan-row">
+                      <div class="mem-meta-col"><span style="font-weight:bold; color:#666;">无时间</span></div>
+                      <textarea class="input-val undated-plan-input" rows="3" placeholder="尚未确定日期的计划...">${escapeRelationHtml(plan)}</textarea>
+                      <button class="btn-del" onclick="this.parentElement.remove()">×</button>
+                  </div>`).join('');
+
+                const datedRows = Object.keys(data)
+                    .filter(k => k !== '_undated')
+                    .sort()
+                    .reverse()
+                    .flatMap(k => (Array.isArray(data[k]) ? data[k] : [data[k]]).map(plan => `
+                      <div class="input-group schedule-dated-row">
+                          <div class="mem-meta-col">
+                              <input type="text" class="input-key" value="${escapeRelationHtml(k)}" placeholder="YYYY-MM-DD">
+                              <div class="meta-right-side"></div>
+                          </div>
+                          <textarea class="input-val" rows="3" placeholder="计划内容...">${escapeRelationHtml(plan || '')}</textarea>
+                          <button class="btn-del" onclick="this.parentElement.remove()">×</button>
+                      </div>`)).join('');
+
+                wrapper.innerHTML = `
+                  <div class="schedule-section-header">
+                      <span class="schedule-section-title">🗒️ 无时间计划</span>
+                      <button type="button" class="schedule-section-add" onclick="addUndatedPlanRow(this)" aria-label="添加无时间计划" title="添加无时间计划">＋ 添加</button>
+                  </div>
+                  <div class="undated-plan-list edit-list-container">${undatedRows}</div>
+                  <div style="font-weight:bold; color:#555; margin:18px 0 8px;">📅 日期计划</div>
+                  <div class="schedule-dated-list edit-list-container">${datedRows}</div>
+                `;
+                container.appendChild(wrapper);
+                return;
+            }
 
             // 【新增】顶部按钮组 (添加 + 清空)
             const topBtns = document.createElement('div');
@@ -2797,13 +2981,29 @@
 
     function relationshipPromptTargetName(contacts) {
         const current = (contacts || []).find(contact => contact.id === charId);
-        const displayed = document.getElementById('view-remark')?.textContent.trim();
-        return current?.name || (displayed && displayed !== '(加载中...)' ? displayed : charId);
+        return current?.name || charId;
+    }
+
+    function relationshipGraphForPrompt(perspective, contacts) {
+        const graph = relationshipGraphForEditor(relationDraft[perspective]);
+        if (perspective === 'reverse') return graph;
+
+        const promptGraph = {};
+        Object.entries(graph).forEach(([key, info]) => {
+            const contact = (contacts || []).find(item =>
+                [item.id, item.name, item.remark].some(alias => alias && alias === key)
+            );
+            const originalName = contact?.name || key;
+            promptGraph[originalName] = info;
+        });
+        return promptGraph;
     }
 
     function buildRelationshipPrompt(perspective, contacts) {
         const targetName = relationshipPromptTargetName(contacts);
-        const currentJson = stringifyRelationshipGraph(relationDraft[perspective]);
+        const currentJson = JSON.stringify(
+            relationshipGraphForPrompt(perspective, contacts), null, 2
+        );
         const otherContacts = (contacts || []).filter(contact => contact.id !== charId);
         const schema = [
             'JSON 格式说明：',
@@ -2817,8 +3017,7 @@
             const allowed = otherContacts
                 .map(contact => {
                     const name = contact.name || contact.id;
-                    const remark = contact.remark && contact.remark !== name ? `（备注：${contact.remark}）` : '';
-                    return `- ${contact.id}：${name}${remark}`;
+                    return `- ${contact.id}：${name}`;
                 })
                 .join('\n') || '- 暂无其他可用角色';
             return `请分别站在其他角色的独立视角，生成或修改他们如何看待“${targetName}”的关系图谱。不要机械反转“${targetName}”对他们的看法，每个角色的描述必须符合自己的人设。仅输出一个合法 JSON 对象，不要输出 Markdown 代码块、前后说明或任何额外文字。\n\n${schema}\n- 此视角的 JSON 顶层键必须使用下方允许列表中的角色 ID。\n- description 必须以该来源角色的视角描述其如何看待“${targetName}”。\n- 没有出现在最终 JSON 中的旧关系会被删除；需要保留的关系请勿遗漏。\n\n允许使用的来源角色：\n${allowed}\n\n请在以下当前完整 JSON 基础上修改：\n${currentJson}`;
@@ -2826,8 +3025,7 @@
         const availableTargets = otherContacts
             .map(contact => {
                 const name = contact.name || contact.id;
-                const remark = contact.remark && contact.remark !== name ? `；备注：${contact.remark}` : '';
-                return `- 原名：${name}；ID：${contact.id}${remark}`;
+                return `- 原名：${name}；ID：${contact.id}`;
             })
             .join('\n') || '- 暂无其他可用角色';
         return `请根据角色设定，生成或修改“${targetName}”如何看待其他角色的关系图谱。仅输出一个合法 JSON 对象，不要输出 Markdown 代码块、前后说明或任何额外文字。\n\n${schema}\n- 此视角的 JSON 顶层键必须使用下方可生成角色列表中的“原名”，不要使用角色 ID 或备注。\n- description 必须使用“${targetName}”的视角描述其如何看待对方。\n- 只允许新增下方列表中的角色，不要虚构其他角色。\n- 没有出现在最终 JSON 中的旧关系会被删除；需要保留的关系请勿遗漏。\n\n可生成关系的其他角色：\n${availableTargets}\n\n请在以下当前完整 JSON 基础上修改：\n${currentJson}`;
@@ -2909,6 +3107,36 @@
         container.insertAdjacentHTML('afterbegin', row);
     }
 
+    function addScheduleDatedRow(btn) {
+        const container = btn.closest('.edit-mode').querySelector('.schedule-dated-list');
+        const today = beijingDateString();
+        const row = `<div class="input-group schedule-dated-row">
+          <div class="mem-meta-col">
+              <input type="text" class="input-key" value="${today}" placeholder="YYYY-MM-DD">
+              <div class="meta-right-side"></div>
+          </div>
+          <textarea class="input-val" rows="3" placeholder="计划内容..."></textarea>
+          <button class="btn-del" onclick="this.parentElement.remove()">×</button>
+        </div>`;
+        container.insertAdjacentHTML('afterbegin', row);
+    }
+
+    function addUndatedPlanRow(btn) {
+        const container = btn.closest('.edit-mode').querySelector('.undated-plan-list');
+        const row = `<div class="input-group undated-plan-row">
+          <div class="mem-meta-col"><span style="font-weight:bold; color:#666;">无时间</span></div>
+          <textarea class="input-val undated-plan-input" rows="3" placeholder="尚未确定日期的计划..."></textarea>
+          <button class="btn-del" onclick="this.parentElement.remove()">×</button>
+        </div>`;
+        container.insertAdjacentHTML('beforeend', row);
+    }
+
+    function clearScheduleDatedItems(btn) {
+        if (!confirm("确定清空所有有日期的计划吗？无时间计划不会受影响。\n需要点击底部保存才会生效。")) return;
+        const container = btn.closest('.edit-mode').querySelector('.schedule-dated-list');
+        container.innerHTML = '';
+    }
+
     // --- 【新增】全部删除功能 ---
     function deleteAllItems(btn) {
         if (!confirm("⚠️ 危险操作：确定要清空列表里的所有条目吗？\n(需要点击底部的“保存”按钮才会生效)")) {
@@ -2957,6 +3185,66 @@
             '"': '&quot;',
             "'": '&#39;'
         })[char]);
+    }
+
+    function parsePersonaLockSegments(value) {
+        const text = String(value || '');
+        const parts = text.split(/(\r\n|\n|\r)/);
+        const lines = [];
+        for (let i = 0; i < parts.length; i += 2) {
+            if (parts[i] === '' && i >= parts.length - 1) break;
+            lines.push(parts[i] + (parts[i + 1] || ''));
+        }
+
+        const segments = [];
+        let unlocked = '';
+        let locked = '';
+        let insideLock = false;
+        let openLine = 0;
+
+        lines.forEach((line, index) => {
+            const marker = line.trim();
+            const lineNumber = index + 1;
+            if (marker === '[[LOCK]]') {
+                if (insideLock) throw new Error(`第 ${lineNumber} 行不允许嵌套 [[LOCK]]`);
+                if (unlocked) segments.push({locked: false, text: unlocked});
+                unlocked = '';
+                locked = '';
+                insideLock = true;
+                openLine = lineNumber;
+                return;
+            }
+            if (marker === '[[/LOCK]]') {
+                if (!insideLock) throw new Error(`第 ${lineNumber} 行出现了没有开始标签的 [[/LOCK]]`);
+                if (!locked.trim()) throw new Error(`第 ${openLine} 行的锁定区块不能为空`);
+                segments.push({locked: true, text: locked});
+                locked = '';
+                insideLock = false;
+                openLine = 0;
+                return;
+            }
+            if (insideLock) locked += line;
+            else unlocked += line;
+        });
+
+        if (insideLock) throw new Error(`第 ${openLine} 行的 [[LOCK]] 缺少 [[/LOCK]]`);
+        if (unlocked) segments.push({locked: false, text: unlocked});
+        return segments;
+    }
+
+    function updatePersonaLockHint(editor) {
+        const status = document.getElementById('persona-lock-status');
+        if (!editor || !status) return;
+        try {
+            const count = parsePersonaLockSegments(editor.value).filter(segment => segment.locked).length;
+            status.className = `persona-lock-status ${count ? 'valid' : ''}`;
+            status.textContent = count
+                ? `已识别 ${count} 个 AI 编辑保护区块；你本人仍可自由修改。`
+                : '尚未设置 AI 编辑保护区块。';
+        } catch (error) {
+            status.className = 'persona-lock-status invalid';
+            status.textContent = `标签格式错误：${error.message}`;
+        }
     }
 
     async function loadRelationMemberCandidates() {
@@ -3159,13 +3447,17 @@
         // 1. Markdown 保存
         if(CONFIG[key].method === 'renderMD') {
             if (key === 'base') {
-                // 如果是 base，我们需要构造 JSON 结构
+                const personaEditor = container.querySelector('.persona-editor');
+                try {
+                    parsePersonaLockSegments(personaEditor.value);
+                } catch (error) {
+                    alert(`人设锁定标签格式错误：${error.message}`);
+                    btn.textContent = '保存 / Save';
+                    btn.disabled = false;
+                    return;
+                }
                 newData = {
-                    "system_prompt": container.querySelector('textarea').value,
-                    "visual_descriptions": {
-                        "tags": document.getElementById('visual-tags').value,
-                        "description": document.getElementById('visual-desc').value
-                    }
+                    "system_prompt": personaEditor.value
                 };
             } else {
                 newData = container.querySelector('textarea').value;
@@ -3216,7 +3508,7 @@
             if (key === 'schedule' && jsonWrapper && jsonWrapper.style.display === 'block') {
                 const textarea = document.getElementById('schedule-json-textarea');
                 try {
-                    newData = JSON.parse(textarea.value);
+                    newData = normalizeScheduleEditorData(JSON.parse(textarea.value));
                 } catch(e) {
                     alert("JSON 格式有误，无法保存！\n" + e.message);
                     btn.textContent = '保存 / Save';
@@ -3225,6 +3517,9 @@
                 }
             }
             // 普通列表模式
+            else if (key === 'schedule') {
+                newData = scrapeScheduleDataFromInputs();
+            }
             else {
                 newData = {};
                 const rows = container.querySelectorAll('.input-group');
@@ -3303,7 +3598,6 @@
                 // 更新本地缓存
                 if (key === 'base' && typeof newData === 'object') {
                     GLOBAL_DATA[key] = newData.system_prompt || '';
-                    GLOBAL_DATA['visual_descriptions'] = newData.visual_descriptions || {};
                     // 重新渲染视图时传入纯文本
                     renderView(key, GLOBAL_DATA[key]);
                 } else {
@@ -3427,6 +3721,14 @@
         }
     }
 
+    function currentPersonaDraft() {
+        const editor = document.querySelector('#module-base .persona-editor');
+        if (editor) return editor.value;
+        const base = GLOBAL_DATA.base;
+        if (base && typeof base === 'object') return String(base.system_prompt || '');
+        return String(base || '');
+    }
+
     async function copyPersonaGenerationPrompt(btn) {
         const name = document.getElementById('gen-char-name').value.trim();
         const ip = document.getElementById('gen-source-ip').value.trim();
@@ -3443,6 +3745,8 @@
                 body: JSON.stringify({
                     char_name: name,
                     source_ip: ip,
+                    char_id: charId,
+                    existing_persona: currentPersonaDraft(),
                     web_search: webSearch,
                     prompt_only: true
                 })
@@ -3479,7 +3783,13 @@
             const res = await fetch('/api/generate_persona', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ char_name: name, source_ip: ip, web_search: webSearch })
+                body: JSON.stringify({
+                    char_name: name,
+                    source_ip: ip,
+                    char_id: charId,
+                    existing_persona: currentPersonaDraft(),
+                    web_search: webSearch
+                })
             });
             const result = await res.json();
 
@@ -3545,15 +3855,10 @@
         if(editor) {
             if (jsonObj && jsonObj.system_prompt) {
                 editor.value = jsonObj.system_prompt;
-                if (jsonObj.visual_descriptions) {
-                    const tagsInput = document.getElementById('visual-tags');
-                    const descInput = document.getElementById('visual-desc');
-                    if (tagsInput) tagsInput.value = jsonObj.visual_descriptions.tags || '';
-                    if (descInput) descInput.value = jsonObj.visual_descriptions.description || '';
-                }
             } else {
                 editor.value = content;
             }
+            updatePersonaLockHint(editor);
             // 2. 关闭弹窗
             document.getElementById('genPreviewModal').style.display = 'none';
             alert("已填入编辑器！\n请检查无误后，点击下方的「保存」按钮写入文件。");
@@ -3609,22 +3914,13 @@
         if (jsonWrapper && jsonWrapper.style.display === 'block') {
             const textarea = document.getElementById('schedule-json-textarea');
             try {
-                newSchedule = JSON.parse(textarea.value);
+                newSchedule = normalizeScheduleEditorData(JSON.parse(textarea.value));
             } catch (e) {
                 alert("JSON 格式错误，无法保存！\n请检查语法（如引号、逗号）。\n" + e.message);
                 return; // 终止执行
             }
         } else {
-            // 普通列表模式：从输入框抓取
-            // (我们可以直接调用之前写的辅助函数，或者在这里原地抓取)
-            const container = document.querySelector('#module-schedule .edit-mode');
-            const inputRows = container.querySelectorAll('.input-group');
-
-            inputRows.forEach(row => {
-                const k = row.querySelector('.input-key').value.trim();
-                const v = row.querySelector('.input-val').value.trim();
-                if (k) newSchedule[k] = v;
-            });
+            newSchedule = scrapeScheduleDataFromInputs();
         }
 
         const btn = event.target;
@@ -3635,11 +3931,15 @@
         try {
             // A. 先保存自己的 (复用 save_prompt 接口)
             // 这一步是为了确保“当前角色”的数据先落袋为安
-            await fetch(`/api/${charId}/save_prompt`, {
+            const ownRes = await fetch(`/api/${charId}/save_prompt`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ key: 'schedule', content: newSchedule })
             });
+            const ownResult = await ownRes.json();
+            if (!ownRes.ok || ownResult.status !== 'success') {
+                throw new Error(ownResult.message || ownResult.error || '当前角色日程保存失败');
+            }
 
             // 更新本地缓存
             GLOBAL_DATA['schedule'] = newSchedule;
@@ -3655,10 +3955,10 @@
                     })
                 });
                 const result = await res.json();
-                if (result.status === 'success') {
+                if (res.ok && result.status === 'success') {
                     alert(`成功！\n已保存当前日程。\n并同步给了: ${result.updated.join(', ')}`);
                 } else {
-                    alert("部分同步失败: " + result.errors.join('; '));
+                    throw new Error(result.error || `同步失败: ${(result.errors || []).join('; ')}`);
                 }
             } else {
                 alert("当前角色日程已保存。");
@@ -3915,7 +4215,7 @@
 
             // 1. 尝试解析 JSON
             try {
-                const newData = JSON.parse(textarea.value);
+                const newData = normalizeScheduleEditorData(JSON.parse(textarea.value));
 
                 // 2. 重新渲染列表 (需要临时调用 buildEditor 的内部逻辑，或者简单点：更新全局数据并重绘)
                 // 为了简单，我们更新 GLOBAL_DATA 并重新调用 buildEditor
@@ -3935,15 +4235,57 @@
     // 辅助：从输入框抓取当前数据
     function scrapeScheduleDataFromInputs() {
         const container = document.querySelector('#module-schedule .edit-mode');
-        const inputRows = container.querySelectorAll('.input-group');
         const newData = {};
 
-        inputRows.forEach(row => {
+        container.querySelectorAll('.schedule-dated-row').forEach(row => {
             const k = row.querySelector('.input-key').value.trim();
             const v = row.querySelector('.input-val').value.trim();
-            if(k) newData[k] = v;
+            if(k && v) {
+                if (!newData[k]) newData[k] = [];
+                newData[k].push(v);
+            }
         });
-        return newData;
+
+        newData._undated = Array.from(container.querySelectorAll('.undated-plan-input'))
+            .map(input => input.value.trim())
+            .filter(Boolean);
+        return normalizeScheduleEditorData(newData);
+    }
+
+    function normalizeScheduleEditorData(rawData) {
+        if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) {
+            throw new Error('日程数据必须是 JSON 对象');
+        }
+
+        const normalized = {};
+        Object.entries(rawData).forEach(([rawKey, value]) => {
+            if (rawKey === '_undated') return;
+            const key = String(rawKey || '').trim();
+            if (!key) return;
+            const items = typeof value === 'string' ? [value] : value;
+            if (!Array.isArray(items)) {
+                throw new Error(`日程 ${key} 必须是文本或文本数组`);
+            }
+            normalized[key] = items.map(item => {
+                if (typeof item !== 'string') {
+                    throw new Error(`日程 ${key} 的每一项都必须是文本`);
+                }
+                return item.trim();
+            }).filter(Boolean);
+            if (!normalized[key].length) delete normalized[key];
+        });
+
+        const rawUndated = rawData._undated == null ? [] : rawData._undated;
+        if (!Array.isArray(rawUndated)) {
+            throw new Error('_undated 必须是文本数组');
+        }
+        normalized._undated = rawUndated.map(item => {
+            if (typeof item !== 'string') {
+                throw new Error('无时间计划的每一项都必须是文本');
+            }
+            return item.trim();
+        }).filter(Boolean);
+        return normalized;
     }
 
     function renderCharacterTimeMeta(data) {
@@ -3962,9 +4304,7 @@
             }
             meta.textContent = `来源：${meta.dataset.source || '默认'} · 睡眠基准：${meta.dataset.basis === 'character' ? '角色当地时间' : '用户当地时间'}`;
             if (basisLabel) {
-                basisLabel.textContent = meta.dataset.basis === 'character'
-                    ? '角色当地时间:'
-                    : '用户当地时间:';
+                basisLabel.textContent = '按角色当地时间设置:';
             }
         }
         if (preview) {
@@ -4177,7 +4517,15 @@
     }
 
     // B. 直接保存 (用于开关和时间选择)
-    async function saveStatusDirect() {
+    let statusSaveQueue = Promise.resolve();
+    function saveStatusDirect() {
+        if (saveTimer) clearTimeout(saveTimer);
+        // 按顺序保存，避免快速锁定/解锁时旧请求覆盖新状态。
+        statusSaveQueue = statusSaveQueue.then(persistStatusDirect, persistStatusDirect);
+        return statusSaveQueue;
+    }
+
+    async function persistStatusDirect() {
         const emotion = document.getElementById('emotion-num').value;
         const momentsIndex = document.getElementById('moments-index-num').value;
         const intimacy = document.getElementById('intimacy-num').value;
@@ -4198,6 +4546,8 @@
             const payload = {
                 emotion: emotion,
                 moments_index: parseFloat(momentsIndex) || 1,
+                emotion_locked: document.getElementById('emotion-locked-chk').checked,
+                moments_index_locked: document.getElementById('moments-index-locked-chk').checked,
                 intimacy: Math.max(0, Math.min(100, parseInt(intimacy, 10) || 60)),
                 light_sleep: lightSleepToSave,
                 bedtime_diary_enabled: bedtimeDiaryEnabled,

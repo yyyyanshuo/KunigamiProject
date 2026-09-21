@@ -10,6 +10,7 @@
     <link rel="apple-touch-icon" href="/static/logo.png">
     <title>朋友圈</title>
     <script src="/static/image-tags.js"></script>
+    <script src="/static/ai-disclosure.js"></script>
     <script defer src="/static/voice-call-incoming.js"></script>
     <script>
         // 将后端语言设置传递给前端
@@ -385,6 +386,13 @@
             margin: 6px 0 10px;
             white-space: pre-wrap;
             word-break: break-word;
+        }
+        .moment-ai-disclosure {
+            margin-top: 9px;
+            color: var(--text-muted);
+            font-size: 10px;
+            line-height: 1.4;
+            text-align: right;
         }
         .moment-head-actions {
             display: flex;
@@ -1294,6 +1302,9 @@
                     const postTransResult = translationCache[postKey]
                         ? '<div class="moment-translation-result">' + escapeHtml(translationCache[postKey]) + '</div>'
                         : '';
+                    const aiDisclosureHtml = m.char_id !== USER_ID
+                        ? '<div class="moment-ai-disclosure" role="note">内容由 AI 生成</div>'
+                        : '';
                     
                     // 朋友圈操作菜单
                     let postMenuItems = '<button type="button" class="moment-menu-item btn-copy-moment">复制</button>';
@@ -1349,6 +1360,7 @@
                         postTransResult +
                         likersHtml +
                         commentsHtml +
+                        aiDisclosureHtml +
                         '</div></div>';
                 }).join('');
                 if (options && options.highlightFirst) {
@@ -1998,7 +2010,8 @@
                                 return `${c.remark}：${reply}${c.content}`;
                             }).join('\n');
                         }
-                        navigator.clipboard.writeText(text.trim()).then(() => {
+                        const disclosureText = window.KunigamiAiDisclosure.appendCopyFooter(text);
+                        navigator.clipboard.writeText(disclosureText).then(() => {
                             const old = copyBtn.textContent;
                             copyBtn.textContent = '已复制';
                             showToast('复制成功！');
@@ -2006,7 +2019,7 @@
                         }).catch(err => {
                             // Fallback for non-secure contexts
                             const textArea = document.createElement("textarea");
-                            textArea.value = text.trim();
+                            textArea.value = disclosureText;
                             document.body.appendChild(textArea);
                             textArea.select();
                             try {

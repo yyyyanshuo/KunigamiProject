@@ -61,6 +61,13 @@
         .bottom-bar { position: fixed; bottom: 0; left: 0; width: 100%; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); border-top: 1px solid var(--border-color); display: flex; padding: 10px 15px; align-items: center; box-shadow: 0 -2px 10px rgba(0,0,0,0.05); z-index: 100; box-sizing: border-box; }
         .btn-add { background: var(--primary-color); color: white; border: none; padding: 10px 20px; border-radius: 20px; font-weight: 600; font-size: 14px; margin-right: auto; cursor: pointer; transition: all 0.2s; }
         .btn-add:active { transform: scale(0.95); opacity: 0.9; }
+        .btn-trial {
+            position: absolute; top: calc(15px + env(safe-area-inset-top)); right: 15px; z-index: 12;
+            border: 1px solid rgba(255,255,255,.8); border-radius: 18px; padding: 8px 14px;
+            background: rgba(255,255,255,.92); color: var(--primary-dark); font-size: 13px;
+            font-weight: 700; box-shadow: 0 4px 14px rgba(0,0,0,.08); cursor: pointer;
+            backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+        }
         
         .btn-small { 
             padding: 5px 15px; font-size: 12px; border-radius: 15px; border: 1px solid var(--primary-color); 
@@ -114,6 +121,7 @@
     <div style="position: absolute; top: 15px; left: 15px; z-index: 10;">
         <a href="/square" style="color: var(--text-main); text-decoration: none; font-size: 24px;">←</a>
     </div>
+    <button class="btn-trial" onclick="startTrialChat()">试聊一下</button>
 
     <div class="cover">
         <img id="char-avatar" class="avatar" src="/static/default_avatar.png">
@@ -198,9 +206,25 @@
         </div>
     </div>
 
+    <div class="modal-mask" id="addLocalModalMask">
+        <div class="modal-card">
+            <div class="modal-title">添加到本地</div>
+            <div id="addLocalModalText" style="font-size:14px;line-height:1.6;color:#667;"></div>
+            <label id="importTrialHistoryLabel" style="display:none;align-items:flex-start;gap:10px;margin-top:16px;padding:12px;background:#f8f9fb;border-radius:12px;cursor:pointer;">
+                <input type="checkbox" id="importTrialHistoryCheckbox" checked style="margin-top:3px;">
+                <span><strong>导入试聊记录</strong><br><small style="color:var(--text-muted);">导入后会成为正式聊天历史，并可能参与之后的记忆整理。</small></span>
+            </label>
+            <div class="modal-actions">
+                <button class="btn-cancel" onclick="closeAddLocalModal()">取消</button>
+                <button class="btn-submit" id="confirmAddLocalBtn" onclick="confirmAddToLocal()">添加到本地</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const charId = "{{ char_id }}";
         let currentData = null;
+        let currentTrial = null;
 
         async function loadDetail() {
             try {
@@ -210,6 +234,7 @@
                 
                 const char = data.character;
                 currentData = char;
+                currentTrial = data.trial;
                 
                 if (data.is_author) {
                     document.getElementById('author-controls').style.display = 'flex';
@@ -313,8 +338,23 @@
             } catch(e) { alert("请求失败"); }
         }
 
-        async function addToLocal() {
-            const btn = document.getElementById('add-local-btn');
+        function startTrialChat() {
+            location.href = `/square/character/${encodeURIComponent(charId)}/trial`;
+        }
+
+        function addToLocal() {
+            const count = currentTrial ? Number(currentTrial.message_count || 0) : 0;
+            document.getElementById('addLocalModalText').innerText = `将「${currentData?.name || charId}」添加到本地，并自动保存已填写的试聊关系。`;
+            document.getElementById('importTrialHistoryLabel').style.display = count > 0 ? 'flex' : 'none';
+            document.getElementById('addLocalModalMask').style.display = 'flex';
+        }
+
+        function closeAddLocalModal() {
+            document.getElementById('addLocalModalMask').style.display = 'none';
+        }
+
+        async function confirmAddToLocal() {
+            const btn = document.getElementById('confirmAddLocalBtn');
             const originalText = btn.innerText;
             btn.innerText = "添加中...";
             btn.disabled = true;
@@ -322,12 +362,16 @@
                 const res = await fetch('/api/square/add_to_local', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: charId })
+                    body: JSON.stringify({
+                        id: charId,
+                        import_trial_history: document.getElementById('importTrialHistoryCheckbox').checked
+                    })
                 });
                 const data = await res.json();
-                if (data.status === 'success') {
-                    alert("已成功添加到本地联系人列表！");
-                    location.href = '/';
+                if (data.status === 'success' || data.status === 'already_added') {
+                    const imported = Number(data.imported_message_count || 0);
+                    alert(data.status === 'already_added' ? "该角色已经在本地联系人中" : `添加成功${imported ? `，已导入${imported}条试聊消息` : ''}！`);
+                    location.href = `/chat/${encodeURIComponent(data.local_id)}`;
                 } else {
                     alert("添加失败: " + data.error);
                 }

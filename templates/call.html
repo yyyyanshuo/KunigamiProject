@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#11151d">
   <title>语音通话</title>
   <script src="/static/auth-guard.js"></script>
+  <link rel="stylesheet" href="/static/ai-disclosure.css">
   <style>
     :root { color-scheme: dark; --accent:#ff8faa; --glass:rgba(255,255,255,.09); }
     * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
@@ -60,6 +61,9 @@
     <div id="transcript" class="transcript" aria-live="polite"></div>
   </section>
   <section class="bottom">
+    <div class="ai-disclosure ai-disclosure--call" role="note" aria-label="AI 内容标识">
+      <span>内容由 AI 生成</span>
+    </div>
     <button id="playGate" class="play-gate">点击播放角色语音</button>
     <div id="liveText" class="live-text"></div>
     <div id="incomingActions" class="hidden">
@@ -219,18 +223,36 @@
     if(!response.ok)throw new Error(data.error||'完整语音识别失败');
     return {text:String(data.transcript||'').trim(),hasSpeech:data.has_speech===true};
   }
-  function realtimeHasSpokenText(text) {
-    const cleaned=String(text||'')
+  function realtimeSpokenText(text) {
+    return String(text||'')
       .replace(/（[^（）]{1,40}）/g,'')
       .replace(/\([^()]{1,40}\)/g,'')
-      .replace(/\[[^\[\]]{1,40}\]/g,'');
+      .replace(/\[[^\[\]]{1,40}\]/g,'').trim();
+  }
+  function realtimeHasSpokenText(text) {
+    const cleaned=realtimeSpokenText(text);
     return /[A-Za-z0-9\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/.test(cleaned);
+  }
+  function updateRealtimeTranscript(state, type, text) {
+    // 环境声/空结果不能覆盖已识别的人声文字，也不重置停顿计时。
+    if(!realtimeHasSpokenText(text))return;
+    if(type==='partial_transcript') state.partial=text;
+    else if(type==='committed_transcript'&&text){state.committed.push(text);state.partial='';}
+    else return;
+    const combined=[...state.committed,state.partial].filter(Boolean).join(' ');
+    const spoken=realtimeSpokenText(combined).replace(/\s+/g,'');
+    // 重复结果、partial 转 committed 和环境声标签不延长本轮识别。
+    if(realtimeHasSpokenText(spoken)&&spoken!==state.lastRecognizedText){
+      state.lastRecognizedText=spoken;state.lastTextAt=Date.now();state.textRevision++;
+    }
+    liveTextEl.textContent=combined;
   }
   function startSilenceWatch(state) {
     clearInterval(state.silenceInterval);
     state.silenceInterval=setInterval(()=>{
-      if(state.stopped||busy||!state.hasVoice)return;
-      if(Date.now()-state.lastSpeechAt>=700)commitSpeech(state);
+      if(state.stopped||state.finalizing||busy||state.lastTextAt===null)return;
+      const text=[...state.committed,state.partial].filter(Boolean).join(' ');
+      if(realtimeHasSpokenText(text)&&Date.now()-state.lastTextAt>=2000)commitSpeech(state);
     },150);
   }
 
@@ -241,7 +263,7 @@
       const context = new (window.AudioContext || window.webkitAudioContext)();
       if (context.state === 'suspended') await context.resume();
       const source=context.createMediaStreamSource(stream), processor=context.createScriptProcessor(4096,1,1), silent=context.createGain(); silent.gain.value=0;
-      const state={stream,context,source,processor,silent,socket:null,queue:[],committed:[],partial:'',stopped:false,finalizing:false,commitTimer:null,silenceInterval:null,lastSpeechAt:Date.now(),hasVoice:false,recorder:null,audioChunks:[]}; listening=state;
+      const state={stream,context,source,processor,silent,socket:null,queue:[],committed:[],partial:'',stopped:false,finalizing:false,commitTimer:null,silenceInterval:null,lastTextAt:null,lastRecognizedText:'',textRevision:0,recorder:null,audioChunks:[]}; listening=state;
       const options=recorderOptions();
       if(options!==null){
         try{
@@ -253,9 +275,7 @@
       source.connect(processor); processor.connect(silent); silent.connect(context.destination);
       processor.onaudioprocess=e=>{
         if(state.stopped)return;
-        const samples=e.inputBuffer.getChannelData(0); let energy=0, measured=0;
-        for(let i=0;i<samples.length;i+=4){energy+=samples[i]*samples[i];measured++;}
-        if(measured&&Math.sqrt(energy/measured)>.012){state.hasVoice=true;state.lastSpeechAt=Date.now();}
+        const samples=e.inputBuffer.getChannelData(0);
         const encoded=pcmToBase64(downsample(samples,context.sampleRate));
         const message=JSON.stringify({message_type:'input_audio_chunk',audio_base_64:encoded});
         if(state.socket?.readyState===WebSocket.OPEN) state.socket.send(message); else if(state.queue.length<40) state.queue.push(message);
@@ -270,10 +290,7 @@
       socket.onmessage=event=>{
         if(state.stopped)return; let msg; try{msg=JSON.parse(event.data)}catch(_){return}
         const type=String(msg.message_type||''), text=String(msg.text||'').trim();
-        if(type==='partial_transcript') state.partial=text;
-        else if(type==='committed_transcript'&&text){state.committed.push(text);state.partial='';clearTimeout(state.commitTimer);state.commitTimer=setTimeout(()=>commitSpeech(state),350)}
-        else return;
-        liveTextEl.textContent=[...state.committed,state.partial].filter(Boolean).join(' ');
+        updateRealtimeTranscript(state,type,text);
       };
       socket.onerror=()=>{ if(!state.stopped) statusEl.textContent='语音识别连接不稳定'; };
       statusEl.textContent='正在聆听'; liveTextEl.textContent='';
@@ -285,10 +302,10 @@
   async function commitSpeech(state) {
     if (state !== listening || busy || state.finalizing) return;
     const realtimeText=[...state.committed,state.partial].filter(Boolean).join(' ').trim();
-    if(!state.hasVoice&&!realtimeText)return;
+    if(state.stopped||!realtimeHasSpokenText(realtimeText))return;
     state.finalizing=true; busy=true; clearTimeout(state.commitTimer); clearInterval(state.silenceInterval);
     statusEl.textContent='正在完善识别…'; liveTextEl.textContent=realtimeText||'正在识别整句话…';
-    const snapshotSpeechAt=state.lastSpeechAt;
+    const snapshotTextRevision=state.textRevision;
     const recording=await snapshotRecordedUtterance(state);
     let text='', batchSucceeded=false, batchHasSpeech=false;
     if(recording?.size){
@@ -299,21 +316,21 @@
       catch(error){console.warn('[CallBatchSTT] falling back to realtime transcript:',error)}
     }
     if(state!==listening||!call||call.status!=='active'){busy=false;return;}
-    if(state.lastSpeechAt>snapshotSpeechAt+50){
+    if(state.textRevision!==snapshotTextRevision){
       state.finalizing=false;busy=false;statusEl.textContent='正在聆听';
       liveTextEl.textContent=[...state.committed,state.partial].filter(Boolean).join(' ');
       startSilenceWatch(state);
       return;
     }
     if(batchSucceeded&&!batchHasSpeech){
-      state.committed=[];state.partial='';state.hasVoice=false;state.lastSpeechAt=Date.now();
+      state.committed=[];state.partial='';state.lastRecognizedText='';state.lastTextAt=null;
       state.finalizing=false;busy=false;statusEl.textContent='正在聆听';liveTextEl.textContent='只听到环境声，继续聆听…';
       startSilenceWatch(state);
       return;
     }
     if(!batchSucceeded){text=realtimeHasSpokenText(realtimeText)?realtimeText:'';}
     if(!text){
-      state.committed=[];state.partial='';state.hasVoice=false;state.lastSpeechAt=Date.now();
+      state.committed=[];state.partial='';state.lastRecognizedText='';state.lastTextAt=null;
       state.finalizing=false;busy=false;statusEl.textContent='正在聆听';liveTextEl.textContent='没有听到说话，继续聆听…';
       startSilenceWatch(state);
       return;
@@ -369,8 +386,22 @@
     } catch(error){statusEl.textContent='通话加载失败';liveTextEl.textContent=error.message;$('backBtn').classList.remove('hidden')}
   }
 
-  $('acceptBtn').onclick=async()=>{incomingActions.classList.add('hidden');statusEl.textContent='正在接听…';try{const data=await api(`/api/calls/${callId}/accept`,{method:'POST'});call=Object.assign(call||{},data.call);await beginActive(null)}catch(e){liveTextEl.textContent=e.message}};
-  $('rejectBtn').onclick=async()=>{try{const data=await api(`/api/calls/${callId}/reject`,{method:'POST'});call=data.call;showEnded(call.end_reason)}catch(e){liveTextEl.textContent=e.message}};
+  function disableIncomingActions(disabled){$('acceptBtn').disabled=disabled;$('rejectBtn').disabled=disabled}
+  $('acceptBtn').onclick=async()=>{
+    disableIncomingActions(true);incomingActions.classList.add('hidden');statusEl.textContent='正在接听…';
+    try{
+      const data=await api(`/api/calls/${callId}/accept`,{method:'POST'});
+      call=Object.assign(call||{},data.call);await beginActive(data.opening_turn||null);
+      if(data.response_warning)liveTextEl.textContent=data.response_warning;
+    }catch(e){incomingActions.classList.remove('hidden');disableIncomingActions(false);liveTextEl.textContent=e.message}
+  };
+  $('rejectBtn').onclick=async()=>{
+    disableIncomingActions(true);incomingActions.classList.add('hidden');statusEl.textContent='正在拒绝…';
+    try{
+      const data=await api(`/api/calls/${callId}/reject`,{method:'POST'});
+      call=data.call;showEnded(call.end_reason);liveTextEl.textContent=data.message||data.response_warning||'';
+    }catch(e){incomingActions.classList.remove('hidden');disableIncomingActions(false);liveTextEl.textContent=e.message}
+  };
   async function hangupCurrentCall(){stopListening();try{const data=await api(`/api/calls/${callId}/end`,{method:'POST'});call=data.call;showEnded(call.end_reason)}catch(e){liveTextEl.textContent=e.message}}
   $('hangupBtn').onclick=hangupCurrentCall;
   $('muteBtn').onclick=()=>{muted=!muted;$('muteBtn').classList.toggle('muted',muted);$('muteLabel').textContent=muted?'取消静音':'静音';if(muted){stopListening();statusEl.textContent='麦克风已关闭'}else{statusEl.textContent='正在通话';startListening()}};

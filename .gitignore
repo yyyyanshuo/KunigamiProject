@@ -28,6 +28,9 @@ users/
 scripts/*
 !scripts/migrate_user_credentials.py
 !scripts/rebuild_memory_day.py
+!scripts/migrate_base_persona.py
+!scripts/run_character_ego_test.py
+!scripts/cleanup_map_locations.py
 credential-migration-backups/
 memory-rebuild-backups/
 

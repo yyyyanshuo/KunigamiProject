@@ -61,7 +61,7 @@ def clean_moments_agent_instructions(text):
         return text
 
     # 匹配已知的 Agent 指令标签关键字 (不区分大小写)，支持中英文括号
-    pattern = r'[\[【]\s*(?:UPDATE_AFFINITY|SET_EMOTION|SET_PERSONALITY|SET_SLEEP_TIME|SET_RELATION|ADD_SCHEDULE|MOOD|DIRECT_TO_GROUP|DIRECT_TO_USER|DIRECT_END|NONE|MOVE_TO|MOVE_TO_COORD|EXPLORE|SET_CHAT_MODE|MUSIC_[A-Z0-9_]+)(?::|：)?\s*.*?[\]】]'
+    pattern = r'[\[【]\s*(?:UPDATE_AFFINITY|SET_EMOTION|SET_PERSONALITY|SET_SLEEP_TIME|SET_RELATION|ADD_SCHEDULE|ADD_PERSONA|DELETE_PERSONA|EDIT_PERSONA|REWRITE_PERSONA|ADD_RELATION|DELETE_RELATION|EDIT_RELATION|REWRITE_RELATION|ADD_PLAN|DELETE_PLAN|EDIT_PLAN|REWRITE_PLAN|MOOD|DIRECT_TO_GROUP|DIRECT_TO_USER|DIRECT_END|NONE|MOVE_TO|MOVE_TO_COORD|EXPLORE|SET_CHAT_MODE|MUSIC_[A-Z0-9_]+)(?::|：)?\s*.*?[\]】]'
     text = re.sub(pattern, '', text, flags=re.IGNORECASE | re.DOTALL)
 
     # 额外兜底清理所有大写加下划线的指令标签，避免未定义或畸形的指令流出（不清理 SEARCH_IMG 和 GENERATE_IMAGE）
@@ -1305,9 +1305,9 @@ def trigger_active_moments(char_id, user_id=None, instruction=None):
 
     # 主动发朋友圈不需要全局格式规则
     if should_use_prompt_v2(char_id):
-        base_system_prompt = build_system_prompt_v2(char_id, include_global_format=False, recent_messages=None, include_long_memory=False, include_recent_messages=False, user_id=user_id)
+        base_system_prompt = build_system_prompt_v2(char_id, include_global_format=False, recent_messages=None, include_long_memory=False, include_recent_messages=False, user_id=user_id, include_all_relationships=True)
     else:
-        base_system_prompt = build_system_prompt(char_id, include_global_format=False, recent_messages=None, include_long_memory=False, user_id=user_id)
+        base_system_prompt = build_system_prompt(char_id, include_global_format=False, recent_messages=None, include_long_memory=False, user_id=user_id, include_all_relationships=True)
 
     remarks = {}
     cfg_file = _get_characters_config_file(user_id=user_id)
@@ -2368,9 +2368,9 @@ def moments_regenerate():
 
         user_id = get_current_user_id()
         if should_use_prompt_v2(char_id):
-            base_system_prompt = build_system_prompt_v2(char_id, include_global_format=False, recent_messages=None, include_long_memory=False, include_recent_messages=False, user_id=user_id)
+            base_system_prompt = build_system_prompt_v2(char_id, include_global_format=False, recent_messages=None, include_long_memory=False, include_recent_messages=False, user_id=user_id, include_all_relationships=True)
         else:
-            base_system_prompt = build_system_prompt(char_id, include_global_format=False, recent_messages=None, include_long_memory=False, user_id=user_id)
+            base_system_prompt = build_system_prompt(char_id, include_global_format=False, recent_messages=None, include_long_memory=False, user_id=user_id, include_all_relationships=True)
 
         lang = get_ai_language(char_id, user_id=user_id)
         now = _character_now(char_id, user_id=user_id)

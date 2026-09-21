@@ -19,6 +19,8 @@ from cos_utils import upload_to_cos
 from core.config import GROUPS_DIR, USERS_ROOT, BASE_DIR
 from core.context import get_current_user_id, set_background_user
 from core.circuit_breaker import get_circuit_breaker_info
+from core.system_messages import is_system_prompt_message
+from services.read_state import remove_read_state
 from core.time_utils import (
     beijing_now,
     get_character_timezone,
@@ -31,6 +33,7 @@ from core.utils import (
     safe_save_json,
     _get_characters_config_file,
     _get_groups_config_file,
+    _get_read_status_file,
     _add_furigana_to_japanese,
     ensure_group_chat_storage,
     is_character_available_for_group_chat,
@@ -40,7 +43,9 @@ from services.memory_store import (
     atomic_write_json,
     load_json_object,
     memory_file_lock,
+    replace_short_memory_events_by_prefix,
 )
+from services.ai_client import ai_error_payload, is_ai_error_response
 from services.voice_messages import (
     VoiceMessageError,
     attach_voice_message,
@@ -201,17 +206,33 @@ def build_group_relationship_prompt(current_char_id, other_member_ids):
         return ""
 
 
-def distribute_group_memory(group_id, group_name, members, new_events, date_str):
+def distribute_group_memory(
+    group_id,
+    group_name,
+    members,
+    new_events,
+    date_str,
+    *,
+    replace=False,
+    target_member_ids=None,
+):
     """
     将群聊新生成的事件，追加到每个成员的 6_memory_group_log.json 中
     """
-    if not new_events:
+    if not new_events and not replace:
         print("   [Distribute] 没有新事件需要分发")
         return
 
     print(f"   [Distribute] 正在分发 {len(new_events)} 条事件给成员: {members}")
 
-    for char_id in members:
+    if target_member_ids is None:
+        selected_members = members
+    else:
+        target_member_set = set(target_member_ids)
+        selected_members = [
+            char_id for char_id in members if char_id in target_member_set
+        ]
+    for char_id in selected_members:
         if char_id == "user": continue # 跳过用户
 
         try:
@@ -224,7 +245,15 @@ def distribute_group_memory(group_id, group_name, members, new_events, date_str)
                     "time": event['time'],
                     "event": f"[群聊:{group_name}] {clean_event_text}",
                 })
-            count_added = append_short_memory_events(short_file, date_str, prepared)
+            if replace:
+                count_added = replace_short_memory_events_by_prefix(
+                    short_file,
+                    date_str,
+                    f"[群聊:{group_name}]",
+                    prepared,
+                )
+            else:
+                count_added = append_short_memory_events(short_file, date_str, prepared)
             if count_added:
                 print(f"     -> [{char_id}] 合并成功 (+{count_added}条)")
 
@@ -333,9 +362,19 @@ def _get_group_chat_bg_config_file(group_id):
     return os.path.join(group_dir, "chat_bg_config.json")
 
 
-def _update_group_short_memory_locked(group_id, target_date_str):
-    from app import call_ai_to_summarize
-    from services.memory import _chunk_items, _parse_short_summary
+def _update_group_short_memory_locked(
+    group_id,
+    target_date_str,
+    force_reset=False,
+    distribute_member_ids=None,
+):
+    from services.memory import (
+        _pack_conversation_sessions,
+        _parse_short_summary_detailed,
+        _short_summary_is_compressed,
+        _split_conversation_sessions,
+        _summary_with_output_retries,
+    )
 
     # 1. 路径准备
     group_dir = get_group_dir(group_id)
@@ -374,18 +413,30 @@ def _update_group_short_memory_locked(group_id, target_date_str):
     start_time = f"{target_date_str} 00:00:00"
     end_time = f"{target_date_str} 23:59:59"
 
-    # 只读取 ID > last_id 的新消息
+    # Normal runs read only unsummarized messages. A targeted rebuild reads the
+    # complete date once and replaces this group's prior event summaries.
     cursor.execute(
         "SELECT id, timestamp, role, content FROM messages "
         "WHERE timestamp >= ? AND timestamp <= ? AND id > ? ORDER BY id ASC",
-        (start_time, end_time, last_id),
+        (start_time, end_time, 0 if force_reset else last_id),
     )
     rows = cursor.fetchall()
     conn.close()
 
-    if not rows: return 0, []
-
-    new_max_id = max(row[0] for row in rows)
+    if not rows:
+        if force_reset:
+            current_data[target_date_str] = {"events": [], "last_id": 0}
+            atomic_write_json(memory_file, current_data)
+            distribute_group_memory(
+                group_id,
+                group_name,
+                members,
+                [],
+                target_date_str,
+                replace=True,
+                target_member_ids=distribute_member_ids,
+            )
+        return 0, []
 
     # 5. 拼接文本 (需要转换 role ID 为名字)
     # 加载名字映射 (使用 per-user 配置)
@@ -403,23 +454,43 @@ def _update_group_short_memory_locked(group_id, target_date_str):
         name = "ユーザー" if role == "user" else id_to_name.get(role, role)
         return f"[{time_part}] {name}: {content}\n"
 
+    source_rows = [row for row in rows if not is_system_prompt_message(row[3])]
+    sessions = _split_conversation_sessions(source_rows)
+    new_max_id = max(row[0] for row in rows)
+
     new_events = []
-    chunks = list(_chunk_items(rows, max_items=36, max_chars=12000, render=render_row))
+    chunks = list(_pack_conversation_sessions(
+        sessions,
+        max_items=36,
+        max_chars=12000,
+        render=render_row,
+    ))
     for index, chunk in enumerate(chunks, start=1):
-        summary_text = call_ai_to_summarize(
-            "".join(render_row(row) for row in chunk), "group_log", "system"
+        chunk_rows = [row for session in chunk for row in session]
+        source = "\n\n--- 会话段结束 / conversation segment ended ---\n\n".join(
+            "".join(render_row(row) for row in session).rstrip()
+            for session in chunk
         )
-        if not summary_text:
-            print(f"   [Group Memory] 第 {index}/{len(chunks)} 批失败，游标未推进")
+        summary_result = _summary_with_output_retries(
+            source,
+            "group_log",
+            "system",
+            validator=_parse_short_summary_detailed,
+        )
+        if not summary_result.ok:
+            print(
+                f"   [Group Memory] 第 {index}/{len(chunks)} 批"
+                f"{summary_result.status}: {summary_result.message}，游标未推进"
+            )
             return 0, []
-        valid, batch_events = _parse_short_summary(summary_text)
-        if not valid:
-            print(f"   [Group Memory] 第 {index}/{len(chunks)} 批格式错误，游标未推进")
+        batch_events = summary_result.parsed
+        if not _short_summary_is_compressed(chunk_rows, batch_events):
+            print(f"   [Group Memory] 第 {index}/{len(chunks)} 批未形成完整事件，游标未推进")
             return 0, []
         new_events.extend(batch_events)
 
     # 8. 保存到群聊记忆 (追加模式)
-    final_events = existing_events + new_events
+    final_events = new_events if force_reset else existing_events + new_events
 
     # 如果是重置模式(last_id=0)，且原本有数据，这里可以加去重逻辑(类似单人)，这里暂略，直接追加
 
@@ -432,20 +503,38 @@ def _update_group_short_memory_locked(group_id, target_date_str):
 
     # ================= 关键修复点 =================
     # 9. 【必须】调用分发函数，传给个人
-    if new_events:
+    if new_events or force_reset:
         print(f"--- [Sync] 开始同步群聊记忆到个人文件 ---")
-        distribute_group_memory(group_id, group_name, members, new_events, target_date_str)
+        distribute_group_memory(
+            group_id,
+            group_name,
+            members,
+            new_events,
+            target_date_str,
+            replace=force_reset,
+            target_member_ids=distribute_member_ids,
+        )
     # ============================================
 
     return len(new_events), new_events
 
 
-def update_group_short_memory(group_id, target_date_str):
+def update_group_short_memory(
+    group_id,
+    target_date_str,
+    force_reset=False,
+    distribute_member_ids=None,
+):
     """Serialize group summarization across web workers and the scheduler."""
     group_dir = get_group_dir(group_id)
     memory_file = os.path.join(group_dir, "memory_short.json")
     with memory_file_lock(memory_file):
-        return _update_group_short_memory_locked(group_id, target_date_str)
+        return _update_group_short_memory_locked(
+            group_id,
+            target_date_str,
+            force_reset=force_reset,
+            distribute_member_ids=distribute_member_ids,
+        )
 
 
 # ==================== 群聊页面路由 ====================
@@ -532,16 +621,66 @@ def get_group_history(group_id):
     # 日语注音处理（不写回DB）
     for m in messages:
         sender_role = m.get("role")
-        if sender_role and sender_role != "user":
-            if get_ai_language(sender_role, group_id=group_id) == "ja":
-                m["content"] = _add_furigana_to_japanese(m["content"])
+        # 用户消息遵循群语言（未设置时使用用户全局语言）。
+        target_id = None if sender_role == "user" else sender_role
+        if get_ai_language(target_id, group_id=group_id) == "ja":
+            m["content"] = _add_furigana_to_japanese(m["content"])
 
     return jsonify({"messages": messages, "total": total})
+
+
+# --- 用户消息先落库：立即返回真实 ID，再由聊天接口生成回复 ---
+@group_bp.route("/api/group/<group_id>/messages", methods=["POST"])
+def create_group_user_message(group_id):
+    data = request.json or {}
+    user_msg = str(data.get("message", "")).strip()
+    if not user_msg:
+        return jsonify({"error": "empty message"}), 400
+
+    user_id = get_current_user_id()
+    try:
+        validate_voice_message_for_scope(
+            user_id, user_msg, scope_type="group", scope_id=group_id
+        )
+    except VoiceMessageError as exc:
+        return jsonify({"error": "voice_message_invalid", "message": str(exc)}), 400
+
+    try:
+        _, db_path = ensure_group_chat_storage(group_id, user_id=user_id)
+    except (OSError, sqlite3.Error) as exc:
+        return jsonify({"error": "group_storage_unavailable", "message": str(exc)}), 500
+
+    user_ts = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
+            ("user", user_msg, user_ts),
+        )
+        user_msg_id = cursor.lastrowid
+        conn.commit()
+    finally:
+        conn.close()
+
+    attach_voice_message(
+        user_id,
+        user_msg,
+        scope_type="group",
+        scope_id=group_id,
+        message_id=user_msg_id,
+    )
+    return jsonify({"user_id": user_msg_id, "timestamp": user_ts}), 201
 
 
 # --- 【修正版】群聊核心接口 (完整逻辑：@解析 + 串行 + 变量修复) ---
 @group_bp.route("/api/group/<group_id>/chat", methods=["POST"])
 def group_chat(group_id):
+    from blueprints.chat import (
+        TransferActionError,
+        apply_assistant_transfer_decision,
+        apply_transfer_action,
+    )
     from app import (
         _memory_context_changed,
         build_system_prompt_v2,
@@ -559,16 +698,20 @@ def group_chat(group_id):
     )
 
     # 1. 基础准备
-    data = request.json
+    data = request.json or {}
     user_msg = data.get("message", "").strip()
     if not user_msg: return jsonify({"error": "empty"}), 400
     # 获取 user_id 用于后续 relay
     user_id = get_current_user_id()
     try:
         validate_voice_message_for_scope(
-            user_id, user_msg, scope_type="group", scope_id=group_id
+            user_id,
+            user_msg,
+            scope_type="group",
+            scope_id=group_id,
+            message_id=data.get("user_message_id"),
         )
-    except VoiceMessageError as exc:
+    except (VoiceMessageError, TypeError, ValueError) as exc:
         return jsonify({"error": "voice_message_invalid", "message": str(exc)}), 400
 
     # --- 群聊前自动同步：仅在切换上下文时总结群内各角色单聊 + 本群群聊短期记忆 ---
@@ -589,6 +732,23 @@ def group_chat(group_id):
     except (OSError, sqlite3.Error) as e:
         print(f"[GroupChat] 无法初始化群聊存储 {group_id}: {e}")
         return jsonify({"error": "group_storage_unavailable", "message": str(e)}), 500
+
+    pre_saved_message_id = data.get("user_message_id")
+    user_message_pre_saved = pre_saved_message_id is not None
+    transfer_update = None
+    if user_message_pre_saved:
+        try:
+            user_msg_id = int(pre_saved_message_id)
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid user_message_id"}), 400
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT role, content FROM messages WHERE id = ?", (user_msg_id,))
+        saved_message = cursor.fetchone()
+        conn.close()
+        if not saved_message or saved_message[0] != "user":
+            return jsonify({"error": "user message not found"}), 404
+        user_msg = saved_message[1]
 
     # 2. 读取群成员 (使用 per-user 配置)
     groups_cfg = _get_groups_config_file()
@@ -652,13 +812,72 @@ def group_chat(group_id):
     # 如果全员都在睡觉，直接返回空
     if not online_ai_members:
         print("--- [GroupChat] 全员睡眠中，无人回复 ---")
-        # 依然要存用户消息
+        # 旧客户端尚未预存时，仍在这里兼容落库。
+        if not user_message_pre_saved:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            user_ts = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                user_msg, transfer_update = apply_transfer_action(
+                    cursor,
+                    data,
+                    user_msg,
+                    allow_group_character_source=True,
+                )
+                cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", ("user", user_msg, user_ts))
+                user_msg_id = cursor.lastrowid
+                conn.commit()
+            except TransferActionError as exc:
+                conn.rollback()
+                conn.close()
+                return jsonify({"error": exc.code, "message": exc.message}), exc.status_code
+            except Exception:
+                conn.rollback()
+                conn.close()
+                raise
+            conn.close()
+            attach_voice_message(
+                user_id,
+                user_msg,
+                scope_type="group",
+                scope_id=group_id,
+                message_id=user_msg_id,
+            )
+        resp = {
+            "replies": [],
+            "user_id": user_msg_id,
+            "transfer_update": transfer_update,
+        }
+        if memory_sync_warning:
+            resp["memory_sync_warning"] = memory_sync_warning
+        return jsonify(resp)
+
+    # 3. 旧客户端兼容：未预存时仍在聊天接口内写入用户消息。
+    if not user_message_pre_saved:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         user_ts = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
-        cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", ("user", user_msg, user_ts))
-        user_msg_id = cursor.lastrowid
-        conn.commit()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            user_msg, transfer_update = apply_transfer_action(
+                cursor,
+                data,
+                user_msg,
+                allow_group_character_source=True,
+            )
+            cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
+                           ("user", user_msg, user_ts))
+            user_msg_id = cursor.lastrowid
+            conn.commit()
+        except TransferActionError as exc:
+            conn.rollback()
+            conn.close()
+            return jsonify({"error": exc.code, "message": exc.message}), exc.status_code
+        except Exception:
+            conn.rollback()
+            conn.close()
+            raise
         conn.close()
         attach_voice_message(
             user_id,
@@ -667,28 +886,6 @@ def group_chat(group_id):
             scope_id=group_id,
             message_id=user_msg_id,
         )
-        resp = {"replies": [], "user_id": user_msg_id}
-        if memory_sync_warning:
-            resp["memory_sync_warning"] = memory_sync_warning
-        return jsonify(resp)
-
-    # 3. 存入用户消息
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    user_ts = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
-
-    cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
-                   ("user", user_msg, user_ts))
-    user_msg_id = cursor.lastrowid # 【新增】获取刚存入的用户消息 ID
-    conn.commit()
-    conn.close()
-    attach_voice_message(
-        user_id,
-        user_msg,
-        scope_type="group",
-        scope_id=group_id,
-        message_id=user_msg_id,
-    )
 
     # 4. 决定回复顺序 (智能 @ 逻辑)
     responder_ids = []
@@ -861,6 +1058,26 @@ def group_chat(group_id):
             if cb_resp:
                 return cb_resp
 
+            if is_ai_error_response(reply_text):
+                error_resp = ai_error_payload(reply_text)
+                error_resp.update({
+                    "replies": replies_for_frontend,
+                    "speaker_id": speaker_id,
+                    "user_id": user_msg_id,
+                    "model": current_model,
+                })
+                # If another group member has already replied, replaying the
+                # entire request could duplicate that reply. Keep the error
+                # visible but disable one-click retry in that partial case.
+                if replies_for_frontend:
+                    error_resp["retryable"] = False
+                    error_resp["partial"] = True
+                if memory_sync_warning:
+                    error_resp["memory_sync_warning"] = memory_sync_warning
+                return jsonify(error_resp), (
+                    getattr(reply_text, "status_code", 0) or 502
+                )
+
             timestamp_pattern = r'\[(?:(?:\d{2}-\d{2}\s+)?\d{1,2}:\d{2})\]\s*'
             cleaned_reply = re.sub(timestamp_pattern, '', reply_text).strip()
 
@@ -918,12 +1135,23 @@ def group_chat(group_id):
 
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
-            cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
-                           (speaker_id, cleaned_reply, ai_ts))
-            # 【关键修复】获取刚刚插入的这条消息的 ID
-            new_msg_id = cursor.lastrowid
-            conn.commit()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                cleaned_reply, assistant_transfer_update = apply_assistant_transfer_decision(
+                    cursor, cleaned_reply
+                )
+                cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
+                               (speaker_id, cleaned_reply, ai_ts))
+                # 【关键修复】获取刚刚插入的这条消息的 ID
+                new_msg_id = cursor.lastrowid
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                conn.close()
+                raise
             conn.close()
+            if assistant_transfer_update:
+                transfer_update = assistant_transfer_update
 
             # 更新 Buffer (供下一个人看)
             context_buffer.append({
@@ -952,16 +1180,17 @@ def group_chat(group_id):
                 rep["content"] = _add_furigana_to_japanese(rep["content"])
 
     # 7. 最终返回；记忆同步失败时附带提示
-    resp = {"replies": replies_for_frontend, "user_id": user_msg_id}
+    resp = {
+        "replies": replies_for_frontend,
+        "user_id": user_msg_id,
+        "transfer_update": transfer_update,
+    }
     if group_affinity_delta:
         resp["affinity_delta"] = round(group_affinity_delta, 2)
     if memory_sync_warning:
         resp["memory_sync_warning"] = memory_sync_warning
     if group_agent_events:
         resp["agent_events"] = group_agent_events
-        safety_alerts = [ev.get("message") for ev in group_agent_events if ev.get("type") == "safety_alert" and ev.get("message")]
-        if safety_alerts:
-            resp["safety_alert"] = "\n".join(safety_alerts)
     cb_info = get_circuit_breaker_info()
     if cb_info:
         resp["circuit_breaker"] = cb_info
@@ -1532,7 +1761,7 @@ def add_group():
             "avatar": "/static/default_group.png", # 记得在static放个图
             "pinned": False,
             "members": members,
-            "active_mode": False,  # 【修改】新建群默认开启主动消息
+            "active_mode": False,  # 新建群默认关闭，用户可在群设置中手动开启
             "group_chat_mode": "online",
         }
 
@@ -1566,6 +1795,7 @@ def delete_group_api(group_id):
         group_dir = get_group_dir(group_id)
         if os.path.exists(group_dir):
             shutil.rmtree(group_dir)
+        remove_read_state(_get_read_status_file(), "group", group_id)
         return jsonify({"status": "success"})
 
     except Exception as e:

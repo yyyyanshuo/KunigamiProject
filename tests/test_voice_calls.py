@@ -180,6 +180,31 @@ def test_separate_users_can_have_independent_calls(tmp_path, monkeypatch):
     assert voice_calls.get_live_call(2)["call_id"] == SECOND_CALL_ID
 
 
+def test_latest_ended_call_can_be_scoped_to_character(tmp_path, monkeypatch):
+    monkeypatch.setattr(voice_calls, "USERS_ROOT", str(tmp_path))
+    voice_calls.create_call(1, call_id=CALL_ID, char_id="rin", initiator="assistant")
+    voice_calls.end_call(1, CALL_ID, reason="rejected")
+    voice_calls.create_call(
+        1, call_id=SECOND_CALL_ID, char_id="isagi", initiator="assistant"
+    )
+    voice_calls.end_call(1, SECOND_CALL_ID, reason="rejected")
+    conn = sqlite3.connect(voice_calls._db_path(1))
+    conn.execute(
+        "UPDATE voice_calls SET ended_at = ? WHERE call_id = ?",
+        ("2026-08-19T01:00:00+00:00", CALL_ID),
+    )
+    conn.execute(
+        "UPDATE voice_calls SET ended_at = ? WHERE call_id = ?",
+        ("2026-08-19T02:00:00+00:00", SECOND_CALL_ID),
+    )
+    conn.commit()
+    conn.close()
+
+    assert voice_calls.get_latest_ended_call(1)["call_id"] == SECOND_CALL_ID
+    assert voice_calls.get_latest_ended_call(1, "rin")["call_id"] == CALL_ID
+    assert voice_calls.get_latest_ended_call(1, "missing") is None
+
+
 def test_delete_calls_for_character_cascades_turns(tmp_path, monkeypatch):
     monkeypatch.setattr(voice_calls, "USERS_ROOT", str(tmp_path))
     voice_calls.create_call(3, call_id=CALL_ID, char_id="rin", initiator="user")

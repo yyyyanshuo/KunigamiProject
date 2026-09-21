@@ -20,6 +20,14 @@ from core.config import BASE_DIR, USERS_DB, USERS_ROOT, DEVICE_ACCOUNTS_FILE, US
 from core.utils import safe_save_json
 from core.context import get_current_user_id
 from core.session_security import establish_authenticated_session
+from core.legal import (
+    get_current_legal_versions,
+    get_legal_documents,
+    get_user_legal_status,
+    init_legal_consents_table,
+    record_current_legal_consents,
+    validate_legal_acceptance,
+)
 
 
 SUBSCRIPTIONS_FILE = os.path.join(BASE_DIR, "configs", "subscriptions.json")
@@ -169,7 +177,11 @@ def login_page():
 def register_page():
     if 'user_id' in session or 'logged_in' in session:
         return redirect('/')
-    return render_template("register.html")
+    return render_template(
+        "register.html",
+        legal_documents=get_legal_documents(),
+        legal_versions=get_current_legal_versions(),
+    )
 
 
 @auth_bp.route("/forgot_password")
@@ -198,6 +210,10 @@ def register_api():
     if not adult_confirmed:
         return jsonify({"status": "error", "message": "请先确认你已年满18周岁"}), 400
 
+    legal_valid, legal_message = validate_legal_acceptance(data)
+    if not legal_valid:
+        return jsonify({"status": "error", "message": legal_message}), 400
+
     if not display_name:
         display_name = email
 
@@ -211,11 +227,13 @@ def register_api():
             conn.close()
             return jsonify({"status": "error", "message": "该邮箱已被注册"}), 400
 
+        init_legal_consents_table(conn)
         cur.execute(
             "INSERT INTO users (email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?)",
             (email, generate_password_hash(password), display_name, datetime.now().isoformat())
         )
         user_id = cur.lastrowid
+        record_current_legal_consents(conn, user_id)
         conn.commit()
         conn.close()
 
@@ -233,6 +251,35 @@ def register_api():
     except Exception as e:
         print(f"[Register] 注册失败: {e}")
         return jsonify({"status": "error", "message": "服务器错误"}), 500
+
+
+@auth_bp.route("/api/legal/status")
+def legal_status_api():
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"status": "error", "message": "请先登录"}), 401
+    return jsonify({"status": "success", **get_user_legal_status(int(user_id))})
+
+
+@auth_bp.route("/api/legal/consent", methods=["POST"])
+def legal_consent_api():
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"status": "error", "message": "请先登录"}), 401
+
+    data = request.get_json() or {}
+    legal_valid, legal_message = validate_legal_acceptance(data)
+    if not legal_valid:
+        return jsonify({"status": "error", "message": legal_message}), 400
+
+    conn = sqlite3.connect(USERS_DB)
+    try:
+        init_legal_consents_table(conn)
+        record_current_legal_consents(conn, int(user_id))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({"status": "success", **get_user_legal_status(int(user_id))})
 
 
 @auth_bp.route("/api/login", methods=["POST"])

@@ -63,6 +63,10 @@ def is_character_available_for_group_chat(info, group_chat_mode="online") -> boo
 def _add_furigana_to_japanese(text: str) -> str:
     if not text:
         return text
+    # 系统提示是系统事件原文，不参与日语注音。
+    from core.system_messages import is_system_prompt_message
+    if is_system_prompt_message(text):
+        return text
     # Lazy import avoids a core.utils -> services package initialization cycle.
     from services.image_tags import protect_image_tags
     text, image_tags = protect_image_tags(text, "__KUNIGAMI_IMAGE_TAG_")
@@ -93,8 +97,17 @@ def _add_furigana_to_japanese(text: str) -> str:
 
                 joined_orig = "".join((it.get("orig") or "") for it in result)
                 if joined_orig != line_part:
-                    out += line_part
-                    continue
+                    # 特殊符号可能使 kakasi 重复/丢失原文；仅重新转换日文片段，
+                    # 其余字符原样保留，避免整行汉字都失去注音。
+                    result = []
+                    for chunk in re.split(r'([\u3400-\u4dbf\u4e00-\u9fff\u3041-\u3096\u30a1-\u30faー々]+)', line_part):
+                        if not chunk:
+                            continue
+                        converted = kks.convert(chunk) if re.search(r'[\u3400-\u4dbf\u4e00-\u9fff]', chunk) else []
+                        if converted and "".join(item.get("orig", "") for item in converted) == chunk:
+                            result.extend(converted)
+                        else:
+                            result.append({"orig": chunk, "hira": chunk})
 
                 for item in result:
                     orig = item["orig"]
@@ -539,8 +552,30 @@ def get_location_at_coord(x, y, user_id=None):
     return None
 
 
+def coordinates_equal(x1, y1, x2, y2, tolerance=1e-9):
+    """Return whether two stored map coordinates represent the same point."""
+    try:
+        return (
+            abs(float(x1) - float(x2)) <= tolerance
+            and abs(float(y1) - float(y2)) <= tolerance
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def get_location_at_exact_coord(x, y, user_id=None, exclude_id=None):
+    """Find a location at the same coordinate, without nearby-place matching."""
+    locs = load_locations(user_id=user_id)
+    for loc in locs.get("locations", []):
+        if exclude_id is not None and loc.get("id") == exclude_id:
+            continue
+        if coordinates_equal(x, y, loc.get("x"), loc.get("y")):
+            return loc
+    return None
+
+
 def normalize_map_state(user_id=None, drop_orphan_positions=True):
-    """Repair location_id/coordinate drift and remove invalid map references."""
+    """Repair map references and ensure every configured character is present."""
     locations = load_locations(user_id=user_id)
     locs_by_id = {
         str(loc.get("id")): loc
@@ -558,6 +593,23 @@ def normalize_map_state(user_id=None, drop_orphan_positions=True):
             valid_char_ids = None
 
     changed = False
+    # The positions file outlives the initial map setup. Characters created or
+    # imported afterwards therefore need to be added here so map consumers can
+    # render and select them immediately.
+    if valid_char_ids is not None:
+        home = locs_by_id.get("home")
+        initial_x = float(home.get("x", 0.0)) if home else 0.0
+        initial_y = float(home.get("y", 0.0)) if home else 0.0
+        for cid in valid_char_ids:
+            if cid not in positions:
+                positions[cid] = {
+                    "location_id": "home" if home else None,
+                    "x": initial_x,
+                    "y": initial_y,
+                    "known_location_ids": ["home"] if home else [],
+                }
+                changed = True
+
     for cid in list(positions.keys()):
         if drop_orphan_positions and valid_char_ids is not None and cid not in valid_char_ids:
             del positions[cid]
@@ -750,14 +802,22 @@ def move_character_position(char_id, x, y, location_id=None, force=False, user_i
             target_x, target_y = float(matched["x"]), float(matched["y"])
 
     old = dict(positions[char_id])
-    distance = calc_distance(float(old.get("x", 0.0)), float(old.get("y", 0.0)), target_x, target_y)
-    if distance > 1.0 and not force:
-        raise ValueError(f"distance {round(distance, 2)} exceeds 1.0")
-
     known = [
         lid for lid in (old.get("known_location_ids") or [])
         if lid in locs_by_id
     ]
+    distance = calc_distance(
+        float(old.get("x", 0.0)),
+        float(old.get("y", 0.0)),
+        target_x,
+        target_y,
+    )
+    is_known_destination = bool(location_id and location_id in known)
+    if distance >= 1.0 and not is_known_destination and not force:
+        raise ValueError(
+            f"distance {round(distance, 2)} is not below 1.0 and destination is unknown"
+        )
+
     if location_id and location_id not in known:
         known.append(location_id)
     positions[char_id] = {

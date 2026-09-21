@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Sakura AI</title>
+<link rel="stylesheet" href="/static/ai-disclosure.css">
 <style>
 :root {
   --sakura-pink: #ffb6b9;
@@ -354,6 +355,9 @@ body {
   <div class="status-bar">
     <span class="status-text" id="status-text" name="status-text">可以开始对话了</span>
     <button class="clear-btn" id="clear-btn" name="clear-btn" onclick="clearHistory()">清空上下文</button>
+  </div>
+  <div class="ai-disclosure ai-disclosure--sakura" role="note" aria-label="AI 内容标识">
+    <span>内容由 AI 生成</span>
   </div>
 </div>
 

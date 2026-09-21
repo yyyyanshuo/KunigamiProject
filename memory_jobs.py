@@ -168,53 +168,23 @@ def run_all_daily_rollovers(target_date_str=None):
 
 def _process_single_char_weekly(char_id, user_id=None):
     """处理单个角色的周结（调用时需已 set_background_user）"""
-    from app import call_ai_to_summarize, get_paths
+    from services.memory import generate_long_memory_for_week
 
     print(f"   > 正在处理角色: [{char_id}] (周结)")
 
-    _, prompts_dir = get_paths(char_id)
-    medium_file = os.path.join(prompts_dir, "5_memory_medium.json")
-    long_file = os.path.join(prompts_dir, "4_memory_long.json")
-
-    if not os.path.exists(medium_file): return
-
-    with open(medium_file, "r", encoding="utf-8") as f:
-        try: medium_data = json.load(f)
-        except: return
-
     today = datetime.datetime.now().date()
-    start_date, end_date = completed_week_before(today)
-    summary_buffer = []
-
-    # 上一个已完整结束的周一至周日，按时间正序提供给模型。
-    for offset in range(7):
-        d = (start_date + timedelta(days=offset)).strftime('%Y-%m-%d')
-        if d in medium_data:
-            summary_buffer.append(f"【{d}】: {medium_data[d]}")
-
-    if not summary_buffer:
-        print("     - 近7天无日记，跳过")
-        return
-
-    full_text = "\n".join(summary_buffer)
-    long_summary = call_ai_to_summarize(full_text, "long", char_id, user_id=user_id)
-
-    if not long_summary: return
-
+    _, end_date = completed_week_before(today)
     week_key = week_key_for_end_date(end_date)
-
-    long_data = {}
-    if os.path.exists(long_file):
-        with open(long_file, "r", encoding="utf-8") as f:
-            try: long_data = json.load(f)
-            except: pass
-
-    long_data[week_key] = long_summary
-
-    with open(long_file, "w", encoding="utf-8") as f:
-        json.dump(long_data, f, ensure_ascii=False, indent=2)
-
-    print(f"     📜 周报写入完成: {week_key}")
+    result = generate_long_memory_for_week(
+        char_id, week_key, user_id=user_id
+    )
+    if result.status == "no_messages":
+        print("     - 近7天无中期记忆，跳过")
+        return
+    if not result.ok or result.status != "success":
+        print(f"     ❌ [长期] {result.status}: {result.message}")
+        return
+    print(f"     📜 周报写入完成: {week_key}（{result.count} 段）")
 
 
 def _process_single_user_weekly_rollovers(user_id):
@@ -623,7 +593,9 @@ def _process_single_user_bedtime_diaries(user_id, target_date_str: str):
             try:
                 try:
                     short_result = update_short_memory_for_date(
-                        char_id, target_date_str, user_id=user_id
+                        char_id,
+                        target_date_str,
+                        user_id=user_id,
                     )
                     if not short_result.ok:
                         _update_bedtime_diary_status(
@@ -653,7 +625,11 @@ def _process_single_user_bedtime_diaries(user_id, target_date_str: str):
                     processed_count += 1
                     continue
 
-                ok = trigger_bedtime_diary(char_id, user_id=user_id)
+                ok = trigger_bedtime_diary(
+                    char_id,
+                    user_id=user_id,
+                    diary_date=target_date_str,
+                )
                 if not ok:
                     with open(cfg_file, "r", encoding="utf-8") as f:
                         after_config = json.load(f)
@@ -717,6 +693,33 @@ def check_and_update_sleep_status():
 
     run_pending_bedtime_diary_jobs()
 
+
+def _call_end_as_beijing_naive(call):
+    """Convert a voice-call UTC ISO timestamp to the chat DB's Beijing-naive clock."""
+    value = (call or {}).get("ended_at")
+    if not value:
+        return None
+    try:
+        ended_at = datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if ended_at.tzinfo is None:
+            ended_at = ended_at.replace(tzinfo=datetime.timezone.utc)
+        return ended_at.astimezone(BEIJING_TZ).replace(tzinfo=None)
+    except (TypeError, ValueError):
+        return None
+
+
+def _latest_activity_datetime(message_datetime, ended_call):
+    call_datetime = _call_end_as_beijing_naive(ended_call)
+    if call_datetime and call_datetime > message_datetime:
+        return call_datetime
+    return message_datetime
+
+
+def _beijing_now_naive(value=None):
+    """Return a naive Beijing clock matching timestamps stored in chat databases."""
+    current = value or datetime.datetime.now(BEIJING_TZ)
+    return current.astimezone(BEIJING_TZ).replace(tzinfo=None)
+
 def _process_single_user_active_messaging(user_id):
     """处理单个用户的主动消息检测（供线程池调用）"""
     from app import (
@@ -726,6 +729,7 @@ def _process_single_user_active_messaging(user_id):
         get_paths, get_group_dir,
     )
     from core.circuit_breaker import is_user_frozen
+    from services.voice_calls import get_latest_ended_call, get_live_call
 
     try:
         set_background_user(user_id)
@@ -734,6 +738,15 @@ def _process_single_user_active_messaging(user_id):
         if is_user_frozen(user_id):
             print(f"   ⚠️ 用户 {user_id} 已被冻结，跳过主动消息")
             return
+
+        live_call = get_live_call(user_id)
+        if live_call:
+            print(
+                f"   ☎️ 用户 {user_id} 正在响铃或通话中，跳过全部主动聊天消息"
+            )
+            return
+
+        latest_user_call = get_latest_ended_call(user_id)
 
         for char_id, info in chars_config.items():
             if info.get("light_sleep", False) or info.get("deep_sleep", False):
@@ -748,16 +761,20 @@ def _process_single_user_active_messaging(user_id):
 
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
-            cursor.execute("SELECT timestamp, role FROM messages ORDER BY id DESC LIMIT 1")
+            cursor.execute("SELECT timestamp FROM messages WHERE role = 'assistant' ORDER BY id DESC LIMIT 1")
             row = cursor.fetchone()
             conn.close()
 
             if not row:
                 continue
 
-            last_ts_str, last_role = row
+            last_ts_str = row[0]
             last_dt = datetime.datetime.strptime(last_ts_str, '%Y-%m-%d %H:%M:%S')
-            minutes_diff = (datetime.datetime.now() - last_dt).total_seconds() / 60
+            latest_char_call = get_latest_ended_call(user_id, char_id=char_id)
+            activity_dt = _latest_activity_datetime(last_dt, latest_char_call)
+            minutes_diff = max(
+                0, (_beijing_now_naive() - activity_dt).total_seconds() / 60
+            )
 
             if minutes_diff < 10:
                 continue
@@ -766,7 +783,7 @@ def _process_single_user_active_messaging(user_id):
             emotion = info.get("emotion", 0.5)
             p_final = p_time * emotion
             dice = random.random()
-            print(f"   > 用户 {user_id} [{char_id}] 距上次 {int(minutes_diff)}分, 情绪 {emotion}, 概率 {p_final:.2f}, 骰子 {dice:.2f}")
+            print(f"   > 用户 {user_id} [{char_id}] 距上次角色消息或通话结束 {int(minutes_diff)}分, 情绪 {emotion}, 概率 {p_final:.2f}, 骰子 {dice:.2f}")
 
             if dice < p_final:
                 trigger_active_chat(char_id, user_id=user_id)
@@ -783,25 +800,33 @@ def _process_single_user_active_messaging(user_id):
 
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
-            cursor.execute("SELECT timestamp FROM messages ORDER BY id DESC LIMIT 1")
+            # 群聊中的角色消息以角色 ID 作为 role，排除用户及系统消息。
+            cursor.execute("SELECT timestamp FROM messages WHERE role NOT IN ('user', 'system') ORDER BY id DESC LIMIT 1")
             row = cursor.fetchone()
             conn.close()
 
-            if not row: continue  # 没聊过的群不主动
+            if not row: continue  # 尚无角色发言的群不主动
 
             last_ts_str = row[0]
             last_dt = datetime.datetime.strptime(last_ts_str, '%Y-%m-%d %H:%M:%S')
-            minutes_diff = (datetime.datetime.now() - last_dt).total_seconds() / 60
+            activity_dt = _latest_activity_datetime(last_dt, latest_user_call)
+            minutes_diff = max(
+                0, (_beijing_now_naive() - activity_dt).total_seconds() / 60
+            )
 
             if minutes_diff < 10: continue
 
             p_final = 0.005 * minutes_diff
             if p_final > 1.0: p_final = 1.0
             dice = random.random()
-            print(f"   > [群:{group_id}] 距上次 {int(minutes_diff)}分, 概率 {p_final:.2f}, 骰子 {dice:.2f}")
+            print(f"   > [群:{group_id}] 距上次角色消息或通话结束 {int(minutes_diff)}分, 概率 {p_final:.2f}, 骰子 {dice:.2f}")
 
             if dice < p_final:
-                trigger_group_active_chat(group_id, user_id=user_id)
+                triggered = trigger_group_active_chat(group_id, user_id=user_id)
+                print(
+                    f"   > [群:{group_id}] 主动消息执行结果: "
+                    f"{'已写入' if triggered else '未写入'}"
+                )
 
     except Exception as e:
         print(f"❌ 用户 {user_id} 心跳检测出错: {e}")

@@ -23,19 +23,44 @@ def _messages_db():
 
 @pytest.mark.parametrize(
     "amount",
-    ["88.00元", "1000円", "$12.50", "€10", "£8.5", "₩12000"],
+    ["88.00元", "1000円", "$12.50", "€10", "£8.5", "₩12000",
+     "88.00", "¥88", "￥88", "88USD", "USD88", "88金币", "88瑞士法郎", "₿1.25"],
 )
-def test_transfer_amount_accepts_supported_currency_notation(amount):
+def test_transfer_amount_accepts_optional_currency_notation(amount):
     assert normalize_transfer_amount(amount) == amount
 
 
 @pytest.mark.parametrize(
     "amount",
-    ["88.00", "¥88", "0元", "-1元", "01元", "1.234元", "1000000000元"],
+    ["", "元", "USD", "0", "0元", "-1元", "01元", "1.234元", "1000000000元",
+     "1USD2", "1..2", "88|USD", "88[USD]", "88/USD", "<b>88</b>"],
 )
-def test_transfer_amount_rejects_missing_or_invalid_currency(amount):
+def test_transfer_amount_rejects_invalid_number_or_tag_delimiters(amount):
     with pytest.raises(TransferActionError):
         normalize_transfer_amount(amount)
+
+
+@pytest.mark.parametrize("amount", ["88.00", "¥88", "88 USD", "88金币", "₿1.25"])
+@pytest.mark.parametrize("action,decision,resolved", [
+    ("accept", "领取转账", "已领取转账"),
+    ("return", "退回转账", "已退回转账"),
+])
+def test_transfer_with_optional_currency_can_be_resolved(amount, action, decision, resolved):
+    conn = _messages_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
+        ("assistant", f"[转账:{amount}|备注]", "2026-09-05 12:00:00"),
+    )
+    source_id = cursor.lastrowid
+    normalized = amount.replace(" ", "")
+    message, event = apply_transfer_action(
+        cursor, {"transfer_action": action, "transfer_source_id": source_id},
+        f"[{decision}:{normalized}]",
+    )
+    assert message == f"[{decision}:{normalized}]"
+    assert event["content"] == f"[{resolved}:{normalized}|备注]"
+    assert conn.execute("SELECT content FROM messages WHERE id = ?", (source_id,)).fetchone()[0] == event["content"]
 
 
 def test_parse_transfer_tag_preserves_amount_note_and_replacement_range():
@@ -76,6 +101,47 @@ def test_accept_transfer_updates_source_and_returns_clean_user_tag():
         "amount": "88.00元",
         "note": "请你喝奶茶",
     }
+
+
+def test_group_user_can_accept_transfer_from_character_role():
+    conn = _messages_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
+        ("kunigami", "[转账:66元|群红包]", "2026-08-26 12:00:00"),
+    )
+    source_id = cursor.lastrowid
+
+    user_message, event = apply_transfer_action(
+        cursor,
+        {"transfer_action": "accept", "transfer_source_id": source_id},
+        "[领取转账:66元]",
+        allow_group_character_source=True,
+    )
+    conn.commit()
+
+    assert user_message == "[领取转账:66元]"
+    assert event["status"] == "accepted"
+    assert conn.execute(
+        "SELECT content FROM messages WHERE id = ?", (source_id,)
+    ).fetchone()[0] == "[已领取转账:66元|群红包]"
+
+
+def test_single_chat_rejects_group_character_role_as_transfer_source():
+    conn = _messages_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
+        ("kunigami", "[转账:66元]", "2026-08-26 12:00:00"),
+    )
+
+    with pytest.raises(TransferActionError) as exc_info:
+        apply_transfer_action(
+            cursor,
+            {"transfer_action": "accept", "transfer_source_id": cursor.lastrowid},
+            "[领取转账:66元]",
+        )
+    assert exc_info.value.code == "transfer_not_found"
 
 
 def test_return_transfer_updates_source_and_rejects_second_resolution():
@@ -212,6 +278,9 @@ def test_transfer_frontend_uses_cards_hidden_source_id_and_inline_edit_refresh()
     assert "transfer_source_id: pending.sourceId" in template
     assert "[${decision}:${pending.amount}]" in template
     assert "replaceRenderedMessageGroup" in template
+    assert "if (isGroupMode || !sourceId" not in template
+    assert "isAssistant && !isGroupMode" not in template
+    assert "`/api/group/${encodeURIComponent(currentId)}/chat`" in template
 
     edit_handler = template[
         template.index("document.getElementById('saveEditBtn').onclick"):

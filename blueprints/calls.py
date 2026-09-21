@@ -9,6 +9,7 @@ import requests
 from flask import Blueprint, jsonify, redirect, render_template, request
 
 from core.context import get_current_user_id
+from core.system_messages import is_system_prompt_message
 from core.credentials import (
     CredentialConfigurationError,
     CredentialError,
@@ -39,7 +40,7 @@ from services.voice_calls import (
     voice_call_for_record,
 )
 from services.ai_client import call_gemini, call_openrouter, get_model_config
-from services.prompt_builder import build_system_prompt_v2
+from services.prompt_builder import build_system_prompt_v2, get_ai_language
 from agent_utils import process_agent_actions
 import core.config
 from services.elevenlabs import (
@@ -117,7 +118,7 @@ def _character_info(uid: int, char_id: str) -> dict:
         "name": info.get("name") or char_id,
         "remark": info.get("remark") or info.get("name") or char_id,
         "avatar": info.get("avatar") or f"/char_assets/{char_id}/avatar.png",
-        "language": info.get("ai_language") or "ja",
+        "language": get_ai_language(char_id, user_id=uid) or "zh",
     }
 
 
@@ -242,6 +243,74 @@ def _run_call_model(uid: int, char_id: str, messages: list[dict]):
             temperature=0.9,
         )
     return str(result or "").strip(), route, model
+
+
+def _call_language_rule(uid: int, char_id: str) -> str:
+    """Return a final, call-specific language instruction for every call model turn."""
+    language = str(get_ai_language(char_id, user_id=uid) or "zh").strip()
+    normalized = language.lower().replace("_", "-")
+    if normalized.startswith("zh"):
+        target = "中文"
+    elif normalized.startswith("ja"):
+        target = "日语"
+    elif normalized.startswith("en"):
+        target = "英语"
+    else:
+        target = language
+    return (
+        "【电话语言硬性要求】无论人设资料、最近聊天、用户输入或事件提示使用什么语言，"
+        f"本次可被用户看到或听到的角色回应都必须使用{target}。"
+        "语气标签不算台词，但正文不得混入其他语言来解释或翻译。"
+    )
+
+
+def _parse_call_reply(uid: int, char_id: str, raw: str) -> dict:
+    normalized = normalize_legacy_voice_for_call(raw)
+    parsed = parse_call_model_output(normalize_untagged_tone_for_call(normalized))
+    try:
+        parsed["text"], _, _ = process_agent_actions(char_id, parsed["text"], uid)
+    except Exception:
+        pass
+    parsed["text"] = normalize_call_spoken_text(parsed["text"])
+    return parsed
+
+
+def _generate_incoming_action_reply(uid: int, call: dict, action: str):
+    """Generate the character reaction after the user accepts or rejects its call."""
+    if action == "accepted":
+        event_prompt = (
+            "系统事件：用户刚刚接听了你主动拨出的语音电话。现在电话已经接通。"
+            "请立刻说一句自然的开场白，通常 1～3 句，不要等待用户先说话。"
+            "可以在正文前使用一次 [CALL_TONE](自然语言语气描述)，但不要输出任何其他标签，"
+            "也不要解释这是系统事件。"
+        )
+    elif action == "rejected":
+        event_prompt = (
+            "系统事件：用户刚刚拒绝了你主动拨出的语音电话，电话没有接通。"
+            "请根据完整人设、关系、情绪和最近聊天，发送一句简短自然的普通聊天回应。"
+            "不要使用 [CALL_TONE]、通话控制标签或其他特殊消息格式，也不要复述系统规则。"
+        )
+    else:
+        raise ValueError("unsupported incoming call action")
+
+    system_prompt = build_system_prompt_v2(
+        call["char_id"], include_global_format=True,
+        recent_messages=_recent_chat_text(uid, call["char_id"]),
+        user_id=uid, call_mode=True,
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": system_prompt + "\n\n" + _call_language_rule(
+                uid, call["char_id"]
+            ),
+        },
+        {"role": "user", "content": event_prompt},
+    ]
+    raw, route, model = _run_call_model(uid, call["char_id"], messages)
+    if is_system_prompt_message(raw):
+        raise RuntimeError(raw)
+    return _parse_call_reply(uid, call["char_id"], raw), route, model
 
 
 def _delete_call_anchor(uid: int, char_id: str, message_id: int) -> None:
@@ -390,6 +459,7 @@ def decide_outgoing_call(call_id):
         user_id=uid,
         call_mode=True,
     )
+    system_prompt += "\n\n" + _call_language_rule(uid, call["char_id"])
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": prompt},
@@ -403,15 +473,7 @@ def decide_outgoing_call(call_id):
             "detail": str(exc), "call": failed,
         }), 502
 
-    normalized = normalize_legacy_voice_for_call(raw)
-    parsed = parse_call_model_output(normalize_untagged_tone_for_call(normalized))
-    try:
-        parsed["text"], _, _ = process_agent_actions(
-            call["char_id"], parsed["text"], uid
-        )
-        parsed["text"] = normalize_call_spoken_text(parsed["text"])
-    except Exception:
-        pass
+    parsed = _parse_call_reply(uid, call["char_id"], raw)
     decisions = {item for item in parsed["controls"] if item in {"CALL_ACCEPT", "CALL_REJECT"}}
     if len(decisions) != 1:
         failed = end_call(uid, call_id, reason="failed")
@@ -464,7 +526,33 @@ def accept_incoming_call(call_id):
     except VoiceCallConflict as exc:
         return jsonify({"error": str(exc), "code": "call_state_conflict"}), 409
     _set_call_chat_mode(uid, call["char_id"], "offline")
-    return jsonify({"status": "success", "call": call})
+
+    opening_turn = next(
+        (
+            turn for turn in list_turns(uid, call_id)
+            if turn.get("client_turn_id") == "incoming-accepted-opening"
+        ),
+        None,
+    )
+    payload = {"status": "success", "call": call, "opening_turn": opening_turn}
+    if opening_turn:
+        return jsonify(payload)
+
+    try:
+        parsed, route, model = _generate_incoming_action_reply(uid, call, "accepted")
+        if parsed["text"]:
+            set_opening(uid, call_id, text=parsed["text"], tone=parsed["tone"])
+            opening_turn = append_turn(
+                uid, call_id, role="assistant", content=parsed["text"],
+                tone=parsed["tone"], client_turn_id="incoming-accepted-opening",
+            )
+        payload.update({"opening_turn": opening_turn, "model": model, "route": route})
+        if not opening_turn:
+            payload["response_warning"] = "角色暂时没有说话，通话仍已接通"
+    except Exception as exc:
+        print(f"[Voice Call] incoming accept response failed: {exc}")
+        payload["response_warning"] = "角色开场回应生成失败，通话仍已接通"
+    return jsonify(payload)
 
 
 @calls_bp.route("/api/calls/<call_id>/reject", methods=["POST"])
@@ -480,7 +568,23 @@ def reject_incoming_call(call_id):
         return error
     if call["initiator"] != "assistant" or call["status"] != "ringing":
         return jsonify({"error": "当前来电无法拒绝", "code": "call_state_conflict"}), 409
-    return jsonify({"status": "success", "call": end_call(uid, call_id, reason="rejected")})
+    ended = end_call(uid, call_id, reason="rejected")
+    payload = {"status": "success", "call": ended, "message": ""}
+    try:
+        parsed, route, model = _generate_incoming_action_reply(uid, ended, "rejected")
+        message_id = _insert_chat_message(
+            uid, ended["char_id"], "assistant", parsed["text"]
+        )
+        payload.update({
+            "message": parsed["text"], "message_id": message_id,
+            "model": model, "route": route,
+        })
+        if not parsed["text"]:
+            payload["response_warning"] = "角色暂时没有回应"
+    except Exception as exc:
+        print(f"[Voice Call] incoming reject response failed: {exc}")
+        payload["response_warning"] = "角色回应生成失败，来电仍已拒绝"
+    return jsonify(payload)
 
 
 @calls_bp.route("/api/calls/<call_id>/cancel", methods=["POST"])
@@ -603,7 +707,11 @@ def create_call_turn(call_id):
         "当你根据人设和当前状态想主动挂断时，在本轮加 [END_CALL]；可以先写最后一句台词。"
         "通话中不要输出 [CALL_USER]、[CALL_ACCEPT] 或 [CALL_REJECT]。"
     )
-    messages = [{"role": "system", "content": system_prompt + "\n\n" + call_rules}]
+    messages = [{
+        "role": "system",
+        "content": system_prompt + "\n\n" + call_rules + "\n\n"
+        + _call_language_rule(uid, call["char_id"]),
+    }]
     messages.extend(
         {"role": turn["role"], "content": turn["content"]}
         for turn in turns[-24:]
@@ -614,15 +722,7 @@ def create_call_turn(call_id):
         return jsonify({
             "error": "角色回复生成失败", "code": "call_model_failed", "detail": str(exc)
         }), 502
-    normalized = normalize_legacy_voice_for_call(raw)
-    parsed = parse_call_model_output(normalize_untagged_tone_for_call(normalized))
-    try:
-        parsed["text"], _, _ = process_agent_actions(
-            call["char_id"], parsed["text"], uid
-        )
-        parsed["text"] = normalize_call_spoken_text(parsed["text"])
-    except Exception:
-        pass
+    parsed = _parse_call_reply(uid, call["char_id"], raw)
     should_end = "END_CALL" in parsed["controls"]
     if not parsed["text"] and not should_end:
         return jsonify({

@@ -1,18 +1,206 @@
 import os
+import io
 import time
 import re
 import json
 import sqlite3
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta, timezone
 from urllib.parse import unquote, urlparse
 from flask import Blueprint, request, jsonify, session, render_template
 from PIL import Image
-from cos_utils import upload_to_cos
-from core.config import SQUARE_DB, SQUARE_AVATARS_DIR, USERS_DB, USERS_ROOT
+from cos_utils import download_from_cos, upload_to_cos
+from core.config import COS_BASE_URL, SQUARE_DB, SQUARE_AVATARS_DIR, USERS_DB, USERS_ROOT
 from core.context import get_current_user_id
-from core.utils import safe_save_json, _get_characters_config_file
+from core.credentials import CredentialError, get_user_credential
+from core.utils import (
+    safe_save_json,
+    _get_characters_config_file,
+    get_current_username,
+    get_paths,
+)
+from services.ai_client import call_gemini
+from services.persona_locks import PersonaLockError, validate_persona_locks
 
 square_bp = Blueprint('square', __name__)
+
+TRIAL_ADMIN_USER_ID = 1
+TRIAL_MAX_TURNS = 10
+TRIAL_MAX_MESSAGE_CHARS = 2000
+TRIAL_RATE_LIMIT_PER_MINUTE = max(
+    1, int(os.getenv("SQUARE_TRIAL_RATE_LIMIT_PER_MINUTE", "6"))
+)
+TRIAL_PENDING_TIMEOUT_SECONDS = max(
+    30, int(os.getenv("SQUARE_TRIAL_PENDING_TIMEOUT_SECONDS", "90"))
+)
+
+
+def _utc_iso_now():
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _parse_utc_iso(value):
+    try:
+        parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    except (TypeError, ValueError):
+        return None
+
+
+def _trial_timestamp_for_chat(value):
+    try:
+        parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _same_origin_json_request():
+    return request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+
+def _ensure_trial_tables(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS square_trial_sessions (
+            user_id INTEGER NOT NULL,
+            character_id TEXT NOT NULL,
+            relationship TEXT NOT NULL DEFAULT '{}',
+            completed_turns INTEGER NOT NULL DEFAULT 0,
+            pending_request TEXT,
+            imported_local_id TEXT,
+            imported_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, character_id)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS square_trial_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            character_id TEXT NOT NULL,
+            turn_number INTEGER NOT NULL,
+            request_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'completed',
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_square_trial_message_request_role
+        ON square_trial_messages(user_id, character_id, request_id, role)
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS square_trial_requests (
+            request_id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            character_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_square_trial_requests_user_created
+        ON square_trial_requests(user_id, created_at)
+    """)
+
+
+def _load_trial_character(conn, char_id):
+    conn.row_factory = sqlite3.Row
+    return conn.execute(
+        """
+        SELECT id, name, avatar, age, no_age_increase, base_persona
+        FROM characters WHERE id = ?
+        """,
+        (char_id,),
+    ).fetchone()
+
+
+def _normalize_trial_relationship(raw):
+    from blueprints.chat import normalize_relationship_graph
+
+    value = normalize_relationship_graph({"user": raw or {}}).get("user") or {}
+    role = str(value.get("role") or "").strip()
+    description = str(value.get("description") or "").strip()
+    if not role:
+        raise ValueError("请填写关系定位")
+    if len(role) > 50:
+        raise ValueError("关系定位不能超过50个字")
+    if len(description) > 1000:
+        raise ValueError("关系描述不能超过1000个字")
+    value["role"] = role
+    value["description"] = description
+    return value
+
+
+def _trial_relationship_from_row(row):
+    if not row:
+        return None
+    try:
+        value = json.loads(row["relationship"] or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) and value.get("role") else None
+
+
+def _build_trial_messages(character, relationship, history, user_message):
+    user_name = get_current_username()
+    age_line = f"\n年龄：{character['age']}" if character["age"] not in (None, "") else ""
+    system_prompt = f"""【角色人设】
+姓名：{character['name']}{age_line}
+{character['base_persona'] or ''}
+
+【当前对话对象】
+用户姓名：{user_name}
+
+【角色与当前用户的关系】
+关系定位：{relationship.get('role', '')}
+关系指数：{relationship.get('score', 1)}
+关系描述：{relationship.get('description', '')}
+
+【角色广场试聊规则】
+- 始终保持上述角色人设和说话方式，只与当前用户进行普通文字聊天。
+- 不得创建、修改或讨论系统记忆、计划、好感度、关系数值、情绪、睡眠状态或聊天模式。
+- 不得发起群聊转向、语音、图片、表情、拍一拍、撤回、转账、通话或任何工具操作。
+- 不得输出方括号形式的系统动作标签或隐藏指令。
+- 回复应自然、简短，直接给出角色要说的话，不解释系统规则。"""
+    messages = [{"role": "system", "content": system_prompt}]
+    for item in history:
+        if item["role"] in {"user", "assistant"}:
+            messages.append({"role": item["role"], "content": item["content"]})
+    messages.append({"role": "user", "content": user_message})
+    return messages
+
+
+_TRIAL_ACTION_PATTERNS = [
+    r"\[(?:ADD_PLAN|UPDATE_AFFINITY|SET_RELATION|SET_CHAT_MODE|SET_EMOTION|SET_PERSONALITY|SET_SLEEP_TIME|DIRECT_TO_GROUP|DIRECT_TO_USER|DIRECT_END|MOOD|SAFETY_ALERT|CALL_USER|GENERATE_IMAGE|SEARCH_IMG)(?::[^\]]*)?\]",
+    r"\[(?:tickle(?:_user)?|recall|NONE)\]",
+    r"\[voice\]\([^)]*\)\([^)]*\)",
+    r"\[(?:表情|图片|音乐|文件|链接|视频)(?:\]|\([^\]]*\)|[^\s/]*)",
+]
+
+
+def _sanitize_trial_reply(value):
+    text = str(value or "")
+    for pattern in _TRIAL_ACTION_PATTERNS:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+    return re.sub(r"\n{3,}", "\n\n", text).strip(" /\n\t")
+
+
+def _trial_ai_error(reply):
+    text = str(reply or "").strip()
+    return (
+        not text
+        or text.startswith("（系统提示：")
+        or text.startswith("（AI 陷入了沉默")
+        or not bool(getattr(reply, "complete", True))
+    )
 
 
 def _ensure_square_character_columns(conn):
@@ -52,17 +240,12 @@ def _is_square_author(row, user_id, author_email):
 
 
 def _read_base_persona(prompts_dir):
-    for filename in ("1_base_persona.json", "1_base_persona.md"):
-        path = os.path.join(prompts_dir, filename)
-        if not os.path.isfile(path):
-            continue
+    path = os.path.join(prompts_dir, "1_base_persona.json")
+    if os.path.isfile(path):
         with open(path, "r", encoding="utf-8-sig") as f:
-            if filename.endswith(".json"):
-                value = json.load(f)
-                if isinstance(value, dict):
-                    return str(value.get("system_prompt") or "")
-                return str(value or "")
-            return f.read()
+            value = json.load(f)
+        if isinstance(value, dict) and isinstance(value.get("system_prompt"), str):
+            return value["system_prompt"]
     return ""
 
 
@@ -125,35 +308,54 @@ def _save_local_square_link(user_id, local_character_id, square_id):
         print(f"Square local link save error: {e}")
 
 
-def _find_private_avatar_file(user_id, avatar_url):
-    """Resolve a /char_assets/... URL to the current user's local avatar file."""
+class SquareAvatarError(ValueError):
+    pass
+
+
+def _private_avatar_cos_keys(user_id, avatar_url):
+    """Resolve a private character avatar URL to current-user COS object keys."""
     if not user_id or not avatar_url:
-        return None
+        return []
 
     parsed = urlparse(avatar_url)
     path = unquote(parsed.path or "")
     prefix = "/char_assets/"
-    if not path.startswith(prefix):
-        return None
+    if path.startswith(prefix):
+        parts = path[len(prefix):].split("/", 1)
+    else:
+        cos_host = urlparse(COS_BASE_URL).netloc
+        if not cos_host or parsed.netloc != cos_host:
+            return []
+        object_key = path.lstrip("/")
+        private_prefix = f"users/{user_id}/characters/"
+        if not object_key.startswith(private_prefix):
+            return []
+        parts = object_key[len(private_prefix):].split("/", 1)
 
-    parts = path[len(prefix):].split("/", 1)
     if len(parts) != 2:
-        return None
+        return []
 
     private_char_id, filename = parts
     if not re.fullmatch(r"[A-Za-z0-9_]+", private_char_id):
-        return None
+        return []
     if filename != os.path.basename(filename):
-        return None
-    char_dir = os.path.join(USERS_ROOT, str(user_id), "characters", private_char_id)
-    exact_path = os.path.join(char_dir, filename)
-    if os.path.isfile(exact_path):
-        return exact_path
+        return []
 
+    filenames = [filename]
     for candidate in ("avatar.png", "avatar.jpg", "avatar.jpeg", "avatar.webp", "avatar.gif"):
-        candidate_path = os.path.join(char_dir, candidate)
-        if os.path.isfile(candidate_path):
-            return candidate_path
+        if candidate not in filenames:
+            filenames.append(candidate)
+    return [
+        f"users/{user_id}/characters/{private_char_id}/{candidate}"
+        for candidate in filenames
+    ]
+
+
+def _read_private_avatar_from_cos(user_id, avatar_url):
+    for object_key in _private_avatar_cos_keys(user_id, avatar_url):
+        payload = download_from_cos(object_key)
+        if payload:
+            return io.BytesIO(payload)
     return None
 
 
@@ -177,33 +379,41 @@ def _save_square_avatar_image(image_source, square_id, name_prefix="square"):
         except OSError:
             pass
         return cos_url
-    return f"/static/square_avatars/{filename}"
+    try:
+        os.remove(local_path)
+    except OSError:
+        pass
+    raise SquareAvatarError("广场头像上传到 COS 失败，请稍后重试")
 
 
 def _materialize_square_avatar(square_id, user_id, uploaded_file=None, avatar_url=None, current_avatar=None):
     """
     Store square avatars as public square assets.
-    Private /char_assets/... URLs are copied from the author's local character folder.
+    Private /char_assets/... and private COS URLs are read from COS, then
+    republished under square/avatars/. The server's local character folder is
+    never used as an avatar source.
     """
     if uploaded_file and getattr(uploaded_file, "filename", ""):
         try:
             return _save_square_avatar_image(uploaded_file.stream, square_id)
         except Exception as e:
             print(f"Square Avatar Upload Error: {e}")
-            return current_avatar or "/static/default_avatar.png"
+            raise SquareAvatarError("头像处理失败，请重新选择图片") from e
 
     source_url = (avatar_url or current_avatar or "").strip()
     if not source_url:
         return "/static/default_avatar.png"
 
-    if urlparse(source_url).path.startswith("/char_assets/"):
-        source_file = _find_private_avatar_file(user_id, source_url)
-        if source_file:
+    private_cos_keys = _private_avatar_cos_keys(user_id, source_url)
+    if private_cos_keys:
+        source_file = _read_private_avatar_from_cos(user_id, source_url)
+        if source_file is not None:
             try:
                 return _save_square_avatar_image(source_file, square_id, "square_import")
             except Exception as e:
                 print(f"Square Avatar Import Error: {e}")
-        return "/static/default_avatar.png"
+                raise SquareAvatarError("COS 头像处理失败，请稍后重试") from e
+        raise SquareAvatarError("无法从 COS 读取角色头像，请先重新上传角色头像")
 
     if source_url.startswith("http://") or source_url.startswith("https://") or source_url.startswith("/static/"):
         return source_url
@@ -273,6 +483,7 @@ def init_square_db():
             PRIMARY KEY (user_id, character_id)
         )
     """)
+    _ensure_trial_tables(conn)
     conn.commit()
     conn.close()
 
@@ -290,6 +501,11 @@ def square_upload_page():
 @square_bp.route("/square/character/<char_id>")
 def square_character_page(char_id):
     return render_template("square/character.html", char_id=char_id)
+
+
+@square_bp.route("/square/character/<char_id>/trial")
+def square_character_trial_page(char_id):
+    return render_template("square/trial_chat.html", char_id=char_id)
 
 @square_bp.route("/api/square/ips")
 def api_square_ips():
@@ -454,6 +670,10 @@ def api_square_upload():
     except (ValueError, json.JSONDecodeError) as e:
         return jsonify({"error": f"关系图谱 JSON 无效: {e}"}), 400
     base_persona = data.get("base_persona", "").strip()
+    try:
+        validate_persona_locks(base_persona)
+    except PersonaLockError as e:
+        return jsonify({"error": f"人设 LOCK 标签格式错误：{e}", "code": e.code}), 400
     source_character_id = data.get("source_character_id", "").strip() or None
 
     if not char_id_base or not name:
@@ -482,12 +702,15 @@ def api_square_upload():
 
     # 头像处理：广场头像必须固化为公共资源，不能保存 /char_assets/... 私有路由
     uploaded_avatar = request.files.get('avatar')
-    avatar_url = _materialize_square_avatar(
-        final_id,
-        user_id,
-        uploaded_file=uploaded_avatar,
-        avatar_url=data.get("avatar_url"),
-    )
+    try:
+        avatar_url = _materialize_square_avatar(
+            final_id,
+            user_id,
+            uploaded_file=uploaded_avatar,
+            avatar_url=data.get("avatar_url"),
+        )
+    except SquareAvatarError as e:
+        return jsonify({"error": str(e), "code": "square_avatar_unavailable"}), 422
 
     # 写入数据库
     try:
@@ -527,6 +750,7 @@ def api_square_character_detail(char_id):
         conn = sqlite3.connect(SQUARE_DB)
         conn.row_factory = sqlite3.Row  # 使用 Row 模式，通过列名访问
         _ensure_square_character_columns(conn)
+        _ensure_trial_tables(conn)
         cur = conn.cursor()
 
         cur.execute("SELECT * FROM characters WHERE id = ?", (char_id,))
@@ -560,6 +784,7 @@ def api_square_character_detail(char_id):
         is_favorited = False
         is_author = False
         user_id = get_current_user_id()
+        trial_summary = None
 
         if user_id:
             # 检查收藏
@@ -571,6 +796,24 @@ def api_square_character_detail(char_id):
             if cur.fetchone(): is_liked = True
 
             is_author = _is_square_author(row, user_id, _get_user_email(user_id))
+            trial_row = cur.execute(
+                """
+                SELECT completed_turns FROM square_trial_sessions
+                WHERE user_id = ? AND character_id = ?
+                """,
+                (user_id, char_id),
+            ).fetchone()
+            if trial_row:
+                trial_summary = {
+                    "completed_turns": int(trial_row["completed_turns"] or 0),
+                    "message_count": cur.execute(
+                        """
+                        SELECT COUNT(*) FROM square_trial_messages
+                        WHERE user_id = ? AND character_id = ? AND status = 'completed'
+                        """,
+                        (user_id, char_id),
+                    ).fetchone()[0],
+                }
 
         conn.close()
         return jsonify({
@@ -579,11 +822,335 @@ def api_square_character_detail(char_id):
             "other_characters": other_chars,
             "is_favorited": is_favorited,
             "is_liked": is_liked,
-            "is_author": is_author
+            "is_author": is_author,
+            "trial": trial_summary,
         })
     except Exception as e:
         print(f"Detail API Error: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@square_bp.route("/api/square/character/<char_id>/trial/bootstrap")
+def api_square_trial_bootstrap(char_id):
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"error": "请先登录"}), 401
+
+    with sqlite3.connect(SQUARE_DB) as conn:
+        conn.row_factory = sqlite3.Row
+        _ensure_trial_tables(conn)
+        character = _load_trial_character(conn, char_id)
+        if not character:
+            return jsonify({"error": "角色不存在"}), 404
+        trial = conn.execute(
+            "SELECT * FROM square_trial_sessions WHERE user_id = ? AND character_id = ?",
+            (user_id, char_id),
+        ).fetchone()
+        messages = conn.execute(
+            """
+            SELECT id, turn_number, role, content, created_at
+            FROM square_trial_messages
+            WHERE user_id = ? AND character_id = ? AND status = 'completed'
+            ORDER BY id ASC
+            """,
+            (user_id, char_id),
+        ).fetchall()
+
+    completed_turns = int(trial["completed_turns"] or 0) if trial else 0
+    response = jsonify({
+        "character": {
+            "id": character["id"],
+            "name": character["name"],
+            "avatar": character["avatar"] or "/static/default_avatar.png",
+            "age": character["age"],
+        },
+        "user": {"name": get_current_username()},
+        "relationship": _trial_relationship_from_row(trial),
+        "messages": [dict(row) for row in messages],
+        "completed_turns": completed_turns,
+        "remaining_turns": max(0, TRIAL_MAX_TURNS - completed_turns),
+        "max_turns": TRIAL_MAX_TURNS,
+        "trial_completed": completed_turns >= TRIAL_MAX_TURNS,
+    })
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@square_bp.route("/api/square/character/<char_id>/trial/relationship", methods=["PUT"])
+def api_square_trial_relationship(char_id):
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"error": "请先登录"}), 401
+    if not _same_origin_json_request():
+        return jsonify({"error": "请求来源校验失败"}), 403
+    try:
+        relationship = _normalize_trial_relationship((request.get_json(silent=True) or {}).get("relationship"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    now = _utc_iso_now()
+    with sqlite3.connect(SQUARE_DB) as conn:
+        conn.row_factory = sqlite3.Row
+        _ensure_trial_tables(conn)
+        if not _load_trial_character(conn, char_id):
+            return jsonify({"error": "角色不存在"}), 404
+        conn.execute(
+            """
+            INSERT INTO square_trial_sessions (
+                user_id, character_id, relationship, completed_turns,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, 0, ?, ?)
+            ON CONFLICT(user_id, character_id) DO UPDATE SET
+                relationship = excluded.relationship,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, char_id, json.dumps(relationship, ensure_ascii=False), now, now),
+        )
+        conn.commit()
+    return jsonify({"status": "success", "relationship": relationship})
+
+
+def _mark_trial_request_failed(user_id, char_id, request_id):
+    now = _utc_iso_now()
+    with sqlite3.connect(SQUARE_DB) as conn:
+        _ensure_trial_tables(conn)
+        conn.execute(
+            """
+            UPDATE square_trial_requests SET status = 'failed', updated_at = ?
+            WHERE request_id = ? AND user_id = ? AND character_id = ?
+            """,
+            (now, request_id, user_id, char_id),
+        )
+        conn.execute(
+            """
+            UPDATE square_trial_sessions SET pending_request = NULL, updated_at = ?
+            WHERE user_id = ? AND character_id = ? AND pending_request = ?
+            """,
+            (now, user_id, char_id, request_id),
+        )
+        conn.commit()
+
+
+@square_bp.route("/api/square/character/<char_id>/trial/chat", methods=["POST"])
+def api_square_trial_chat(char_id):
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"error": "请先登录"}), 401
+    if not _same_origin_json_request():
+        return jsonify({"error": "请求来源校验失败"}), 403
+
+    payload = request.get_json(silent=True) or {}
+    user_message = str(payload.get("message") or "").strip()
+    if not user_message:
+        return jsonify({"error": "请输入消息"}), 400
+    if len(user_message) > TRIAL_MAX_MESSAGE_CHARS:
+        return jsonify({"error": f"消息不能超过{TRIAL_MAX_MESSAGE_CHARS}个字"}), 400
+    request_id = str(payload.get("request_id") or uuid.uuid4().hex).strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,100}", request_id):
+        return jsonify({"error": "request_id 格式错误"}), 400
+
+    try:
+        admin_key = get_user_credential(TRIAL_ADMIN_USER_ID, "gemini", allow_legacy=True)
+    except CredentialError:
+        return jsonify({"error": "试聊服务暂时不可用，请联系管理员"}), 503
+    if not admin_key:
+        return jsonify({"error": "管理员尚未配置试聊 Gemini API Key"}), 503
+
+    now = _utc_iso_now()
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(minutes=1)
+    ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    character = None
+    relationship = None
+    history = []
+    turn_number = None
+
+    with sqlite3.connect(SQUARE_DB, timeout=10) as conn:
+        conn.row_factory = sqlite3.Row
+        _ensure_trial_tables(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        character = _load_trial_character(conn, char_id)
+        if not character:
+            conn.rollback()
+            return jsonify({"error": "角色不存在"}), 404
+        trial = conn.execute(
+            "SELECT * FROM square_trial_sessions WHERE user_id = ? AND character_id = ?",
+            (user_id, char_id),
+        ).fetchone()
+        relationship = _trial_relationship_from_row(trial)
+        if not relationship:
+            conn.rollback()
+            return jsonify({"error": "relationship_required", "message": "请先填写与角色的关系"}), 409
+
+        completed = conn.execute(
+            """
+            SELECT role, content, created_at, turn_number
+            FROM square_trial_messages
+            WHERE user_id = ? AND character_id = ? AND request_id = ?
+              AND status = 'completed'
+            ORDER BY id ASC
+            """,
+            (user_id, char_id, request_id),
+        ).fetchall()
+        if len(completed) == 2:
+            conn.commit()
+            completed_turns = int(trial["completed_turns"] or 0)
+            return jsonify({
+                "status": "success",
+                "turn": completed[0]["turn_number"],
+                "remaining_turns": max(0, TRIAL_MAX_TURNS - completed_turns),
+                "user_message": dict(completed[0]),
+                "assistant_message": dict(completed[1]),
+                "trial_completed": completed_turns >= TRIAL_MAX_TURNS,
+                "replayed": True,
+            })
+
+        completed_turns = int(trial["completed_turns"] or 0)
+        if completed_turns >= TRIAL_MAX_TURNS:
+            conn.rollback()
+            return jsonify({
+                "error": "trial_limit_reached",
+                "message": "该角色的10轮试聊已经完成",
+                "completed_turns": completed_turns,
+                "remaining_turns": 0,
+            }), 409
+
+        pending = str(trial["pending_request"] or "")
+        if pending:
+            pending_row = conn.execute(
+                "SELECT updated_at FROM square_trial_requests WHERE request_id = ?",
+                (pending,),
+            ).fetchone()
+            pending_at = _parse_utc_iso(pending_row["updated_at"] if pending_row else None)
+            is_stale = not pending_at or (
+                datetime.now(timezone.utc).replace(tzinfo=None) - pending_at
+            ).total_seconds() > TRIAL_PENDING_TIMEOUT_SECONDS
+            if not is_stale:
+                conn.rollback()
+                return jsonify({"error": "trial_busy", "message": "上一条消息仍在生成中"}), 409
+            conn.execute(
+                "UPDATE square_trial_requests SET status = 'failed', updated_at = ? WHERE request_id = ?",
+                (now, pending),
+            )
+
+        recent_count = conn.execute(
+            """
+            SELECT COUNT(*) FROM square_trial_requests
+            WHERE user_id = ? AND created_at >= ?
+            """,
+            (user_id, cutoff),
+        ).fetchone()[0]
+        if recent_count >= TRIAL_RATE_LIMIT_PER_MINUTE:
+            conn.rollback()
+            return jsonify({"error": "rate_limited", "message": "试聊请求过于频繁，请稍后再试"}), 429
+
+        history = conn.execute(
+            """
+            SELECT role, content FROM square_trial_messages
+            WHERE user_id = ? AND character_id = ? AND status = 'completed'
+            ORDER BY id ASC
+            """,
+            (user_id, char_id),
+        ).fetchall()
+        turn_number = completed_turns + 1
+        conn.execute(
+            """
+            INSERT INTO square_trial_requests (
+                request_id, user_id, character_id, status, created_at, updated_at
+            ) VALUES (?, ?, ?, 'pending', ?, ?)
+            """,
+            (request_id, user_id, char_id, now, now),
+        )
+        conn.execute(
+            """
+            UPDATE square_trial_sessions
+            SET pending_request = ?, updated_at = ?
+            WHERE user_id = ? AND character_id = ?
+            """,
+            (request_id, now, user_id, char_id),
+        )
+        conn.commit()
+
+    model_name = os.getenv("SQUARE_TRIAL_GEMINI_MODEL", "gemini-2.5-flash")
+    messages = _build_trial_messages(character, relationship, history, user_message)
+    reply_raw = call_gemini(
+        messages,
+        char_id=f"square_trial:{char_id}",
+        model_name=model_name,
+        user_id=TRIAL_ADMIN_USER_ID,
+        max_tokens=1200,
+    )
+    if _trial_ai_error(reply_raw):
+        _mark_trial_request_failed(user_id, char_id, request_id)
+        return jsonify({
+            "error": "generation_failed",
+            "message": str(reply_raw or "角色暂时没有回复，请稍后重试"),
+        }), 503
+    reply = _sanitize_trial_reply(reply_raw)
+    if not reply:
+        _mark_trial_request_failed(user_id, char_id, request_id)
+        return jsonify({"error": "generation_failed", "message": "回复为空，请重试"}), 503
+
+    user_created_at = _utc_iso_now()
+    assistant_created_at = _utc_iso_now()
+    with sqlite3.connect(SQUARE_DB, timeout=10) as conn:
+        conn.row_factory = sqlite3.Row
+        _ensure_trial_tables(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        trial = conn.execute(
+            "SELECT * FROM square_trial_sessions WHERE user_id = ? AND character_id = ?",
+            (user_id, char_id),
+        ).fetchone()
+        if not trial or trial["pending_request"] != request_id:
+            conn.rollback()
+            return jsonify({"error": "trial_state_changed", "message": "试聊状态已变化，请刷新页面"}), 409
+        conn.executemany(
+            """
+            INSERT INTO square_trial_messages (
+                user_id, character_id, turn_number, request_id,
+                role, content, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 'completed', ?)
+            """,
+            [
+                (user_id, char_id, turn_number, request_id, "user", user_message, user_created_at),
+                (user_id, char_id, turn_number, request_id, "assistant", reply, assistant_created_at),
+            ],
+        )
+        conn.execute(
+            """
+            UPDATE square_trial_sessions
+            SET completed_turns = completed_turns + 1,
+                pending_request = NULL,
+                updated_at = ?
+            WHERE user_id = ? AND character_id = ?
+            """,
+            (assistant_created_at, user_id, char_id),
+        )
+        conn.execute(
+            "UPDATE square_trial_requests SET status = 'completed', updated_at = ? WHERE request_id = ?",
+            (assistant_created_at, request_id),
+        )
+        completed_turns = int(trial["completed_turns"] or 0) + 1
+        conn.commit()
+
+    return jsonify({
+        "status": "success",
+        "turn": turn_number,
+        "remaining_turns": max(0, TRIAL_MAX_TURNS - completed_turns),
+        "user_message": {
+            "turn_number": turn_number,
+            "role": "user",
+            "content": user_message,
+            "created_at": user_created_at,
+        },
+        "assistant_message": {
+            "turn_number": turn_number,
+            "role": "assistant",
+            "content": reply,
+            "created_at": assistant_created_at,
+        },
+        "trial_completed": completed_turns >= TRIAL_MAX_TURNS,
+    })
 
 @square_bp.route("/api/square/like", methods=["POST"])
 def api_square_like():
@@ -751,6 +1318,10 @@ def api_square_delete():
         cur.execute("DELETE FROM likes WHERE character_id = ?", (char_id,))
         cur.execute("DELETE FROM favorites WHERE character_id = ?", (char_id,))
         cur.execute("DELETE FROM comments WHERE character_id = ?", (char_id,))
+        _ensure_trial_tables(conn)
+        cur.execute("DELETE FROM square_trial_messages WHERE character_id = ?", (char_id,))
+        cur.execute("DELETE FROM square_trial_requests WHERE character_id = ?", (char_id,))
+        cur.execute("DELETE FROM square_trial_sessions WHERE character_id = ?", (char_id,))
 
         # 更新 IP 表计数
         if ip:
@@ -836,6 +1407,11 @@ def api_square_update():
             conn.close()
             return jsonify({"error": f"关系图谱 JSON 无效: {e}"}), 400
         base_persona = data.get("base_persona", "")
+        try:
+            validate_persona_locks(base_persona)
+        except PersonaLockError as e:
+            conn.close()
+            return jsonify({"error": f"人设 LOCK 标签格式错误：{e}", "code": e.code}), 400
         requested_source_character_id = data.get("source_character_id", "").strip()
         source_character_id = (
             requested_source_character_id or c_row["source_character_id"] or None
@@ -860,13 +1436,17 @@ def api_square_update():
                 }), 409
 
         uploaded_avatar = request.files.get('avatar')
-        avatar_url = _materialize_square_avatar(
-            char_id,
-            user_id,
-            uploaded_file=uploaded_avatar,
-            avatar_url=data.get("avatar_url"),
-            current_avatar=old_avatar,
-        )
+        try:
+            avatar_url = _materialize_square_avatar(
+                char_id,
+                user_id,
+                uploaded_file=uploaded_avatar,
+                avatar_url=data.get("avatar_url"),
+                current_avatar=old_avatar,
+            )
+        except SquareAvatarError as e:
+            conn.close()
+            return jsonify({"error": str(e), "code": "square_avatar_unavailable"}), 422
 
         # 更新
         cur.execute("""
@@ -902,9 +1482,15 @@ def api_square_add_to_local():
 
     user_id = get_current_user_id()
     if not user_id: return jsonify({"error": "请先登录"}), 401
-    char_id = request.json.get("id")
+    payload = request.get_json(silent=True) or {}
+    char_id = str(payload.get("id") or "").strip()
+    import_trial_history = payload.get("import_trial_history", True) is not False
+    if not char_id:
+        return jsonify({"error": "角色ID不能为空"}), 400
     try:
         conn = sqlite3.connect(SQUARE_DB)
+        conn.row_factory = sqlite3.Row
+        _ensure_trial_tables(conn)
         cur = conn.cursor()
         columns = [
             "id", "name", "avatar", "age", "no_age_increase",
@@ -912,17 +1498,49 @@ def api_square_add_to_local():
         ]
         cur.execute(f"SELECT {', '.join(columns)} FROM characters WHERE id = ?", (char_id,))
         row = cur.fetchone()
-        conn.close()
-        if not row: return jsonify({"error": "角色不存在"}), 404
+        if not row:
+            conn.close()
+            return jsonify({"error": "角色不存在"}), 404
 
         # 使用字典映射
-        s = dict(zip(columns, row))
+        s = dict(row)
+        trial = conn.execute(
+            "SELECT * FROM square_trial_sessions WHERE user_id = ? AND character_id = ?",
+            (user_id, char_id),
+        ).fetchone()
+        trial_relationship = _trial_relationship_from_row(trial)
+        trial_messages = conn.execute(
+            """
+            SELECT role, content, created_at
+            FROM square_trial_messages
+            WHERE user_id = ? AND character_id = ? AND status = 'completed'
+            ORDER BY id ASC
+            """,
+            (user_id, char_id),
+        ).fetchall()
+        conn.close()
 
         cfg_file = _get_characters_config_file()
         all_config = {}
         if os.path.exists(cfg_file):
             with open(cfg_file, "r", encoding="utf-8") as f:
                 all_config = json.load(f)
+
+        existing_local_id = next(
+            (
+                local_char_id for local_char_id, info in all_config.items()
+                if isinstance(info, dict) and info.get("square_origin_id") == s["id"]
+            ),
+            None,
+        )
+        if existing_local_id:
+            return jsonify({
+                "status": "already_added",
+                "local_id": existing_local_id,
+                "trial_history_imported": bool(
+                    all_config[existing_local_id].get("square_trial_history_imported")
+                ),
+            })
 
         local_id = s["id"]
         if local_id in all_config:
@@ -938,14 +1556,45 @@ def api_square_add_to_local():
         os.makedirs(target_prompts_dir, exist_ok=True)
         init_char_db(local_id)
 
-        with open(os.path.join(target_prompts_dir, "1_base_persona.md"), "w", encoding="utf-8") as f:
-            f.write(s["base_persona"] or "")
-        with open(os.path.join(target_prompts_dir, "2_relationship.json"), "w", encoding="utf-8") as f:
-            f.write(s["relationship_graph"] or "{}")
+        safe_save_json(
+            os.path.join(target_prompts_dir, "1_base_persona.json"),
+            {"system_prompt": s["base_persona"] or ""},
+        )
+        from blueprints.chat import normalize_relationship_graph
+        try:
+            relationship_graph = normalize_relationship_graph(s["relationship_graph"] or {})
+        except (ValueError, json.JSONDecodeError):
+            relationship_graph = {}
+        if trial_relationship:
+            relationship_graph[str(user_id)] = trial_relationship
+        safe_save_json(
+            os.path.join(target_prompts_dir, "2_relationship.json"),
+            relationship_graph,
+        )
 
-        for fn in ["3_user_persona.md", "4_memory_long.json", "5_memory_medium.json", "6_memory_short.json", "7_schedule.json"]:
+        for fn in ["4_memory_long.json", "5_memory_medium.json", "6_memory_short.json", "7_schedule.json"]:
             with open(os.path.join(target_prompts_dir, fn), "w", encoding="utf-8") as f:
-                f.write("{}" if fn.endswith(".json") else "")
+                if fn == "7_schedule.json":
+                    json.dump({"_undated": []}, f, ensure_ascii=False, indent=2)
+                else:
+                    f.write("{}" if fn.endswith(".json") else "")
+
+        imported_message_count = 0
+        if import_trial_history and trial_messages:
+            db_path, _ = get_paths(local_id, user_id=user_id)
+            with sqlite3.connect(db_path) as chat_conn:
+                chat_conn.execute("BEGIN IMMEDIATE")
+                for message in trial_messages:
+                    chat_conn.execute(
+                        "INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
+                        (
+                            message["role"],
+                            message["content"],
+                            _trial_timestamp_for_chat(message["created_at"]),
+                        ),
+                    )
+                    imported_message_count += 1
+                chat_conn.commit()
 
         all_config[local_id] = {
             "name": s["name"], "remark": s["name"], "avatar": s["avatar"], "pinned": False,
@@ -955,10 +1604,30 @@ def api_square_add_to_local():
             "ds_time_basis": "character", "ds_set_by": "default",
             "ds_timezone_at_set": "Asia/Shanghai",
             "deep_sleep_source": "schedule", "sleep_manual_override": False,
-            "age": s["age"], "no_age_increase": bool(s["no_age_increase"])
+            "age": s["age"], "no_age_increase": bool(s["no_age_increase"]),
+            "square_trial_history_imported": imported_message_count > 0,
+            "square_trial_history_imported_at": _utc_iso_now() if imported_message_count > 0 else None,
+            "square_trial_completed_turns": int(trial["completed_turns"] or 0) if trial else 0,
         }
         safe_save_json(cfg_file, all_config)
-        return jsonify({"status": "success", "local_id": local_id})
+        if imported_message_count > 0:
+            with sqlite3.connect(SQUARE_DB) as conn:
+                _ensure_trial_tables(conn)
+                conn.execute(
+                    """
+                    UPDATE square_trial_sessions
+                    SET imported_local_id = ?, imported_at = ?, updated_at = ?
+                    WHERE user_id = ? AND character_id = ?
+                    """,
+                    (local_id, _utc_iso_now(), _utc_iso_now(), user_id, char_id),
+                )
+                conn.commit()
+        return jsonify({
+            "status": "success",
+            "local_id": local_id,
+            "imported_message_count": imported_message_count,
+            "relationship_imported": bool(trial_relationship),
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
