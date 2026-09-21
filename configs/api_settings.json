@@ -5,6 +5,7 @@
       "name": "线路一：Gemini 直连",
       "models": {
         "chat": "gemini-2.5-pro",
+        "call": "gemini-2.5-flash-lite",
         "moments": "gemini-2.5-pro",
         "gen_persona": "gemini-3.1-pro-preview",
         "summary": "gemini-2.5-flash",
@@ -17,6 +18,7 @@
       "relay_provider": "new",
       "models": {
         "chat": "gemini-2.5-flash",
+        "call": "gemini-2.5-flash-lite",
         "moments": "gemini-2.5-flash",
         "gen_persona": "gemini-3.1-pro",
         "summary": "gemini-2.0-flash",
@@ -38,6 +40,7 @@
     "relay": [
       "gemini-3.1-pro",
       "gemini-2.5-pro",
+      "gemini-2.5-flash-lite",
       "gemini-2.5-flash",
       "gpt-4o",
       "gpt-3.5-turbo-0125",

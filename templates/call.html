@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#11151d">
+  <title>语音通话</title>
+  <script src="/static/auth-guard.js"></script>
+  <link rel="stylesheet" href="/static/ai-disclosure.css">
+  <style>
+    :root { color-scheme: dark; --accent:#ff8faa; --glass:rgba(255,255,255,.09); }
+    * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    html, body { width:100%; height:100%; margin:0; overflow:hidden; }
+    body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif; background:#11151d; color:#fff; }
+    .call-page { position:relative; width:100%; height:100vh; height:100dvh; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+    .call-bg { position:absolute; inset:-30px; background:radial-gradient(circle at 50% 18%,rgba(255,143,170,.32),transparent 37%),linear-gradient(160deg,#252b3a,#11151d 58%,#090b10); filter:saturate(.9); }
+    .call-bg::after { content:""; position:absolute; inset:0; backdrop-filter:blur(20px); background:linear-gradient(to bottom,rgba(0,0,0,.05),rgba(0,0,0,.48)); }
+    .call-content { position:relative; z-index:1; flex:1; min-height:0; display:flex; flex-direction:column; padding:calc(env(safe-area-inset-top) + 22px) 18px calc(env(safe-area-inset-bottom) + 18px); }
+    .top { text-align:center; flex-shrink:0; }
+    .avatar { width:92px; height:92px; border-radius:50%; object-fit:cover; border:2px solid rgba(255,255,255,.55); box-shadow:0 14px 40px rgba(0,0,0,.35); background:#343947; }
+    .name { margin-top:13px; font-size:24px; font-weight:650; letter-spacing:.02em; }
+    .status { margin-top:6px; min-height:21px; color:rgba(255,255,255,.68); font-size:14px; }
+    .duration { margin-top:3px; color:rgba(255,255,255,.48); font-size:12px; }
+    .transcript { flex:1; min-height:0; overflow:auto; margin:22px auto 8px; width:min(720px,100%); padding:4px 2px 280px; padding-bottom:calc(280px + env(safe-area-inset-bottom)); scrollbar-width:none; scroll-padding-bottom:calc(280px + env(safe-area-inset-bottom)); }
+    .transcript::-webkit-scrollbar { display:none; }
+    .turn { max-width:88%; margin:10px 0; padding:10px 13px; border-radius:16px; background:var(--glass); backdrop-filter:blur(12px); line-height:1.5; font-size:15px; word-break:break-word; }
+    .turn.user { margin-left:auto; background:rgba(255,143,170,.22); border-bottom-right-radius:5px; }
+    .turn.assistant { margin-right:auto; border-bottom-left-radius:5px; }
+    .turn-role { display:block; margin-bottom:3px; color:rgba(255,255,255,.46); font-size:11px; }
+    .turn-tone { display:block; margin-top:5px; color:rgba(255,255,255,.42); font-size:11px; }
+    .turn-tools { display:flex; justify-content:flex-end; margin-top:5px; }
+    .translate-turn { border:0; border-radius:11px; padding:2px 8px; color:rgba(255,255,255,.68); background:rgba(255,255,255,.1); font-size:11px; }
+    .turn-translation { display:block; margin-top:7px; padding-top:7px; border-top:1px solid rgba(255,255,255,.12); color:rgba(255,255,255,.74); font-size:13px; line-height:1.5; }
+    .bottom { position:fixed; z-index:2; left:0; right:0; bottom:0; padding:38px 18px 72px; padding-bottom:calc(72px + env(safe-area-inset-bottom)); background:linear-gradient(to bottom,transparent 0%,rgba(7,9,13,.82) 35%,#07090d 100%); }
+    .live-text { width:min(680px,100%); min-height:42px; margin:0 auto 16px; text-align:center; color:rgba(255,255,255,.92); font-size:16px; line-height:1.45; text-shadow:0 1px 8px rgba(0,0,0,.45); }
+    .actions { display:flex; align-items:center; justify-content:center; gap:24px; }
+    .action { width:62px; height:62px; border:0; border-radius:50%; color:#fff; background:rgba(255,255,255,.16); backdrop-filter:blur(12px); font-size:24px; cursor:pointer; box-shadow:0 8px 24px rgba(0,0,0,.22); }
+    .action:active { transform:scale(.95); }
+    .action.accept { background:#36c878; }
+    .action.reject,.action.hangup { background:#ef5261; }
+    .action.muted { background:#fff; color:#222; }
+    .action-labels { display:flex; justify-content:center; gap:24px; margin-top:7px; }
+    .action-labels span { width:62px; text-align:center; color:rgba(255,255,255,.62); font-size:11px; }
+    .hidden { display:none !important; }
+    .back-btn { position:absolute; top:calc(env(safe-area-inset-top) + 14px); left:14px; z-index:3; border:0; color:#fff; background:rgba(0,0,0,.24); border-radius:20px; padding:8px 12px; font-size:13px; }
+    .play-gate { display:none; margin:0 auto 13px; border:1px solid rgba(255,255,255,.3); color:#fff; background:rgba(255,255,255,.12); border-radius:18px; padding:8px 15px; }
+    @media (min-width:700px) { .avatar{width:110px;height:110px}.call-content{padding-top:42px}.transcript{margin-top:28px}.turn{font-size:16px} }
+  </style>
+</head>
+<body>
+<main class="call-page">
+  <div class="call-bg"></div>
+  <button id="backBtn" class="back-btn hidden">返回聊天</button>
+  <section class="call-content">
+    <div class="top">
+      <img id="avatar" class="avatar" src="/static/avatar_assistant.png" alt="角色头像">
+      <div id="name" class="name">语音通话</div>
+      <div id="status" class="status">正在连接…</div>
+      <div id="duration" class="duration"></div>
+    </div>
+    <div id="transcript" class="transcript" aria-live="polite"></div>
+  </section>
+  <section class="bottom">
+    <div class="ai-disclosure ai-disclosure--call" role="note" aria-label="AI 内容标识">
+      <span>内容由 AI 生成</span>
+    </div>
+    <button id="playGate" class="play-gate">点击播放角色语音</button>
+    <div id="liveText" class="live-text"></div>
+    <div id="incomingActions" class="hidden">
+      <div class="actions">
+        <button id="rejectBtn" class="action reject" aria-label="拒绝">✕</button>
+        <button id="acceptBtn" class="action accept" aria-label="接听">☎</button>
+      </div>
+      <div class="action-labels"><span>拒绝</span><span>接听</span></div>
+    </div>
+    <div id="activeActions" class="hidden">
+      <div class="actions">
+        <button id="muteBtn" class="action" aria-label="静音">🎙</button>
+        <button id="hangupBtn" class="action hangup" aria-label="挂断">☎</button>
+      </div>
+      <div class="action-labels"><span id="muteLabel">静音</span><span>挂断</span></div>
+    </div>
+  </section>
+</main>
+<script>
+(() => {
+  const callId = {{ call_id|tojson }};
+  const $ = id => document.getElementById(id);
+  const statusEl = $('status'), durationEl = $('duration'), transcriptEl = $('transcript');
+  const liveTextEl = $('liveText'), incomingActions = $('incomingActions'), activeActions = $('activeActions');
+  let call = null, listening = null, muted = false, busy = false, durationTimer = null, heartbeatTimer = null;
+  let ttsEnabled = true;
+  let deferredPlayback = null;
+
+  async function api(path, options = {}) {
+    const headers = Object.assign({'X-Requested-With':'XMLHttpRequest'}, options.headers || {});
+    if (options.body && typeof options.body === 'string') headers['Content-Type'] = 'application/json';
+    const response = await fetch(path, Object.assign({}, options, {headers, cache:'no-store'}));
+    const type = response.headers.get('content-type') || '';
+    const data = type.includes('application/json') ? await response.json().catch(() => ({})) : response;
+    if (!response.ok) {
+      const error = new Error(data.error || `请求失败（${response.status}）`);
+      error.code = data.code; error.data = data; throw error;
+    }
+    return data;
+  }
+
+  function formatDuration(seconds) {
+    const m = Math.floor(seconds / 60), s = seconds % 60;
+    return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  }
+  function startDuration() {
+    clearInterval(durationTimer);
+    const base = call.answered_at ? Date.parse(call.answered_at) : Date.now();
+    const tick = () => durationEl.textContent = formatDuration(Math.max(0, Math.floor((Date.now()-base)/1000)));
+    tick(); durationTimer = setInterval(tick, 1000);
+  }
+  function addTurn(turn) {
+    if (!turn || !turn.content) return;
+    if (turn.id && transcriptEl.querySelector(`[data-turn-id="${turn.id}"]`)) return;
+    const node = document.createElement('div');
+    node.className = `turn ${turn.role}`;
+    if (turn.id) node.dataset.turnId = turn.id;
+    const role = document.createElement('span'); role.className='turn-role';
+    role.textContent = turn.role === 'user' ? '你' : (call.character?.remark || call.character?.name || '角色');
+    const text = document.createElement('span'); text.className='turn-text'; text.textContent = turn.content;
+    node.append(role, text);
+    if (turn.tone) { const tone=document.createElement('span'); tone.className='turn-tone'; tone.textContent=`语气：${turn.tone}`; node.appendChild(tone); }
+    if(turn.role==='assistant'&&String(call.character?.language||'ja').toLowerCase()!=='zh'){
+      const tools=document.createElement('div');tools.className='turn-tools';
+      const translate=document.createElement('button');translate.type='button';translate.className='translate-turn';translate.textContent='译';translate.title='翻译成中文';
+      translate.onclick=()=>translateTurn(node,turn,translate);tools.appendChild(translate);node.appendChild(tools);
+    }
+    transcriptEl.appendChild(node); transcriptEl.scrollTop = transcriptEl.scrollHeight;
+  }
+  function renderTurns(turns) { transcriptEl.innerHTML=''; (turns || []).forEach(addTurn); }
+  async function translateTurn(node,turn,button) {
+    let translation=node.querySelector('.turn-translation');
+    if(translation?.dataset.loaded==='true'){translation.hidden=!translation.hidden;button.textContent=translation.hidden?'译':'收起';return;}
+    if(!translation){translation=document.createElement('span');translation.className='turn-translation';node.appendChild(translation)}
+    translation.hidden=false;translation.textContent='正在翻译…';button.disabled=true;
+    const context=Array.from(transcriptEl.querySelectorAll('.turn')).filter(item=>item!==node).slice(-5).map(item=>item.querySelector('.turn-text')?.textContent||'').filter(Boolean).join('\n');
+    const source=String(call.character?.language||'ja').toLowerCase();
+    try{
+      const response=await fetch('/api/translate',{method:'POST',headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},body:JSON.stringify({text:turn.content,context,direction:`${source}_to_zh`,char_id:call.char_id})});
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok||!data.result)throw new Error(data.error||'翻译失败');
+      translation.textContent=data.result;translation.dataset.loaded='true';button.textContent='收起';
+    }catch(error){translation.textContent=error.message||'翻译失败';button.textContent='重试'}
+    finally{button.disabled=false;transcriptEl.scrollTop=transcriptEl.scrollHeight}
+  }
+  function showEnded(reason) {
+    stopListening(); clearInterval(durationTimer); clearInterval(heartbeatTimer);
+    incomingActions.classList.add('hidden'); activeActions.classList.add('hidden');
+    $('backBtn').classList.remove('hidden'); liveTextEl.textContent='';
+    const labels={rejected:'对方已拒绝',missed:'未接听',canceled:'已取消',hangup:'通话已结束',character_hangup:'对方已挂断',disconnected:'连接已断开',failed:'通话失败'};
+    statusEl.textContent = labels[reason] || '通话已结束';
+  }
+  function showActive() {
+    incomingActions.classList.add('hidden');
+    activeActions.classList.remove('hidden');
+    statusEl.textContent = ttsEnabled ? '正在通话' : '语音输入 · 文字回复'; startDuration();
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => api(`/api/calls/${callId}/heartbeat`,{method:'POST'}).catch(()=>{}),10000);
+  }
+
+  function stopListening() {
+    const state = listening; listening = null;
+    if (!state) return;
+    state.stopped = true; clearTimeout(state.commitTimer); clearInterval(state.silenceInterval);
+    try { if (state.recorder?.state !== 'inactive') state.recorder.stop(); } catch (_) {}
+    try { if (state.socket && state.socket.readyState < 2) state.socket.close(); } catch (_) {}
+    try { state.processor.disconnect(); state.source.disconnect(); state.silent.disconnect(); } catch (_) {}
+    try { state.stream.getTracks().forEach(t => t.stop()); } catch (_) {}
+    try { state.context.close(); } catch (_) {}
+  }
+  function pcmToBase64(pcm) {
+    const bytes = new Uint8Array(pcm.buffer); let binary='';
+    for (let i=0;i<bytes.length;i+=0x8000) binary += String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000));
+    return btoa(binary);
+  }
+  function downsample(input, inputRate) {
+    const ratio=inputRate/16000, length=Math.floor(input.length/ratio), output=new Int16Array(length);
+    for(let i=0;i<length;i++) { const v=Math.max(-1,Math.min(1,input[Math.floor(i*ratio)])); output[i]=v<0?v*0x8000:v*0x7fff; }
+    return output;
+  }
+  function recorderOptions() {
+    if (!window.MediaRecorder) return null;
+    const candidates=['audio/webm;codecs=opus','audio/mp4','audio/ogg;codecs=opus'];
+    const mimeType=candidates.find(type=>!MediaRecorder.isTypeSupported||MediaRecorder.isTypeSupported(type));
+    return mimeType?{mimeType}:{};
+  }
+  function audioExtension(type) {
+    const mime=String(type||'').toLowerCase();
+    if(mime.includes('mp4')||mime.includes('m4a'))return 'm4a';
+    if(mime.includes('ogg'))return 'ogg';
+    if(mime.includes('wav'))return 'wav';
+    return 'webm';
+  }
+  function snapshotRecordedUtterance(state) {
+    const recorder=state.recorder;
+    if(!recorder)return Promise.resolve(null);
+    if(recorder.state==='inactive')return Promise.resolve(new Blob(state.audioChunks,{type:recorder.mimeType||'audio/webm'}));
+    return new Promise(resolve=>{
+      let finished=false;
+      const finish=()=>{
+        if(finished)return;finished=true;
+        clearTimeout(timeout);recorder.removeEventListener('dataavailable',finish);
+        setTimeout(()=>resolve(new Blob(state.audioChunks,{type:recorder.mimeType||'audio/webm'})),0);
+      };
+      const timeout=setTimeout(finish,500);
+      recorder.addEventListener('dataavailable',finish,{once:true});
+      try{recorder.requestData()}catch(_){finish()}
+    });
+  }
+  async function transcribeRecordedUtterance(blob) {
+    const form=new FormData(), extension=audioExtension(blob.type);
+    form.append('file',blob,`call.${extension}`);
+    const response=await fetch(`/api/calls/${callId}/transcribe`,{
+      method:'POST',headers:{'X-Requested-With':'XMLHttpRequest'},body:form,cache:'no-store'
+    });
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(data.error||'完整语音识别失败');
+    return {text:String(data.transcript||'').trim(),hasSpeech:data.has_speech===true};
+  }
+  function realtimeSpokenText(text) {
+    return String(text||'')
+      .replace(/（[^（）]{1,40}）/g,'')
+      .replace(/\([^()]{1,40}\)/g,'')
+      .replace(/\[[^\[\]]{1,40}\]/g,'').trim();
+  }
+  function realtimeHasSpokenText(text) {
+    const cleaned=realtimeSpokenText(text);
+    return /[A-Za-z0-9\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/.test(cleaned);
+  }
+  function updateRealtimeTranscript(state, type, text) {
+    // 环境声/空结果不能覆盖已识别的人声文字，也不重置停顿计时。
+    if(!realtimeHasSpokenText(text))return;
+    if(type==='partial_transcript') state.partial=text;
+    else if(type==='committed_transcript'&&text){state.committed.push(text);state.partial='';}
+    else return;
+    const combined=[...state.committed,state.partial].filter(Boolean).join(' ');
+    const spoken=realtimeSpokenText(combined).replace(/\s+/g,'');
+    // 重复结果、partial 转 committed 和环境声标签不延长本轮识别。
+    if(realtimeHasSpokenText(spoken)&&spoken!==state.lastRecognizedText){
+      state.lastRecognizedText=spoken;state.lastTextAt=Date.now();state.textRevision++;
+    }
+    liveTextEl.textContent=combined;
+  }
+  function startSilenceWatch(state) {
+    clearInterval(state.silenceInterval);
+    state.silenceInterval=setInterval(()=>{
+      if(state.stopped||state.finalizing||busy||state.lastTextAt===null)return;
+      const text=[...state.committed,state.partial].filter(Boolean).join(' ');
+      if(realtimeHasSpokenText(text)&&Date.now()-state.lastTextAt>=2000)commitSpeech(state);
+    },150);
+  }
+
+  async function startListening() {
+    if (!call || call.status !== 'active' || muted || busy || listening) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
+      const context = new (window.AudioContext || window.webkitAudioContext)();
+      if (context.state === 'suspended') await context.resume();
+      const source=context.createMediaStreamSource(stream), processor=context.createScriptProcessor(4096,1,1), silent=context.createGain(); silent.gain.value=0;
+      const state={stream,context,source,processor,silent,socket:null,queue:[],committed:[],partial:'',stopped:false,finalizing:false,commitTimer:null,silenceInterval:null,lastTextAt:null,lastRecognizedText:'',textRevision:0,recorder:null,audioChunks:[]}; listening=state;
+      const options=recorderOptions();
+      if(options!==null){
+        try{
+          state.recorder=new MediaRecorder(stream,options);
+          state.recorder.ondataavailable=event=>{if(event.data?.size)state.audioChunks.push(event.data)};
+          state.recorder.start(250);
+        }catch(error){console.warn('[CallBatchSTT] recording unavailable:',error)}
+      }
+      source.connect(processor); processor.connect(silent); silent.connect(context.destination);
+      processor.onaudioprocess=e=>{
+        if(state.stopped)return;
+        const samples=e.inputBuffer.getChannelData(0);
+        const encoded=pcmToBase64(downsample(samples,context.sampleRate));
+        const message=JSON.stringify({message_type:'input_audio_chunk',audio_base_64:encoded});
+        if(state.socket?.readyState===WebSocket.OPEN) state.socket.send(message); else if(state.queue.length<40) state.queue.push(message);
+      };
+      startSilenceWatch(state);
+      const token=await api(`/api/calls/${callId}/stt-token`,{method:'POST'});
+      if(state.stopped)return;
+      const url=new URL('wss://api.elevenlabs.io/v1/speech-to-text/realtime');
+      url.searchParams.set('model_id',token.model_id||'scribe_v2_realtime'); url.searchParams.set('audio_format',token.audio_format||'pcm_16000'); url.searchParams.set('token',token.token);
+      const socket=new WebSocket(url); state.socket=socket;
+      socket.onopen=()=>state.queue.splice(0).forEach(item=>socket.send(item));
+      socket.onmessage=event=>{
+        if(state.stopped)return; let msg; try{msg=JSON.parse(event.data)}catch(_){return}
+        const type=String(msg.message_type||''), text=String(msg.text||'').trim();
+        updateRealtimeTranscript(state,type,text);
+      };
+      socket.onerror=()=>{ if(!state.stopped) statusEl.textContent='语音识别连接不稳定'; };
+      statusEl.textContent='正在聆听'; liveTextEl.textContent='';
+    } catch (error) {
+      stopListening(); statusEl.textContent='无法使用麦克风'; liveTextEl.textContent=error.message||'请允许麦克风权限';
+    }
+  }
+
+  async function commitSpeech(state) {
+    if (state !== listening || busy || state.finalizing) return;
+    const realtimeText=[...state.committed,state.partial].filter(Boolean).join(' ').trim();
+    if(state.stopped||!realtimeHasSpokenText(realtimeText))return;
+    state.finalizing=true; busy=true; clearTimeout(state.commitTimer); clearInterval(state.silenceInterval);
+    statusEl.textContent='正在完善识别…'; liveTextEl.textContent=realtimeText||'正在识别整句话…';
+    const snapshotTextRevision=state.textRevision;
+    const recording=await snapshotRecordedUtterance(state);
+    let text='', batchSucceeded=false, batchHasSpeech=false;
+    if(recording?.size){
+      try{
+        const result=await transcribeRecordedUtterance(recording);
+        text=result.text;batchHasSpeech=result.hasSpeech;batchSucceeded=true;
+      }
+      catch(error){console.warn('[CallBatchSTT] falling back to realtime transcript:',error)}
+    }
+    if(state!==listening||!call||call.status!=='active'){busy=false;return;}
+    if(state.textRevision!==snapshotTextRevision){
+      state.finalizing=false;busy=false;statusEl.textContent='正在聆听';
+      liveTextEl.textContent=[...state.committed,state.partial].filter(Boolean).join(' ');
+      startSilenceWatch(state);
+      return;
+    }
+    if(batchSucceeded&&!batchHasSpeech){
+      state.committed=[];state.partial='';state.lastRecognizedText='';state.lastTextAt=null;
+      state.finalizing=false;busy=false;statusEl.textContent='正在聆听';liveTextEl.textContent='只听到环境声，继续聆听…';
+      startSilenceWatch(state);
+      return;
+    }
+    if(!batchSucceeded){text=realtimeHasSpokenText(realtimeText)?realtimeText:'';}
+    if(!text){
+      state.committed=[];state.partial='';state.lastRecognizedText='';state.lastTextAt=null;
+      state.finalizing=false;busy=false;statusEl.textContent='正在聆听';liveTextEl.textContent='没有听到说话，继续聆听…';
+      startSilenceWatch(state);
+      return;
+    }
+    stopListening();
+    liveTextEl.textContent=''; statusEl.textContent='对方正在回应…';
+    const clientId=`turn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,9)}`;
+    addTurn({role:'user',content:text});
+    try {
+      const result=await api(`/api/calls/${callId}/turn`,{method:'POST',body:JSON.stringify({text,client_turn_id:clientId})});
+      if(result.assistant_turn)addTurn(result.assistant_turn);
+      if(ttsEnabled&&result.tts_text) await playSpeech(result.tts_text);
+      if(result.end_after_speech){await api(`/api/calls/${callId}/character-end`,{method:'POST'});call.status='ended';call.end_reason='character_hangup';showEnded(call.end_reason);return;}
+      statusEl.textContent='正在通话';
+    } catch(error) { statusEl.textContent='回复失败'; liveTextEl.textContent=error.message||'请稍后再说一次'; }
+    finally { busy=false; if(call?.status==='active'&&!muted)setTimeout(startListening,350); }
+  }
+
+  async function playSpeech(text) {
+    const response=await fetch(`/api/calls/${callId}/tts`,{method:'POST',headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},body:JSON.stringify({text})});
+    if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.error||'角色语音生成失败')}
+    const url=URL.createObjectURL(await response.blob()), audio=new Audio(url);
+    await new Promise(resolve=>{
+      let done=false; const finish=()=>{if(done)return;done=true;URL.revokeObjectURL(url);$('playGate').style.display='none';deferredPlayback=null;resolve()};
+      audio.onended=finish; audio.onerror=finish;
+      const play=()=>audio.play().catch(()=>{});
+      audio.play().catch(()=>{ deferredPlayback=play; $('playGate').style.display='block'; });
+    });
+  }
+
+  async function beginActive(openingTurn) {
+    showActive();
+    if(openingTurn?.content){
+      addTurn(openingTurn);
+      if(ttsEnabled){busy=true;statusEl.textContent='对方正在说话…';try{const tone=openingTurn.tone?`[${openingTurn.tone}]\n`:'';await playSpeech(tone+openingTurn.content)}catch(e){liveTextEl.textContent=e.message}finally{busy=false}}
+    }
+    if(!muted)startListening();
+  }
+  async function decideOutgoing() {
+    statusEl.textContent='等待对方接听…';
+    try { const result=await api(`/api/calls/${callId}/decision`,{method:'POST'}); call=Object.assign(call||{},result.call);
+      if(result.decision==='accepted') await beginActive(result.opening_turn);
+      else if(result.decision==='rejected'||call.status==='ended') showEnded(call.end_reason||'rejected');
+      else if(call.status==='active') beginActive(null);
+    } catch(error){ call=error.data?.call||call; showEnded(call?.end_reason||'failed'); liveTextEl.textContent=error.message; }
+  }
+  async function initialize() {
+    try { const data=await api(`/api/calls/${callId}`); call=data.call; ttsEnabled=call.tts_enabled===true; $('name').textContent=call.character.remark||call.character.name; $('avatar').src=call.character.avatar; $('avatar').onerror=()=>{$('avatar').src='/static/avatar_assistant.png'}; renderTurns(call.turns);
+      if(call.status==='ended'){showEnded(call.end_reason);return}
+      if(call.status==='active'){await beginActive(null);return}
+      if(call.initiator==='assistant'){statusEl.textContent='邀请你进行通话';incomingActions.classList.remove('hidden')}
+      else decideOutgoing();
+    } catch(error){statusEl.textContent='通话加载失败';liveTextEl.textContent=error.message;$('backBtn').classList.remove('hidden')}
+  }
+
+  function disableIncomingActions(disabled){$('acceptBtn').disabled=disabled;$('rejectBtn').disabled=disabled}
+  $('acceptBtn').onclick=async()=>{
+    disableIncomingActions(true);incomingActions.classList.add('hidden');statusEl.textContent='正在接听…';
+    try{
+      const data=await api(`/api/calls/${callId}/accept`,{method:'POST'});
+      call=Object.assign(call||{},data.call);await beginActive(data.opening_turn||null);
+      if(data.response_warning)liveTextEl.textContent=data.response_warning;
+    }catch(e){incomingActions.classList.remove('hidden');disableIncomingActions(false);liveTextEl.textContent=e.message}
+  };
+  $('rejectBtn').onclick=async()=>{
+    disableIncomingActions(true);incomingActions.classList.add('hidden');statusEl.textContent='正在拒绝…';
+    try{
+      const data=await api(`/api/calls/${callId}/reject`,{method:'POST'});
+      call=data.call;showEnded(call.end_reason);liveTextEl.textContent=data.message||data.response_warning||'';
+    }catch(e){incomingActions.classList.remove('hidden');disableIncomingActions(false);liveTextEl.textContent=e.message}
+  };
+  async function hangupCurrentCall(){stopListening();try{const data=await api(`/api/calls/${callId}/end`,{method:'POST'});call=data.call;showEnded(call.end_reason)}catch(e){liveTextEl.textContent=e.message}}
+  $('hangupBtn').onclick=hangupCurrentCall;
+  $('muteBtn').onclick=()=>{muted=!muted;$('muteBtn').classList.toggle('muted',muted);$('muteLabel').textContent=muted?'取消静音':'静音';if(muted){stopListening();statusEl.textContent='麦克风已关闭'}else{statusEl.textContent='正在通话';startListening()}};
+  $('backBtn').onclick=()=>location.href=call?`/chat/${encodeURIComponent(call.char_id)}`:'/';
+  $('playGate').onclick=()=>{const play=deferredPlayback;deferredPlayback=null;$('playGate').style.display='none';if(play)play()};
+  window.addEventListener('beforeunload',event=>{if(call?.status==='active'){event.preventDefault();event.returnValue=''}});
+  initialize();
+})();
+</script>
+</body>
+</html>

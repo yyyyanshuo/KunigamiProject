@@ -12,16 +12,27 @@ from email.mime.text import MIMEText
 from email.header import Header
 from email.utils import formataddr
 
-from flask import Blueprint, request, jsonify, session, redirect, render_template
+from flask import Blueprint, current_app, request, jsonify, session, redirect, render_template
 from werkzeug.security import generate_password_hash, check_password_hash
 from pywebpush import webpush, WebPushException
 
 from core.config import BASE_DIR, USERS_DB, USERS_ROOT, DEVICE_ACCOUNTS_FILE, USER_SETTINGS_FILE
 from core.utils import safe_save_json
 from core.context import get_current_user_id
+from core.session_security import establish_authenticated_session
+from core.legal import (
+    get_current_legal_versions,
+    get_legal_documents,
+    get_user_legal_status,
+    init_legal_consents_table,
+    record_current_legal_consents,
+    validate_legal_acceptance,
+)
 
 
 SUBSCRIPTIONS_FILE = os.path.join(BASE_DIR, "configs", "subscriptions.json")
+SQUARE_DB = os.path.join(BASE_DIR, "configs", "square.db")
+FORUMS_DB = os.path.join(BASE_DIR, "configs", "forums.db")
 VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY")
 VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY")
 VAPID_CLAIMS = {"sub": "mailto:yyyyanshuo@foxmail.com"}
@@ -166,7 +177,11 @@ def login_page():
 def register_page():
     if 'user_id' in session or 'logged_in' in session:
         return redirect('/')
-    return render_template("register.html")
+    return render_template(
+        "register.html",
+        legal_documents=get_legal_documents(),
+        legal_versions=get_current_legal_versions(),
+    )
 
 
 @auth_bp.route("/forgot_password")
@@ -182,14 +197,22 @@ def forgot_password_page():
 
 @auth_bp.route("/api/register", methods=["POST"])
 def register_api():
-    """注册新用户：email + password (+ display_name)，成功后自动登录"""
+    """注册新用户：email + password (+ display_name)，需确认已满 18 周岁。"""
     data = request.get_json() or {}
     email = (data.get("email") or "").strip().lower()
     password = data.get("password") or ""
     display_name = (data.get("display_name") or "").strip()
+    adult_confirmed = data.get("adult_confirmed") is True
 
     if not email or not password:
         return jsonify({"status": "error", "message": "邮箱和密码不能为空"}), 400
+
+    if not adult_confirmed:
+        return jsonify({"status": "error", "message": "请先确认你已年满18周岁"}), 400
+
+    legal_valid, legal_message = validate_legal_acceptance(data)
+    if not legal_valid:
+        return jsonify({"status": "error", "message": legal_message}), 400
 
     if not display_name:
         display_name = email
@@ -204,27 +227,59 @@ def register_api():
             conn.close()
             return jsonify({"status": "error", "message": "该邮箱已被注册"}), 400
 
+        init_legal_consents_table(conn)
         cur.execute(
             "INSERT INTO users (email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?)",
             (email, generate_password_hash(password), display_name, datetime.now().isoformat())
         )
         user_id = cur.lastrowid
+        record_current_legal_consents(conn, user_id)
         conn.commit()
         conn.close()
 
         init_user_workspace(user_id)
 
-        session['user_id'] = user_id
-        session['logged_in'] = True
-        session.permanent = True
+        establish_authenticated_session(user_id)
 
         device_id = _track_device_login(user_id, email=email, display_name=display_name)
         resp = jsonify({"status": "success"})
-        resp.set_cookie("device_id", device_id, max_age=30 * 24 * 3600, httponly=True, samesite="Lax")
+        resp.set_cookie(
+            "device_id", device_id, max_age=30 * 24 * 3600,
+            secure=bool(current_app.config.get("SESSION_COOKIE_SECURE")), httponly=True, samesite="Lax",
+        )
         return resp
     except Exception as e:
         print(f"[Register] 注册失败: {e}")
         return jsonify({"status": "error", "message": "服务器错误"}), 500
+
+
+@auth_bp.route("/api/legal/status")
+def legal_status_api():
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"status": "error", "message": "请先登录"}), 401
+    return jsonify({"status": "success", **get_user_legal_status(int(user_id))})
+
+
+@auth_bp.route("/api/legal/consent", methods=["POST"])
+def legal_consent_api():
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"status": "error", "message": "请先登录"}), 401
+
+    data = request.get_json() or {}
+    legal_valid, legal_message = validate_legal_acceptance(data)
+    if not legal_valid:
+        return jsonify({"status": "error", "message": legal_message}), 400
+
+    conn = sqlite3.connect(USERS_DB)
+    try:
+        init_legal_consents_table(conn)
+        record_current_legal_consents(conn, int(user_id))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({"status": "success", **get_user_legal_status(int(user_id))})
 
 
 @auth_bp.route("/api/login", methods=["POST"])
@@ -246,31 +301,35 @@ def login_api():
                 email = row[1]
                 display_name = row[3] or email
 
-                session['user_id'] = user_id
-                session['logged_in'] = True
-                session.permanent = True
+                establish_authenticated_session(user_id)
 
                 device_id = _track_device_login(user_id, email=email, display_name=display_name)
                 resp = jsonify({"status": "success"})
-                resp.set_cookie("device_id", device_id, max_age=30 * 24 * 3600, httponly=True, samesite="Lax")
+                resp.set_cookie(
+                    "device_id", device_id, max_age=30 * 24 * 3600,
+                    secure=bool(current_app.config.get("SESSION_COOKIE_SECURE")), httponly=True, samesite="Lax",
+                )
                 return resp
         except Exception as e:
             print(f"[Login] users.db 查询失败: {e}")
 
-    # 2. 向下兼容：如果没有在 users 表中找到，则读取旧的 user_settings.json
-    saved_user = "admin"
-    saved_pass = "123456"
+    # 2. 旧明文账号登录默认关闭，只用于一次性的受控迁移。
+    if os.getenv("ALLOW_LEGACY_PLAINTEXT_LOGIN", "false").strip().lower() != "true":
+        return jsonify({"status": "error", "message": "用户名或密码错误"}), 401
+
+    saved_user = ""
+    saved_pass = ""
     user_data = {}
     if os.path.exists(USER_SETTINGS_FILE):
         try:
             with open(USER_SETTINGS_FILE, "r", encoding="utf-8") as f:
                 user_data = json.load(f)
-                saved_user = user_data.get("current_user_name", "admin")
-                saved_pass = user_data.get("password", "123456")
+                saved_user = str(user_data.get("current_user_name") or "").strip()
+                saved_pass = str(user_data.get("password") or "")
         except Exception:
             pass
 
-    if input_user == saved_user and input_pass == saved_pass:
+    if saved_user and saved_pass and input_user == saved_user and input_pass == saved_pass:
         try:
             conn = sqlite3.connect(USERS_DB)
             cur = conn.cursor()
@@ -288,19 +347,23 @@ def login_api():
                 conn.commit()
             conn.close()
 
-            session['user_id'] = user_id
-            session['logged_in'] = True
-            session.permanent = True
+            establish_authenticated_session(user_id)
+
+            # 数据库账号已建立后立即清除旧配置中的明文登录密码。
+            if "password" in user_data:
+                user_data.pop("password", None)
+                safe_save_json(USER_SETTINGS_FILE, user_data)
 
             device_id = _track_device_login(user_id, email=email, display_name=saved_user)
             resp = jsonify({"status": "success"})
-            resp.set_cookie("device_id", device_id, max_age=30 * 24 * 3600, httponly=True, samesite="Lax")
+            resp.set_cookie(
+                "device_id", device_id, max_age=30 * 24 * 3600,
+                secure=bool(current_app.config.get("SESSION_COOKIE_SECURE")), httponly=True, samesite="Lax",
+            )
             return resp
         except Exception as e:
             print(f"[Login] 旧账号迁移失败: {e}")
-            session['logged_in'] = True
-            session.permanent = True
-            return jsonify({"status": "success"})
+            return jsonify({"status": "error", "message": "旧账号迁移失败，请联系管理员"}), 500
 
     return jsonify({"status": "error", "message": "用户名或密码错误"}), 401
 
@@ -426,7 +489,10 @@ def forgot_password_reset():
             return jsonify({"status": "error", "message": "找回失败：该邮箱账号不存在", "error_type": "email"}), 404
 
         password_hash = generate_password_hash(new_password)
-        cur.execute("UPDATE users SET password_hash = ? WHERE email = ?", (password_hash, email))
+        cur.execute(
+            "UPDATE users SET password_hash = ?, auth_version = COALESCE(auth_version, 1) + 1 WHERE email = ?",
+            (password_hash, email),
+        )
         conn.commit()
         conn.close()
 
@@ -439,19 +505,212 @@ def forgot_password_reset():
         return jsonify({"status": "error", "message": "系统错误，请联系管理员"}), 500
 
 
+@auth_bp.route("/api/user/change_password", methods=["POST"])
+def change_password():
+    current_uid = get_current_user_id()
+    if not current_uid:
+        return jsonify({"status": "error", "message": "请先登录"}), 401
+    if session.get("impersonator_user_id"):
+        return jsonify({"status": "error", "message": "管理员模拟登录期间不能修改密码"}), 403
+    if request.headers.get("X-Requested-With") != "XMLHttpRequest":
+        return jsonify({"status": "error", "message": "请求来源校验失败"}), 403
+
+    data = request.get_json(silent=True) or {}
+    current_password = data.get("current_password") or ""
+    new_password = data.get("new_password") or ""
+    if not current_password or not new_password:
+        return jsonify({"status": "error", "message": "请输入当前密码和新密码"}), 400
+    if len(new_password) < 8:
+        return jsonify({"status": "error", "message": "新密码至少需要 8 个字符"}), 400
+    if current_password == new_password:
+        return jsonify({"status": "error", "message": "新密码不能与当前密码相同"}), 400
+
+    conn = sqlite3.connect(USERS_DB)
+    try:
+        row = conn.execute("SELECT password_hash FROM users WHERE id = ?", (int(current_uid),)).fetchone()
+        if not row or not row[0] or not check_password_hash(row[0], current_password):
+            return jsonify({"status": "error", "message": "当前密码不正确"}), 403
+        conn.execute(
+            "UPDATE users SET password_hash = ?, auth_version = COALESCE(auth_version, 1) + 1 WHERE id = ?",
+            (generate_password_hash(new_password), int(current_uid)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    settings_path = os.path.join(USERS_ROOT, str(int(current_uid)), "configs", "user_settings.json")
+    if os.path.exists(settings_path):
+        try:
+            with open(settings_path, "r", encoding="utf-8") as handle:
+                settings = json.load(handle) or {}
+            if isinstance(settings, dict) and "password" in settings:
+                settings.pop("password", None)
+                safe_save_json(settings_path, settings)
+        except Exception:
+            current_app.logger.exception("Failed to remove legacy plaintext password for user %s", current_uid)
+
+    _clear_auth_session()
+    response = jsonify({"status": "success", "message": "密码已修改，请重新登录", "requires_login": True})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 # ---------------------------------------------------------------------------
 # 登出 / 账号切换
 # ---------------------------------------------------------------------------
 
-@auth_bp.route("/logout")
-def logout():
+def _clear_auth_session():
     session.pop('user_id', None)
     session.pop('logged_in', None)
+    session.pop('auth_version', None)
     session.pop('impersonator_user_id', None)
     session.pop('impersonated_user_id', None)
     session.pop('impersonation_expires_at', None)
     session.pop('impersonation_expired', None)
+
+
+@auth_bp.route("/logout")
+def logout():
+    _clear_auth_session()
     return redirect('/login')
+
+
+def _remove_user_from_device_accounts(user_id: int) -> None:
+    user_key = str(user_id)
+    all_devices = _load_device_accounts()
+    changed = False
+
+    for device_id in list(all_devices.keys()):
+        accounts = all_devices.get(device_id)
+        if not isinstance(accounts, dict):
+            continue
+        if user_key in accounts:
+            accounts.pop(user_key, None)
+            changed = True
+        if not accounts:
+            all_devices.pop(device_id, None)
+            changed = True
+
+    if changed:
+        _save_device_accounts(all_devices)
+
+
+def _remove_user_subscriptions(user_id: int) -> None:
+    if not os.path.exists(SUBSCRIPTIONS_FILE):
+        return
+
+    try:
+        with open(SUBSCRIPTIONS_FILE, "r", encoding="utf-8") as f:
+            all_subs = json.load(f) or {}
+    except Exception:
+        return
+
+    if not isinstance(all_subs, dict):
+        return
+
+    user_key = str(user_id)
+    if user_key in all_subs:
+        all_subs.pop(user_key, None)
+        safe_save_json(SUBSCRIPTIONS_FILE, all_subs)
+
+
+def _safe_remove_user_workspace(user_id: int) -> None:
+    user_key = str(int(user_id))
+    root = os.path.abspath(USERS_ROOT)
+    target = os.path.abspath(os.path.join(root, user_key))
+    if not target.startswith(root + os.sep):
+        raise ValueError("Unsafe user workspace path")
+    if os.path.isdir(target):
+        shutil.rmtree(target)
+
+
+def _delete_user_forums(user_id: int) -> None:
+    if not os.path.exists(FORUMS_DB):
+        return
+
+    conn = sqlite3.connect(FORUMS_DB)
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM forums WHERE user_id = ?", (int(user_id),))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _cleanup_square_user_data(user_id: int, email: str) -> None:
+    if not os.path.exists(SQUARE_DB):
+        return
+
+    conn = sqlite3.connect(SQUARE_DB)
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM favorites WHERE user_id = ?", (int(user_id),))
+        cur.execute("DELETE FROM likes WHERE user_id = ?", (int(user_id),))
+        if email:
+            cur.execute("UPDATE characters SET author_email = NULL WHERE author_email = ?", (email,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _delete_user_account_record(user_id: int) -> None:
+    conn = sqlite3.connect(USERS_DB)
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM circuit_breaker WHERE user_id = ?", (int(user_id),))
+        cur.execute("DELETE FROM users WHERE id = ?", (int(user_id),))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@auth_bp.route("/api/account/delete", methods=["POST"])
+def delete_account():
+    current_uid = get_current_user_id()
+    if not current_uid:
+        return jsonify({"status": "error", "message": "请先登录"}), 401
+
+    if session.get("impersonator_user_id"):
+        return jsonify({"status": "error", "message": "请先退出管理员模拟登录"}), 403
+
+    data = request.get_json() or {}
+    password = data.get("password") or ""
+    confirm_text = (data.get("confirm_text") or "").strip()
+
+    if confirm_text != "注销账户":
+        return jsonify({"status": "error", "message": "请输入“注销账户”确认操作"}), 400
+    if not password:
+        return jsonify({"status": "error", "message": "请输入当前密码"}), 400
+
+    conn = sqlite3.connect(USERS_DB)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT email, password_hash FROM users WHERE id = ?", (int(current_uid),))
+        row = cur.fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        _clear_auth_session()
+        return jsonify({"status": "error", "message": "账号不存在或已注销"}), 404
+
+    email, password_hash = row
+    if not password_hash or not check_password_hash(password_hash, password):
+        return jsonify({"status": "error", "message": "当前密码不正确"}), 403
+
+    try:
+        _delete_user_forums(current_uid)
+        _cleanup_square_user_data(current_uid, email)
+        _remove_user_from_device_accounts(current_uid)
+        _remove_user_subscriptions(current_uid)
+        _safe_remove_user_workspace(current_uid)
+        _delete_user_account_record(current_uid)
+        _clear_auth_session()
+    except Exception as e:
+        print(f"[AccountDelete] 注销账户失败 user_id={current_uid}: {e}")
+        return jsonify({"status": "error", "message": "注销失败，请稍后重试或联系管理员"}), 500
+
+    return jsonify({"status": "success", "message": "账号已注销"})
 
 
 @auth_bp.route("/api/accounts/recent", methods=["GET"])
@@ -532,9 +791,7 @@ def switch_account():
     except Exception:
         return jsonify({"status": "error", "message": "无法确认登录时间，请重新登录该账号"}), 403
 
-    session['user_id'] = target_id
-    session['logged_in'] = True
-    session.permanent = True
+    establish_authenticated_session(target_id)
 
     info["last_login"] = datetime.now().isoformat()
     entries[str(target_id)] = info

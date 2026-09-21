@@ -22,11 +22,11 @@ BLUEPRINT_ROUTES = {
         "/api/register", "/api/login",
         "/api/forgot_password/send_code", "/api/forgot_password/reset",
         "/api/accounts/recent", "/api/accounts/switch",
-        "/api/subscribe", "/api/vapid_public_key",
+        "/api/account/delete", "/api/subscribe", "/api/vapid_public_key",
     ],
     "views": [
         "/", "/profile", "/guide", "/sakura",
-        "/manifest.json", "/sw.js",
+        "/manifest.json", "/sw.js", "/api/app/announcement",
     ],
     "chat": [
         "/api/<char_id>/mark_read",
@@ -45,6 +45,9 @@ BLUEPRINT_ROUTES = {
         "/api/<char_id>/debug/force_maintenance",
         "/api/<char_id>/prompts_data",
         "/api/<char_id>/relationship_reverse",
+        "/api/<char_id>/relationship_reverse/parse",
+        "/api/<char_id>/relationship_reverse/ai_generate",
+        "/api/<char_id>/relationships/save_all",
         "/api/<char_id>/save_relationship_reverse",
         "/api/<char_id>/save_prompt",
         "/api/<char_id>/search",
@@ -53,6 +56,7 @@ BLUEPRINT_ROUTES = {
         "/api/<char_id>/upload_avatar",
         "/api/<target_char_id>/copy_schedule",
         "/api/character/<char_id>/delete",
+        "/api/relationship/parse",
         "/api/agent/chat",
         "/api/agent/notify_user",
         "/api/agent/reply",
@@ -146,6 +150,8 @@ BLUEPRINT_ROUTES = {
         "/api/square/ips",
         "/api/square/search_ip",
         "/api/square/list",
+        "/api/square/local_characters",
+        "/api/square/local_character/<local_character_id>/preview",
         "/api/square/upload",
         "/api/square/like",
         "/api/square/favorite",
@@ -156,6 +162,24 @@ BLUEPRINT_ROUTES = {
         "/api/square/update",
         "/api/square/add_to_local",
         "/api/square/ai_complete_graph",
+    ],
+    "calls": [
+        "/call/<call_id>",
+        "/api/calls",
+        "/api/calls/pending",
+        "/api/calls/resolve-records",
+        "/api/calls/<call_id>",
+        "/api/calls/<call_id>/decision",
+        "/api/calls/<call_id>/accept",
+        "/api/calls/<call_id>/reject",
+        "/api/calls/<call_id>/cancel",
+        "/api/calls/<call_id>/end",
+        "/api/calls/<call_id>/character-end",
+        "/api/calls/<call_id>/turn",
+        "/api/calls/<call_id>/tts",
+        "/api/calls/<call_id>/stt-token",
+        "/api/calls/<call_id>/heartbeat",
+        "/api/calls/<call_id>/turns",
     ],
 }
 
@@ -225,9 +249,13 @@ class TestRouteRegistration:
         for route in BLUEPRINT_ROUTES["square"]:
             assert self._rule_exists(route), f"Square route missing: {route}"
 
+    def test_call_routes(self):
+        for route in BLUEPRINT_ROUTES["calls"]:
+            assert self._rule_exists(route), f"Call route missing: {route}"
+
     def test_total_route_count(self):
         count = sum(1 for _ in self.app.url_map.iter_rules())
-        assert count == 201, f"Expected 201 routes, got {count}"
+        assert count == 246, f"Expected 246 routes, got {count}"
 
 
 class TestRouteEndpoints:

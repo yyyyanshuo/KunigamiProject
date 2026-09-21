@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#fff3f8">
+  <title>{% block title %}协议与隐私{% endblock %} | Kunigami</title>
+  <link rel="manifest" href="/manifest.json">
+  <style>
+    :root {
+      --primary: #d94f7c;
+      --primary-soft: #fff0f5;
+      --text: #35343b;
+      --muted: #75717a;
+      --line: #eadfe4;
+      --card: rgba(255, 255, 255, .96);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; color: var(--text); line-height: 1.8;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: linear-gradient(145deg, #fff8fb 0%, #fffdf9 48%, #f8f5ff 100%);
+    }
+    a { color: var(--primary); }
+    .topbar {
+      position: sticky; top: 0; z-index: 10; display: flex; align-items: center;
+      justify-content: space-between; min-height: 58px; padding: 10px 18px;
+      border-bottom: 1px solid rgba(234, 223, 228, .9); background: rgba(255, 255, 255, .9);
+      backdrop-filter: blur(14px);
+    }
+    .brand { display: flex; align-items: center; gap: 9px; color: var(--text); font-weight: 750; text-decoration: none; }
+    .brand img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
+    .top-links { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .top-links a {
+      padding: 5px 10px; border-radius: 999px; color: var(--primary); background: var(--primary-soft);
+      font-size: 12px; font-weight: 650; text-decoration: none;
+    }
+    main { width: min(860px, calc(100% - 24px)); margin: 24px auto 64px; }
+    article { padding: clamp(22px, 5vw, 42px); border: 1px solid #fff; border-radius: 22px; background: var(--card); box-shadow: 0 12px 36px rgba(111, 62, 80, .09); }
+    h1 { margin: 0 0 8px; color: #bd3d68; font-size: clamp(27px, 6vw, 40px); line-height: 1.25; }
+    h2 { margin: 30px 0 10px; padding-top: 4px; color: #8f3152; font-size: 19px; line-height: 1.45; }
+    h3 { margin: 20px 0 8px; font-size: 16px; }
+    p, li { font-size: 14px; }
+    ul, ol { padding-left: 23px; }
+    li + li { margin-top: 6px; }
+    .meta { margin-bottom: 20px; color: var(--muted); font-size: 13px; }
+    .notice { margin: 18px 0; padding: 12px 14px; border-left: 4px solid #ee9bb7; border-radius: 8px; color: #65545a; background: #fff6f9; font-size: 13px; }
+    .contact { padding: 13px 15px; border: 1px solid var(--line); border-radius: 12px; background: #fffafd; }
+    footer { padding-top: 20px; color: var(--muted); text-align: center; font-size: 12px; }
+    @media (max-width: 560px) {
+      .topbar { align-items: flex-start; }
+      .top-links { max-width: 190px; }
+      article { border-radius: 17px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">
+      <img src="/static/logo.png" alt="Kunigami" onerror="this.src='/static/default_avatar.png'">
+      <span>Kunigami</span>
+    </a>
+    <nav class="top-links" aria-label="协议页面导航">
+      <a href="/terms">用户协议</a>
+      <a href="/privacy">隐私政策</a>
+      <a href="/guide">使用文档</a>
+    </nav>
+  </header>
+  <main>
+    <article>
+      <h1>{{ document.title }}</h1>
+      <div class="meta">版本 {{ document.version }} · 生效日期：{{ document.effective_date }}</div>
+      {% block content %}{% endblock %}
+    </article>
+    <footer>如有疑问，请联系 yyyyanshuo@foxmail.com</footer>
+  </main>
+</body>
+</html>
