@@ -255,7 +255,7 @@ class TestRouteRegistration:
 
     def test_total_route_count(self):
         count = sum(1 for _ in self.app.url_map.iter_rules())
-        assert count == 232, f"Expected 232 routes, got {count}"
+        assert count == 246, f"Expected 246 routes, got {count}"
 
 
 class TestRouteEndpoints:

@@ -5373,6 +5373,7 @@ def trigger_bedtime_diary(char_id, user_id=None, diary_date=None):
         user_id=user_id,
         include_all_relationships=True,
         include_general_agent_rules=False,
+        include_content_actions=True,
         exclude_bedtime_diaries_from_timeline=True,
     )
     messages = [{"role": "system", "content": base_system_prompt}]

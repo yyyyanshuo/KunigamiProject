@@ -31,6 +31,9 @@ scripts/*
 !scripts/migrate_base_persona.py
 !scripts/run_character_ego_test.py
 !scripts/cleanup_map_locations.py
+!scripts/migrate_sleep_times_to_character_local.py
+!scripts/sync_character_timezones.py
+!scripts/translate_ego_monologues.py
 credential-migration-backups/
 memory-rebuild-backups/
 

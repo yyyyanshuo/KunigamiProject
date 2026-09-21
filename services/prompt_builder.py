@@ -1120,6 +1120,7 @@ def build_system_prompt_v2(
     include_general_agent_rules=True,
     exclude_bedtime_diaries_from_timeline=False,
     read_only=False,
+    include_content_actions=None,
 ):
     if user_id is None:
         from core.context import get_current_user_id
@@ -1397,7 +1398,9 @@ def build_system_prompt_v2(
         if agent_rules:
             prompt_parts.append(f"【Agent Actions / 智能体动作】\n{agent_rules}")
 
-    if not call_mode and include_general_agent_rules:
+    if not call_mode and not read_only and (
+        include_general_agent_rules if include_content_actions is None else include_content_actions
+    ):
         prompt_parts.append(get_content_action_rules(lang))
 
     timeline_events = []

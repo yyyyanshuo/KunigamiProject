@@ -3,6 +3,7 @@ import sqlite3
 import pytest
 
 import services.prompt_builder as prompt_builder
+import core.utils as core_utils
 
 from services.bedtime_diary import (
     BedtimeDiaryOutputError,
@@ -96,7 +97,7 @@ def test_bedtime_timeline_excludes_older_thoughts(tmp_path, monkeypatch):
     conn.close()
 
     monkeypatch.setattr(
-        prompt_builder,
+        core_utils,
         "get_paths",
         lambda *args, **kwargs: (str(db_path), str(tmp_path / "prompts")),
     )

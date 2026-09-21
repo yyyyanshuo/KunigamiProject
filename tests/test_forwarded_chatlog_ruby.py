@@ -41,10 +41,15 @@ def test_forwarded_chatlog_preview_and_reforward_strip_ruby_markup():
     assert "const content = stripRubyTags(selectedMessageResolvedContent(group, false));" in source
 
 
-def test_selected_voice_calls_are_expanded_in_every_record_output():
+def test_selected_voice_calls_expand_in_text_outputs_but_keep_cards_in_images():
     source = _template_source()
 
     assert "async function preloadSelectedCallRecords(groups)" in source
     assert "fetch('/api/calls/resolve-records'" in source
-    assert source.count("await preloadSelectedCallRecords(selectedEls);") >= 4
-    assert "callBubble.textContent = selectedMessageResolvedContent(group, false);" in source
+    for function_name in ("forumPickerConfirm", "exportSelectedMessages", "confirmForward"):
+        start = source.index(f"async function {function_name}(")
+        end = source.index("selectedEls.forEach", start)
+        assert "await preloadSelectedCallRecords(selectedEls);" in source[start:end]
+    assert "await waitForSelectedVoiceCallCards(selectedEls);" in source
+    assert "const clonedGroup = group.cloneNode(true);" in source
+    assert "callBubble.textContent = selectedMessageResolvedContent(group, false);" not in source

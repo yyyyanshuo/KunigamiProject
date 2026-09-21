@@ -1,5 +1,6 @@
 import json
 import io
+import sqlite3
 import subprocess
 
 import pytest
@@ -109,6 +110,17 @@ def _jpeg_upload():
     return buffer
 
 
+@pytest.fixture
+def image_test_user(tmp_path, monkeypatch):
+    import core.config
+
+    database = tmp_path / 'users.db'
+    with sqlite3.connect(database) as conn:
+        conn.execute('CREATE TABLE users (id INTEGER PRIMARY KEY, auth_version INTEGER)')
+        conn.execute('INSERT INTO users VALUES (1, 1)')
+    monkeypatch.setattr(core.config, 'USERS_DB', str(database))
+
+
 def _authenticate(client):
     from core.session_security import get_auth_version
 
@@ -117,7 +129,7 @@ def _authenticate(client):
         current_session["auth_version"] = get_auth_version(1)
 
 
-def test_chat_manual_description_skips_vision_model(app_client, monkeypatch, tmp_path):
+def test_chat_manual_description_skips_vision_model(app_client, monkeypatch, tmp_path, image_test_user):
     import blueprints.media as media_module
 
     _authenticate(app_client)
@@ -147,7 +159,7 @@ def test_chat_manual_description_skips_vision_model(app_client, monkeypatch, tmp
     assert payload["description"] == "菜单上的 f(x/y) / 今日限定"
 
 
-def test_chat_ai_failure_requests_manual_fallback(app_client, monkeypatch, tmp_path):
+def test_chat_ai_failure_requests_manual_fallback(app_client, monkeypatch, tmp_path, image_test_user):
     import blueprints.media as media_module
 
     _authenticate(app_client)
@@ -173,7 +185,7 @@ def test_chat_ai_failure_requests_manual_fallback(app_client, monkeypatch, tmp_p
     assert response.get_json()["code"] == "vision_failed"
 
 
-def test_moments_rejects_invalid_image_metadata_before_publish(app_client, monkeypatch):
+def test_moments_rejects_invalid_image_metadata_before_publish(app_client, monkeypatch, image_test_user):
     import blueprints.moments as moments_module
 
     _authenticate(app_client)

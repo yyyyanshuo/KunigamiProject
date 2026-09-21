@@ -203,6 +203,7 @@ def test_bedtime_prompt_keeps_content_actions_but_omits_general_agent_rules(tmp_
         user_id="12",
         include_all_relationships=True,
         include_general_agent_rules=False,
+        include_content_actions=True,
         include_long_memory=False,
         include_recent_messages=False,
     )
@@ -215,6 +216,17 @@ def test_bedtime_prompt_keeps_content_actions_but_omits_general_agent_rules(tmp_
     assert "DIRECT_TO_GROUP" not in prompt
     assert "MOVE_TO" not in prompt
     assert "每轮回复末尾" not in prompt
+
+
+def test_read_only_prompt_omits_content_actions_even_when_requested(tmp_path, monkeypatch):
+    _patch_prompt_environment(monkeypatch, tmp_path / "prompts")
+    prompt = prompt_builder.build_system_prompt_v2(
+        "hero", user_id="12", include_general_agent_rules=False,
+        include_content_actions=True, read_only=True,
+        include_long_memory=False, include_recent_messages=False,
+    )
+    for action in ("ADD_PERSONA", "ADD_RELATION", "ADD_PLAN"):
+        assert action not in prompt
 
 
 def test_role_rules_explicitly_allow_content_only_plan_tag():
