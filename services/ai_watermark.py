@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 
 WATERMARK_ASSET = (
@@ -18,24 +18,20 @@ def _resampling_lanczos():
 
 
 def _build_watermark_badge(image_width: int, image_height: int) -> Image.Image:
-    """Scale the bundled transparent watermark without altering its design."""
-
-    with Image.open(WATERMARK_ASSET) as source:
-        watermark = source.convert("RGBA")
-
-    max_width = max(1, image_width - 24)
-    target_width = min(max_width, max(150, round(image_width * 0.23)))
-    scale = target_width / watermark.width
-    target_height = max(1, round(watermark.height * scale))
-    watermark = watermark.resize(
-        (target_width, target_height),
-        _resampling_lanczos(),
-    )
-    return watermark
+    """Render public brand text for new images; never alter the original logo."""
+    # An ASCII brand keeps rendering portable without a CJK font dependency.
+    width = min(max(1, image_width - 24), max(150, round(image_width * 0.23)))
+    badge = Image.new("RGBA", (600, 160), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(badge)
+    draw.rounded_rectangle((0, 0, 599, 159), radius=24, fill=(255, 255, 255, 220))
+    font = ImageFont.load_default(size=48)
+    draw.text((28, 18), "Saki", font=font, fill=(213, 85, 142, 255))
+    draw.text((28, 87), "AI generated", font=ImageFont.load_default(size=28), fill=(120, 62, 89, 255))
+    return badge.resize((width, max(1, round(width * 160 / 600))), _resampling_lanczos())
 
 
 def apply_ai_watermark(image_path: str | os.PathLike[str]) -> bool:
-    """Bake the Sakura AI disclosure into one newly generated image.
+    """Bake the Saki AI disclosure into one newly generated image.
 
     The source file is replaced only after the completed image is successfully
     encoded, so callers never upload a partially written asset.
@@ -44,9 +40,6 @@ def apply_ai_watermark(image_path: str | os.PathLike[str]) -> bool:
     path = Path(image_path)
     temp_path = path.with_name(f".{path.stem}.watermark{path.suffix}")
     try:
-        if not WATERMARK_ASSET.is_file():
-            raise FileNotFoundError(f"水印素材不存在: {WATERMARK_ASSET}")
-
         with Image.open(path) as source:
             source.load()
             has_alpha = source.mode in ("RGBA", "LA") or "transparency" in source.info

@@ -10,7 +10,7 @@ def test_normalize_map_state_repairs_coordinates_and_drops_orphans(tmp_path, mon
     monkeypatch.setattr(core_utils, "USERS_ROOT", str(users_root))
 
     (config_dir / "characters.json").write_text(
-        json.dumps({"hero": {"name": "Hero"}}),
+        json.dumps({"hero": {"name": "Hero", "chat_mode": "offline"}}),
         encoding="utf-8",
     )
     (config_dir / "locations.json").write_text(
@@ -53,7 +53,7 @@ def test_normalize_map_state_repairs_coordinates_and_drops_orphans(tmp_path, mon
     assert positions["hero"]["known_location_ids"] == ["cafe"]
     assert user_position == {"location_id": "home", "x": 0.0, "y": 0.0}
     characters = json.loads((config_dir / "characters.json").read_text(encoding="utf-8"))
-    assert characters["hero"]["chat_mode"] == "online"
+    assert characters["hero"]["chat_mode"] == "offline"
 
 
 def test_normalize_map_state_adds_new_character_to_existing_positions_file(

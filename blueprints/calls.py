@@ -154,10 +154,11 @@ def create_incoming_call_for_character(uid: int, char_id: str):
         with open(path, "r", encoding="utf-8") as handle:
             char_name = (json.load(handle).get(char_id) or {}).get("name") or char_id
         from blueprints.auth import send_push_notification
+        from core.localization import tr, user_language
         tts_enabled, _ = _call_tts_capability(uid, char_id)
         send_push_notification(
-            f"{char_name} 给你打来{'语音' if tts_enabled else ''}电话",
-            "点击接听或拒绝",
+            tr("{name} 给你打来电话", user_language(uid), name=char_name),
+            tr("点击接听或拒绝", user_language(uid)),
             url=f"/call/{call_id}",
             user_id=uid,
         )
@@ -695,6 +696,7 @@ def create_call_turn(call_id):
         call["char_id"], include_global_format=True,
         recent_messages=recent_chat, user_latest_input=transcript, user_id=uid,
         call_mode=True,
+        exclude_call_id=call_id,
     )
     call_rules = (
         "你现在正与用户进行实时一对一语音电话。只回复适合直接说出口的内容，通常 1～3 句，"
@@ -871,9 +873,23 @@ def call_transcribe(call_id):
             audio_bytes=audio_bytes,
             content_type=content_type,
             model_id="scribe_v2",
+            # Whole-recording recognition is authoritative for every call turn.
+            # Separate connection and recognition budgets. The browser starts
+            # its response timer only after the complete recording is uploaded.
+            timeout=(5, 45),
         )
     except ElevenLabsAPIError as exc:
-        return jsonify({"error": exc.user_message, "code": exc.code}), exc.http_status
+        if exc.code == "elevenlabs_empty_transcript":
+            # The acoustic watchdog can fire on noise. Resume listening instead
+            # of leaving the call paused behind a retry button for empty speech.
+            transcript = ""
+        else:
+            return jsonify({"error": exc.user_message, "code": exc.code}), exc.http_status
+    except requests.Timeout:
+        return jsonify({
+            "error": "录音识别超时，录音已保留，请重试",
+            "code": "call_recognition_timeout",
+        }), 504
     except requests.RequestException:
         return jsonify({
             "error": "无法连接 ElevenLabs，请稍后重试",

@@ -1,6 +1,7 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="{{ ui_language }}" data-ai-brand-line="{{ ui_t('ai_brand_line', brand=saki_brand) }}">
 <head>
+  {% include "ui_language_head.html" %}
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>上传角色</title>
@@ -34,7 +35,7 @@
             padding: 28px;
 
             box-shadow:
-                0 10px 30px rgba(255, 182, 185, 0.08),
+                0 10px 30px var(--primary-rgba-light),
                 0 2px 10px rgba(0,0,0,0.04);
 
             border: 1px solid rgba(255,255,255,0.6);
@@ -77,10 +78,10 @@
         input:focus,
         textarea:focus {
             background: white;
-            border-color: rgba(255,182,185,.8);
+            border-color: var(--primary-color);
 
             box-shadow:
-                0 0 0 4px rgba(255,182,185,.15);
+                0 0 0 4px var(--primary-rgba-lighter);
         }
         .avatar-upload {
             width: 110px;
@@ -90,7 +91,7 @@
             background:
                 linear-gradient(145deg,#fff,#f7f7f7);
 
-            border: 2px dashed rgba(255,182,185,0.5);
+            border: 2px dashed var(--primary-rgba-darker);
 
             display: flex;
             align-items: center;
@@ -108,18 +109,18 @@
         .avatar-upload:hover {
             transform: translateY(-2px);
             border-color: var(--primary-color);
-            box-shadow: 0 8px 24px rgba(255,182,185,.18);
+            box-shadow: 0 8px 24px var(--primary-rgba-medium);
         }
         .avatar-upload img { width: 100%; height: 100%; object-fit: cover; }
         .btn {
             background:
-                linear-gradient(135deg,#ffb6b9,#ff9ea3);
+                linear-gradient(135deg, var(--primary-color), var(--primary-dark));
 
             color: white;
             border: none;
 
             padding: 14px;
-            border-radius: 16px;
+            border-radius: 999px;
 
             width: 100%;
 
@@ -133,12 +134,12 @@
             transition: all .22s ease;
 
             box-shadow:
-                0 10px 20px rgba(255,182,185,.18);
+                0 10px 20px var(--primary-rgba-medium);
         }
         .btn:hover {
             transform: translateY(-1px);
             box-shadow:
-                0 14px 28px rgba(255,182,185,.24);
+                0 14px 28px var(--primary-rgba-strong);
         }
         .btn:active {
             transform: scale(.98);
@@ -148,13 +149,28 @@
             color: #5f6b7a;
             box-shadow: none;
         }
+        .privacy-note {
+            font-size: 12px; color: var(--text-muted); line-height: 1.6;
+            background: #f8f9fb; border: 1px solid var(--border-color);
+            border-radius: 12px; padding: 12px 14px; margin: 4px 0 0;
+        }
         .ip-suggestions-container { position: relative; }
-        .suggestions-list { position: absolute; top: 100%; left: 0; width: 100%; background: white; border: 1px solid var(--border-color); border-radius: 8px; z-index: 10; display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-        .suggestion-item { padding: 10px; cursor: pointer; font-size: 14px; display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); }
+        .suggestions-list { position: absolute; top: 100%; left: 0; width: 100%; background: white; border: 1px solid var(--border-color); border-radius: 12px; z-index: 10; display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.1); overflow: hidden; margin-top: 4px; }
+        .suggestion-item { padding: 10px 12px; cursor: pointer; font-size: 14px; display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); }
         .suggestion-item:last-child { border-bottom: none; }
-        .suggestion-item:hover { background: var(--bg-color); }
-        .header { display: flex; align-items: center; margin-bottom: 20px; }
-        .back-btn { font-size: 20px; margin-right: 15px; cursor: pointer; text-decoration: none; color: var(--text-main); }
+        .suggestion-item:hover { background: #f7f8fc; }
+        .header { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+        .header h2 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: .3px; }
+        .header p { margin: 4px 0 0; font-size: 12px; color: var(--text-muted); }
+        .back-btn {
+            width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            background: white; color: var(--text-main); font-size: 17px;
+            text-decoration: none; cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0,0,0,.06);
+            transition: transform .2s ease;
+        }
+        .back-btn:active { transform: scale(.92); }
 
         /* 关系卡片样式 */
         .rel-edit-card {
@@ -247,7 +263,13 @@
 
             <div class="form-group">
                 <label>角色名称</label>
-                <input type="text" name="name" placeholder="角色全名" required>
+                <input aria-describedby="character-name-hint" type="text" name="name" placeholder="角色全名" required>
+                <small id="character-name-hint">角色名和备注名最多可用 10 个全角字符，两个半角字符算一个。</small>
+            </div>
+            <div class="form-group">
+                <label for="square-aliases">别名（可选）</label>
+                <textarea id="square-aliases" name="aliases" rows="3" maxlength="810" placeholder="每行一个别名，最多10个，每个最多80字符"></textarea>
+                <small>可填写其他语言名称、昵称或常用译名，方便搜索。</small>
             </div>
 
             <div class="form-group" style="display: flex; gap: 15px; align-items: flex-end;">
@@ -282,8 +304,8 @@
                     <button type="button" class="btn btn-secondary" style="flex: 1; margin-top: 0;" onclick="addRelRow()">+ 添加角色关系</button>
                     <button type="button" class="btn btn-secondary" style="flex: 1; margin-top: 0;" id="ai-gen-rel-btn" onclick="aiCompleteGraph()">AI 补全关系</button>
                 </div>
-                <details style="margin-top:10px; background:#f6fff7; border:1px solid #c8e6c9; border-radius:10px; padding:10px;">
-                    <summary style="cursor:pointer; font-size:12px; font-weight:bold; color:#256029;">&#123;&#125; 粘贴 JSON 自动解析</summary>
+                <details style="margin-top:10px; background:#f8f9fb; border:1px solid var(--border-color); border-radius:12px; padding:12px;">
+                    <summary style="cursor:pointer; font-size:12px; font-weight:bold; color:var(--text-main);">&#123;&#125; 粘贴 JSON 自动解析</summary>
                     <select id="square-relation-json-mode" style="margin-top:8px; padding:5px; font-size:12px;">
                         <option value="merge">合并现有关系</option>
                         <option value="replace">覆盖现有关系</option>
@@ -305,6 +327,7 @@
                 <button type="button" class="btn btn-secondary" id="ai-gen-persona-btn" onclick="aiGeneratePersona()">AI 自动编写人设</button>
             </div>
 
+            <p class="privacy-note" role="note">{{ ui_t('发布后，登录用户可查看并保存角色名称、头像、人设、关系图谱、别名和标签。关系内容也会公开；撤回原投稿不能回收他人已保存的副本。请检查内容后确认发布。') }}</p>
             <button type="submit" class="btn" id="submit-btn">立即上传</button>
         </form>
     </div>
@@ -344,14 +367,14 @@
 
         async function loadPrivateCharacters() {
             const list = document.getElementById('private-char-list');
-            list.innerHTML = '<div style="padding:20px; text-align:center;">加载中...</div>';
+            list.innerHTML = SakiI18n.fragment('<div style="padding:20px; text-align:center;">加载中...</div>');
             try {
                 const res = await fetch('/api/square/local_characters');
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.error || '加载失败');
                 const chars = Array.isArray(data) ? data : [];
                 if (chars.length === 0) {
-                    list.innerHTML = '<div style="padding:20px; text-align:center; color:#999;">暂无私有角色</div>';
+                    list.innerHTML = SakiI18n.fragment('<div style="padding:20px; text-align:center; color:#999;">暂无私有角色</div>');
                     return;
                 }
                 list.innerHTML = '';
@@ -367,14 +390,14 @@
                     name.textContent = c.name || c.id;
                     const meta = document.createElement('div');
                     meta.style.cssText = 'font-size:12px; color:#999;';
-                    meta.textContent = `ID: ${c.id}${c.linked_square_id ? ` · 已发布为 ${c.linked_square_id}` : ''}`;
+                    meta.textContent = SakiI18n.ui`ID: ${c.id}${c.linked_square_id ? SakiI18n.ui` · 已发布为 ${c.linked_square_id}` : ''}`;
                     text.append(name, meta);
                     row.append(img, text);
                     row.addEventListener('click', () => importCharacter(c.id));
                     list.appendChild(row);
                 });
             } catch(e) {
-                list.textContent = `加载失败：${e.message || ''}`;
+                list.textContent = SakiI18n.ui`加载失败：${e.message || ''}`;
                 list.style.cssText = 'padding:20px; text-align:center; color:red;';
             }
         }
@@ -393,12 +416,12 @@
             const nameInput = document.createElement('input');
             nameInput.type = 'text';
             nameInput.className = 'rel-name';
-            nameInput.placeholder = '对方姓名';
+            nameInput.placeholder = SakiI18n.t('对方姓名');
             nameInput.value = name || '';
             const roleInput = document.createElement('input');
             roleInput.type = 'text';
             roleInput.className = 'rel-role';
-            roleInput.placeholder = '关系(如: 队友)';
+            roleInput.placeholder = SakiI18n.t('关系(如: 队友)');
             roleInput.value = role || '';
             const scoreInput = document.createElement('input');
             scoreInput.type = 'number';
@@ -406,13 +429,13 @@
             scoreInput.min = '0';
             scoreInput.max = '5';
             scoreInput.step = '0.1';
-            scoreInput.placeholder = '指数';
-            scoreInput.title = '关系指数';
+            scoreInput.placeholder = SakiI18n.t('指数');
+            scoreInput.title = SakiI18n.t('关系指数');
             scoreInput.value = score ?? 1;
             row.append(nameInput, roleInput, scoreInput);
             const description = document.createElement('textarea');
             description.className = 'rel-desc';
-            description.placeholder = '详细关系描述...';
+            description.placeholder = SakiI18n.t('详细关系描述...');
             description.value = desc || '';
             card.append(deleteButton, row, description);
             container.appendChild(card);
@@ -423,7 +446,7 @@
         function scheduleSquareRelationJsonParse() {
             if (squareRelationJsonTimer) clearTimeout(squareRelationJsonTimer);
             const status = document.getElementById('square-relation-json-status');
-            status.textContent = '正在等待输入完成…';
+            status.textContent = SakiI18n.t('正在等待输入完成…');
             status.style.color = 'var(--text-muted)';
             squareRelationJsonTimer = setTimeout(parseSquareRelationJson, 450);
         }
@@ -433,10 +456,10 @@
             const status = document.getElementById('square-relation-json-status');
             const content = textarea.value.trim();
             if (!content) {
-                status.textContent = '等待输入';
+                status.textContent = SakiI18n.t('等待输入');
                 return;
             }
-            status.textContent = '正在解析…';
+            status.textContent = SakiI18n.t('正在解析…');
             try {
                 const response = await fetch('/api/relationship/parse', {
                     method: 'POST',
@@ -465,10 +488,10 @@
                         addRelRow(name, info.role, info.score, info.description);
                     }
                 });
-                status.textContent = `✓ 已自动解析 ${Object.keys(result.graph).length} 条关系（${mode === 'replace' ? '覆盖' : '合并'}模式）`;
+                status.textContent = SakiI18n.ui`✓ 已自动解析 ${Object.keys(result.graph).length} 条关系（${mode === 'replace' ? SakiI18n.t('覆盖') : SakiI18n.t('合并')}模式）`;
                 status.style.color = '#2e7d32';
             } catch (error) {
-                status.textContent = `解析失败：${error.message}`;
+                status.textContent = SakiI18n.ui`解析失败：${error.message}`;
                 status.style.color = '#c62828';
             }
         }
@@ -528,11 +551,11 @@
                     if (data.tags) document.querySelector('[name="tags"]').value = Array.isArray(data.tags) ? data.tags.join(',') : data.tags;
                 }
                 document.getElementById('import-source-status').textContent = isEdit
-                    ? `已选择本地角色「${data.name || data.id}」。保存后将覆盖人设、头像、年龄和关系图谱；广场 ID、点赞、收藏和评论保持不变。`
-                    : `已导入本地角色「${data.name || data.id}」。`;
+                    ? SakiI18n.ui`已选择本地角色「${data.name || data.id}」。保存后将覆盖人设、头像、年龄和关系图谱；广场 ID、点赞、收藏和评论保持不变。`
+                    : SakiI18n.ui`已导入本地角色「${data.name || data.id}」。`;
                 closeImportModal();
             } catch(e) {
-                alert(`导入失败：${e.message || '未知错误'}`);
+                alert(SakiI18n.ui`导入失败：${e.message || SakiI18n.t('未知错误')}`);
             }
         }
 
@@ -560,7 +583,7 @@
                 const res = await fetch(`/api/square/search_ip?q=${encodeURIComponent(q)}`);
                 const data = await res.json();
                 if (data.length > 0) {
-                    ipSuggestions.innerHTML = data.map(item => `
+                    ipSuggestions.innerHTML = data.map(item => SakiI18n.ui`
                         <div class="suggestion-item" onclick="selectIp('${item.name}')">
                             <span>${item.name}</span>
                             <span style="color:var(--text-muted);font-size:12px;">已有${item.count}角色</span>
@@ -600,7 +623,7 @@
             const name = document.querySelector('[name="name"]').value;
             const ip = ipInput.value;
             const tags = document.querySelector('[name="tags"]').value;
-            if (!name) { alert("请先填写角色名称"); return; }
+            if (!name) { alert(SakiI18n.t("请先填写角色名称")); return; }
             
             // 获取当前已填写的关系
             const currentGraph = {};
@@ -614,7 +637,7 @@
 
             const btn = document.getElementById('ai-gen-rel-btn');
             const originalText = btn.innerText;
-            btn.innerText = "AI 正在思考关系...";
+            btn.innerText = SakiI18n.t("AI 正在思考关系...");
             btn.disabled = true;
             
             try {
@@ -623,7 +646,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'include', // 关键：强制发送 Cookie
-                    body: JSON.stringify({ name, ip, tags, current_graph: JSON.stringify(currentGraph) })
+                    body: JSON.stringify({ name, ip, tags, source_character_id: window.importedLocalCharacterId || null, current_graph: JSON.stringify(currentGraph) })
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
@@ -633,7 +656,7 @@
                             relData = JSON.parse(relData);
                         } catch(e) {
                             console.error("Malformed AI JSON:", relData);
-                            alert("AI 返回的格式不完整，请尝试再次补全或手动修改。");
+                            alert(SakiI18n.t("AI 返回的格式不完整，请尝试再次补全或手动修改。"));
                             return;
                         }
                     }
@@ -650,12 +673,12 @@
                         
                         const item = document.createElement('div');
                         item.style.cssText = "background:#f8f9fb; padding:12px; border-radius:12px; border-left:4px solid var(--primary-color); margin-bottom:10px;";
-                        item.innerHTML = `
+                        item.innerHTML = SakiI18n.ui`
                             <div style="font-size:14px; font-weight:700; margin-bottom:4px; display:flex; justify-content:space-between;">
                                 <span>👤 ${n} <small style="background:var(--primary-rgba-light); color:var(--primary-dark); padding:1px 4px; border-radius:4px; margin-left:4px;">${role}</small></span>
                                 <span style="font-size:11px; color:#999;">指数: ${score}</span>
                             </div>
-                            <div style="font-size:13px; color:#666; line-height:1.4;">${desc}</div>
+                            <div data-model-output style="font-size:13px; color:#666; line-height:1.4;">${desc}</div>
                         `;
                         previewContainer.appendChild(item);
                     }
@@ -677,10 +700,10 @@
                     };
 
                 } else {
-                    alert("AI 补全失败: " + data.error);
+                    alert(SakiI18n.t("AI 补全失败: ") + data.error);
                 }
             } catch(e) {
-                alert("请求失败，请检查网络");
+                alert(SakiI18n.t("请求失败，请检查网络"));
             } finally {
                 btn.innerText = originalText;
                 btn.disabled = false;
@@ -690,11 +713,11 @@
         async function aiGeneratePersona() {
             const name = document.querySelector('[name="name"]').value;
             const ip = ipInput.value;
-            if (!name) { alert("请先填写角色名称"); return; }
+            if (!name) { alert(SakiI18n.t("请先填写角色名称")); return; }
             
             const btn = document.getElementById('ai-gen-persona-btn');
             const originalText = btn.innerText;
-            btn.innerText = "AI 正在编写人设...";
+            btn.innerText = SakiI18n.t("AI 正在编写人设...");
             btn.disabled = true;
             
             try {
@@ -703,6 +726,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         char_name: name,
+                        char_id: window.importedLocalCharacterId || null,
                         source_ip: ip,
                         existing_persona: document.getElementById('base-persona').value,
                         web_search: document.getElementById('persona-web-search').checked
@@ -727,7 +751,7 @@
                             link.href = source.url;
                             link.target = '_blank';
                             link.rel = 'noopener noreferrer';
-                            link.textContent = source.title || `来源 ${index + 1}`;
+                            link.textContent = source.title || SakiI18n.ui`来源 ${index + 1}`;
                             link.style.marginRight = '8px';
                             sourceList.appendChild(link);
                         });
@@ -741,11 +765,12 @@
                     } else {
                         document.getElementById('base-persona').value = JSON.stringify(content, null, 2);
                     }
+                    window.SakiModelDisplay?.preview(document.getElementById('base-persona'));
                 } else {
-                    alert("AI 生成失败: " + data.error);
+                    alert(SakiI18n.t("AI 生成失败: ") + data.error);
                 }
             } catch(e) {
-                alert("请求失败，请检查网络");
+                alert(SakiI18n.t("请求失败，请检查网络"));
             } finally {
                 btn.innerText = originalText;
                 btn.disabled = false;
@@ -757,10 +782,11 @@
             const params = new URLSearchParams(window.location.search);
             const isEdit = params.get('mode') === 'edit';
             
+            if (!confirm(SakiI18n.t("发布后，登录用户可查看并保存角色名称、头像、人设、关系图谱、别名和标签。关系内容也会公开；撤回原投稿不能回收他人已保存的副本。请检查内容后确认发布。"))) return;
             serializeRelGraph(); // 提交前序列化关系图谱
             
             const submitBtn = document.getElementById('submit-btn');
-            submitBtn.innerText = "上传中...";
+            submitBtn.innerText = SakiI18n.t("上传中...");
             submitBtn.disabled = true;
 
             const formData = new FormData(e.target);
@@ -786,20 +812,20 @@
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
-                    alert(isEdit ? "修改成功！" : "上传成功！");
+                    alert(isEdit ? SakiI18n.t("修改成功！") : SakiI18n.t("上传成功！"));
                     if (isEdit) localStorage.removeItem('edit_square_char');
                     location.href = isEdit ? `/square/character/${formData.get('id')}` : '/square';
                 } else if (data.status === 'already_published' && data.square_id) {
-                    if (confirm('该本地角色已经发布。是否前往原作品进行更新？')) {
+                    if (confirm(SakiI18n.t('该本地角色已经发布。是否前往原作品进行更新？'))) {
                         location.href = `/square/character/${encodeURIComponent(data.square_id)}`;
                     }
                 } else {
-                    alert("操作失败: " + data.error);
+                    alert(SakiI18n.t("操作失败: ") + data.error);
                 }
             } catch(e) {
-                alert("发生错误");
+                alert(SakiI18n.t("发生错误"));
             } finally {
-                submitBtn.innerText = isEdit ? "保存修改" : "立即上传";
+                submitBtn.innerText = isEdit ? SakiI18n.t("保存修改") : SakiI18n.t("立即上传");
                 submitBtn.disabled = false;
             }
         };
@@ -816,10 +842,10 @@
                 const dataStr = localStorage.getItem('edit_square_char');
                 if (dataStr) {
                     const data = JSON.parse(dataStr);
-                    document.getElementById('page-title').innerText = '编辑作品';
-                    document.getElementById('page-desc').innerText = '修改已发布在广场的作品';
-                    document.getElementById('import-local-btn').innerText = '从本地角色重新同步';
-                    document.getElementById('submit-btn').innerText = '保存修改';
+                    document.getElementById('page-title').innerText = SakiI18n.t('编辑作品');
+                    document.getElementById('page-desc').innerText = SakiI18n.t('修改已发布在广场的作品');
+                    document.getElementById('import-local-btn').innerText = SakiI18n.t('从本地角色重新同步');
+                    document.getElementById('submit-btn').innerText = SakiI18n.t('保存修改');
                     
                     // 填充数据
                     const idInput = document.getElementById('id-input-field');
@@ -828,6 +854,7 @@
                     idInput.style.background = '#f1f3f5';
                     
                     document.querySelector('[name="name"]').value = data.name;
+                    document.querySelector('[name="aliases"]').value = (Array.isArray(data.aliases) ? data.aliases : []).join('\n');
                     document.querySelector('[name="age"]').value = data.age ?? '';
                     document.getElementById('no_age_increase').checked = !!data.no_age_increase;
                     document.getElementById('ip-input').value = data.ip || '';
@@ -849,7 +876,7 @@
                     // 人设
                     document.getElementById('base-persona').value = data.base_persona || '';
                     if (data.source_character_id) {
-                        document.getElementById('import-source-status').textContent = `当前关联本地角色：${data.source_character_id}`;
+                        document.getElementById('import-source-status').textContent = SakiI18n.ui`当前关联本地角色：${data.source_character_id}`;
                     }
                     
                     // 关系图谱

@@ -1,10 +1,11 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="{{ ui_language }}" data-ai-brand-line="{{ ui_t('ai_brand_line', brand=saki_brand) }}">
 <head>
+  {% include "ui_language_head.html" %}
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#fff3f8">
-  <title>{% block title %}协议与隐私{% endblock %} | Kunigami</title>
+  <title>{% block title %}协议与隐私{% endblock %} | {{ saki_brand }}</title>
   <link rel="manifest" href="/manifest.json">
   <style>
     :root {
@@ -57,8 +58,8 @@
 <body>
   <header class="topbar">
     <a class="brand" href="/">
-      <img src="/static/logo.png" alt="Kunigami" onerror="this.src='/static/default_avatar.png'">
-      <span>Kunigami</span>
+      <img src="/static/logo.png" alt="{{ saki_brand }}" onerror="this.src='/static/default_avatar.png'">
+      <span>{{ saki_brand }}</span>
     </a>
     <nav class="top-links" aria-label="协议页面导航">
       <a href="/terms">用户协议</a>
@@ -68,11 +69,17 @@
   </header>
   <main>
     <article>
-      <h1>{{ document.title }}</h1>
-      <div class="meta">版本 {{ document.version }} · 生效日期：{{ document.effective_date }}</div>
+      <h1>{{ ui_t(document.title) }}</h1>
+      <div class="meta">{{ ui_t('版本 {version} · 更新日期：{date}', version=document.version, date=document.updated_date) }}</div>
+      {% if document.status == 'review' %}
+      <div class="notice" id="legal-review-notice" role="note">
+        <strong>{{ ui_t('海外版审阅稿 · 尚未正式生效') }}</strong><br>
+        {{ ui_t('本页供运营者确认，必要部分须经专业审核后再正式上线。待确认事项不作为已核实的事实或已经生效的约定。') }}
+      </div>
+      {% endif %}
       {% block content %}{% endblock %}
     </article>
-    <footer>如有疑问，请联系 yyyyanshuo@foxmail.com</footer>
+    <footer>{{ ui_t('海外版审阅稿 · 尚未正式生效') }}</footer>
   </main>
 </body>
 </html>

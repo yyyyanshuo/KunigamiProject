@@ -46,6 +46,7 @@ def test_force_short_rebuild_keeps_external_sources_and_beijing_early_hours(tmp_
         (2, "assistant", "凌晨回复", "2026-08-07 00:31:00"),
         (3, "assistant", "[THOUGHTS]\n睡前日记\n[/THOUGHTS]", "2026-08-07 04:29:00"),
         (4, "user", "下午发生的事情", "2026-08-07 13:00:00"),
+        (5, "user", "（系统提示：下午的约定地点改为图书馆。）", "2026-08-07 13:01:00"),
     ])
     _write_json(short_file, {
         "2026-08-07": {
@@ -63,25 +64,27 @@ def test_force_short_rebuild_keeps_external_sources_and_beijing_early_hours(tmp_
 
     def fake_summary(source, *_args, **_kwargs):
         calls.append(source)
-        assert "[THOUGHTS]" not in source
         if "00:30" in source:
             return "- [00:30] 凌晨的重要事件"
-        return "- [13:00] 下午的重要事件"
+        if "[THOUGHTS]" in source:
+            return "- [04:29] 我在睡前日记中回顾了自己的感受。"
+        assert "System: （系统提示：下午的约定地点改为图书馆。）" in source
+        return "- [13:00] 下午的约定地点改为了图书馆。"
 
     monkeypatch.setattr(memory, "call_ai_to_summarize", fake_summary)
     result = memory.update_short_memory_for_date("rin", "2026-08-07", force_reset=True)
 
     assert result.status == "success"
-    assert len(calls) == 2
+    assert len(calls) == 3
     saved = json.loads(short_file.read_text(encoding="utf-8"))["2026-08-07"]
-    assert saved["last_id"] == 4
+    assert saved["last_id"] == 5
     texts = [event["event"] for event in saved["events"]]
     assert "凌晨的重要事件" in texts
-    assert "下午的重要事件" in texts
+    assert "下午的约定地点改为了图书馆。" in texts
     assert "[朋友圈] 发了一条动态" in texts
     assert "[群聊:测试群] 讨论行程" in texts
     assert "手工输入内容" not in texts
-    assert all("睡前日记" not in text for text in texts)
+    assert "我在睡前日记中回顾了自己的感受。" in texts
 
 
 def test_force_short_rebuild_without_private_messages_clears_only_private_entries(
@@ -220,6 +223,7 @@ def test_short_retries_truncation_and_format_before_atomic_commit(tmp_path, monk
     assert saved["events"] == [{
         "time": "09:00",
         "event": "用户提出并完成了一件需要记录的事情。",
+        "timestamp": "2026-08-07T09:00:00+08:00",
     }]
 
 
@@ -316,6 +320,8 @@ def test_gemini_combines_all_text_parts_and_marks_truncation(monkeypatch):
                 }]
             }
 
+    # Exercise the provider parser using the mocked HTTP transport, even in offline mode.
+    monkeypatch.setattr(ai_client, "LOCAL_TEST", False)
     monkeypatch.setattr(ai_client, "get_effective_gemini_key", lambda **_kwargs: "test-key")
     monkeypatch.setattr(ai_client.requests, "post", lambda *_args, **_kwargs: Response())
     monkeypatch.setattr(ai_client, "log_full_prompt", lambda *_args, **_kwargs: None)
@@ -347,6 +353,8 @@ def test_gemini_honors_task_specific_max_output_tokens(monkeypatch):
         captured.update(kwargs["json"])
         return Response()
 
+    # Exercise the provider parser using the mocked HTTP transport, even in offline mode.
+    monkeypatch.setattr(ai_client, "LOCAL_TEST", False)
     monkeypatch.setattr(ai_client, "get_effective_gemini_key", lambda **_kwargs: "test-key")
     monkeypatch.setattr(ai_client.requests, "post", fake_post)
     monkeypatch.setattr(ai_client, "log_full_prompt", lambda *_args, **_kwargs: None)
@@ -368,6 +376,8 @@ def test_gemini_timeout_is_structured_and_not_automatically_retried(monkeypatch)
         calls.append(kwargs)
         raise ai_client.requests.exceptions.Timeout("read timed out")
 
+    # Exercise the provider parser using the mocked HTTP transport, even in offline mode.
+    monkeypatch.setattr(ai_client, "LOCAL_TEST", False)
     monkeypatch.setattr(ai_client, "get_effective_gemini_key", lambda **_kwargs: "test-key")
     monkeypatch.setattr(ai_client.requests, "post", fake_post)
 
@@ -408,6 +418,8 @@ def test_only_gemini_503_is_automatically_retried(monkeypatch):
         calls.append(1)
         return Response(next(statuses))
 
+    # Exercise the provider parser using the mocked HTTP transport, even in offline mode.
+    monkeypatch.setattr(ai_client, "LOCAL_TEST", False)
     monkeypatch.setattr(ai_client, "get_effective_gemini_key", lambda **_kwargs: "test-key")
     monkeypatch.setattr(ai_client.requests, "post", fake_post)
     monkeypatch.setattr(ai_client.time, "sleep", sleeps.append)
@@ -433,6 +445,8 @@ def test_gemini_500_is_returned_without_automatic_retry(monkeypatch):
         calls.append(1)
         return Response()
 
+    # Exercise the provider parser using the mocked HTTP transport, even in offline mode.
+    monkeypatch.setattr(ai_client, "LOCAL_TEST", False)
     monkeypatch.setattr(ai_client, "get_effective_gemini_key", lambda **_kwargs: "test-key")
     monkeypatch.setattr(ai_client.requests, "post", fake_post)
     monkeypatch.setattr(ai_client, "log_api_error", lambda *_args, **_kwargs: None)
@@ -791,13 +805,13 @@ def test_memory_page_uses_character_database_and_beijing_dates():
     chat_source = (root / "blueprints" / "chat.py").read_text(encoding="utf-8")
     template = (root / "templates" / "memory.html").read_text(encoding="utf-8")
     save_block = chat_source.split("def save_prompt_file", 1)[1].split("def search_messages", 1)[0]
-    assert "sqlite3.connect(db_path)" in save_block
+    assert "save_memory_edits(key, path, db_path, payload)" in save_block
     assert "sqlite3.connect(DATABASE_FILE)" not in save_block
     assert "function beijingDateString" in template
     assert "toISOString().split('T')[0]" not in template
 
 
-def test_rebuild_script_collects_and_summarizes_each_moment_action(tmp_path, monkeypatch):
+def test_rebuild_script_restores_full_moment_actions_without_model(tmp_path, monkeypatch):
     root = Path(__file__).resolve().parents[1]
     script_path = root / "scripts" / "rebuild_memory_day.py"
     spec = importlib.util.spec_from_file_location("rebuild_memory_day_test", script_path)
@@ -824,10 +838,15 @@ def test_rebuild_script_collects_and_summarizes_each_moment_action(tmp_path, mon
     }, {
         "char_id": "sae",
         "timestamp": "2026-08-07 18:00:00",
-        "content": "試合",
+        "content": "試合" * 200 + "\n[IMAGE](match.jpg)(試合終了)",
         "comments": [{
+            "commenter_id": "sae",
+            "timestamp": "2026-08-07 19:00:00",
+            "content": "上游评论" * 100 + "\n末行",
+        }, {
             "commenter_id": "rin",
             "timestamp": "2026-08-07 20:00:00",
+            "reply_to": "sae",
             "content": "知るか",
         }],
     }])
@@ -836,11 +855,12 @@ def test_rebuild_script_collects_and_summarizes_each_moment_action(tmp_path, mon
 
     actions = module._moment_actions(1, "rin", "2026-08-07")
     assert [action["time"] for action in actions] == ["13:30", "15:30", "20:00"]
-    monkeypatch.setattr(
-        module,
-        "call_ai_to_summarize",
-        lambda context, *_args, **_kwargs: f"已总结：{context[:12]}",
-    )
-    events = module._summarize_moment_actions(actions, "rin", 1)
+    def fail_model(*args, **kwargs):
+        raise AssertionError("Moments memory must not call a model")
+    monkeypatch.setattr(memory, "call_ai_to_summarize", fail_model)
+    events = module._moment_events(actions)
     assert len(events) == 3
     assert all(event["event"].startswith("[朋友圈]") for event in events)
+    assert "試合" * 200 + "\n[IMAGE](match.jpg)(試合終了)" in events[-1]["event"]
+    assert "上游评论" * 100 + "\n末行" in events[-1]["event"]
+    assert "知るか" in events[-1]["event"]

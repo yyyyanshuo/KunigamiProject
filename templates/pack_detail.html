@@ -1,6 +1,7 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="{{ ui_language }}" data-ai-brand-line="{{ ui_t('ai_brand_line', brand=saki_brand) }}">
 <head>
+  {% include "ui_language_head.html" %}
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>{{ name }} - 表情包</title>
@@ -234,7 +235,7 @@ body {
     {% endfor %}
   </div>
 
-  <div class="footer">作者：{{ author }}</div>
+  <div class="footer">{{ ui_t('作者') }}：{{ author }}</div>
 
   <script type="application/json" id="pack-detail-data">{{ { 'packId': pack_id, 'fromChar': from_char | default('', true), 'fromGroup': from_group | default('0', true), 'added': added | default(false, true) } | tojson }}</script>
   <script>
@@ -256,13 +257,13 @@ body {
         });
         const data = await r.json();
         if (data.status === 'success') {
-          btn.textContent = '已添加';
+          btn.textContent = SakiI18n.t('已添加');
           btn.disabled = true;
         } else {
-          alert(data.message || '添加失败');
+          alert(data.message || SakiI18n.t('添加失败'));
         }
       } catch (e) {
-        alert('添加失败');
+        alert(SakiI18n.t('添加失败'));
       }
     };
 
@@ -271,7 +272,7 @@ body {
       if (!cell) return;
       const path = cell.dataset.path;
       if (!path) return;
-      const content = '[表情]' + path;
+      const content = '[STICKER]' + path;
       if (!fromChar) {
         if (history.length > 1) history.back();
         else window.location.href = '/contacts';

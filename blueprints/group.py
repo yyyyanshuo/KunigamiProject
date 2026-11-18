@@ -1,3 +1,10 @@
+from contextlib import closing
+from core.message_tags import canonicalize_message_tags
+from services.memory_store import memory_now
+from services.memory_store import (memory_timezone, memory_now, memory_day_bounds, load_calendar_memory, memory_row_is_covered, dated_memory_event, split_memory_clock_epochs)
+from core.languages import group_language, normalize_language
+from core.runtime import LOCAL_TEST
+from core.runtime import DATA_ROOT
 import os
 import time
 import json
@@ -20,15 +27,17 @@ from core.config import GROUPS_DIR, USERS_ROOT, BASE_DIR
 from core.context import get_current_user_id, set_background_user
 from core.circuit_breaker import get_circuit_breaker_info
 from core.system_messages import is_system_prompt_message
-from services.read_state import remove_read_state
+from services.read_state import chat_poll_header, remove_read_state
 from core.time_utils import (
     beijing_now,
     get_character_timezone,
     get_zone,
     parse_beijing_timestamp,
+    format_prompt_time,
     utc_now,
 )
 from core.utils import (
+    GROUP_NAME_HINT, GROUP_NAME_LIMIT, name_fits, locked_group_catalog,
     get_paths,
     safe_save_json,
     _get_characters_config_file,
@@ -86,16 +95,13 @@ def _group_circuit_breaker_response(user_msg_id=None, memory_sync_warning=None, 
 
 # ==================== 群聊路径与辅助函数 ====================
 
-def get_group_dir(group_id: str) -> str:
-    """
-    获取群聊目录路径。
-    如有登录用户，则使用 users/<user_id>/groups/<group_id>/ 作为工作目录；
-    否则使用全局 GROUPS_DIR/<group_id>。
-    """
-    user_id = get_current_user_id()
-    if user_id:
-        return os.path.join(USERS_ROOT, str(user_id), "groups", group_id)
-    return os.path.join(GROUPS_DIR, group_id)
+from werkzeug.exceptions import NotFound
+
+
+def get_group_dir(group_id: str, user_id=None) -> str:
+    from core.user_resources import require_owned_group
+    user_id = get_current_user_id() if user_id is None else user_id
+    return str(require_owned_group(group_id, user_id=user_id))
 
 
 def extract_group_recent_messages_with_labels(group_id, limit=20) -> list:
@@ -215,6 +221,7 @@ def distribute_group_memory(
     *,
     replace=False,
     target_member_ids=None,
+    strict=False,
 ):
     """
     将群聊新生成的事件，追加到每个成员的 6_memory_group_log.json 中
@@ -242,6 +249,7 @@ def distribute_group_memory(
             for event in new_events:
                 clean_event_text = event['event'].replace('AI生成信息发送的内容', '').strip()
                 prepared.append({
+                    **event,
                     "time": event['time'],
                     "event": f"[群聊:{group_name}] {clean_event_text}",
                 })
@@ -251,13 +259,16 @@ def distribute_group_memory(
                     date_str,
                     f"[群聊:{group_name}]",
                     prepared,
+                    source_timezone=memory_timezone(),
                 )
             else:
-                count_added = append_short_memory_events(short_file, date_str, prepared)
+                count_added = append_short_memory_events(short_file, date_str, prepared, source_timezone=memory_timezone())
             if count_added:
                 print(f"     -> [{char_id}] 合并成功 (+{count_added}条)")
 
         except Exception as e:
+            if strict:
+                raise
             print(f"     ❌ 同步给 [{char_id}] 失败: {e}")
 
 
@@ -292,7 +303,7 @@ def sync_memory_before_group_chat(group_id):
     except Exception:
         members = []
 
-    now = beijing_now()
+    now = memory_now()
     today_str = now.strftime("%Y-%m-%d")
     yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
     dates = [yesterday_str, today_str]
@@ -362,11 +373,16 @@ def _get_group_chat_bg_config_file(group_id):
     return os.path.join(group_dir, "chat_bg_config.json")
 
 
+class GroupMemoryConflict(RuntimeError):
+    pass
+
+
 def _update_group_short_memory_locked(
     group_id,
     target_date_str,
     force_reset=False,
     distribute_member_ids=None,
+    *, scheduled=False,
 ):
     from services.memory import (
         _pack_conversation_sessions,
@@ -394,49 +410,59 @@ def _update_group_short_memory_locked(
     members = group_info.get("members", [])
 
     # 3. 读取现有群记忆 (获取 last_id)
-    current_data = load_json_object(memory_file)
+    zone = memory_timezone()
+    with memory_file_lock(memory_file):
+        current_data = load_calendar_memory(memory_file, zone)
 
-    day_data = current_data.get(target_date_str, {})
-    # 兼容处理：如果是列表转字典
-    if isinstance(day_data, list):
-        existing_events = day_data
-        last_id = 0
-    else:
-        existing_events = day_data.get("events", [])
-        last_id = day_data.get("last_id", 0)
+        day_data = current_data.get(target_date_str, {})
+        # 兼容处理：如果是列表转字典
+        def deliver_pending():
+            delivery = day_data.get("pending_distribution")
+            if delivery:
+                distribute_group_memory(group_id, delivery["name"], members, delivery["events"],
+                                        target_date_str, target_member_ids=delivery["members"], strict=True)
+                del day_data["pending_distribution"]
+                atomic_write_json(memory_file, current_data)
 
-    # 4. 查询群数据库
-    if not os.path.exists(db_path): return 0, []
+        if isinstance(day_data, dict):
+            deliver_pending()
+        if isinstance(day_data, list):
+            existing_events = day_data
+            last_id = 0
+        else:
+            existing_events = day_data.get("events", [])
+            last_id = day_data.get("last_id", 0)
 
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    start_time = f"{target_date_str} 00:00:00"
-    end_time = f"{target_date_str} 23:59:59"
+        # 4. 查询群数据库
+        if not os.path.exists(db_path): return 0, []
 
-    # Normal runs read only unsummarized messages. A targeted rebuild reads the
-    # complete date once and replaces this group's prior event summaries.
-    cursor.execute(
-        "SELECT id, timestamp, role, content FROM messages "
-        "WHERE timestamp >= ? AND timestamp <= ? AND id > ? ORDER BY id ASC",
-        (start_time, end_time, 0 if force_reset else last_id),
-    )
-    rows = cursor.fetchall()
-    conn.close()
+        start_time, end_time = memory_day_bounds(target_date_str, zone)
+        def read_rows():
+            with closing(sqlite3.connect(db_path)) as conn:
+                rows = conn.execute(
+                    "SELECT id, timestamp, role, content FROM messages "
+                    "WHERE timestamp >= ? AND timestamp < ? AND id > ? ORDER BY id ASC",
+                    (start_time, end_time, 0 if force_reset else last_id),
+                ).fetchall()
+            if not force_reset and isinstance(day_data, dict):
+                rows = [r for r in rows if not memory_row_is_covered(r, day_data)]
+            return rows
 
-    if not rows:
-        if force_reset:
-            current_data[target_date_str] = {"events": [], "last_id": 0}
-            atomic_write_json(memory_file, current_data)
-            distribute_group_memory(
-                group_id,
-                group_name,
-                members,
-                [],
-                target_date_str,
-                replace=True,
-                target_member_ids=distribute_member_ids,
-            )
-        return 0, []
+        rows = read_rows()
+        if not rows:
+            if force_reset:
+                current_data[target_date_str] = {"events": [], "last_id": 0, "timezone": zone}
+                atomic_write_json(memory_file, current_data)
+                distribute_group_memory(
+                    group_id,
+                    group_name,
+                    members,
+                    [],
+                    target_date_str,
+                    replace=True,
+                    target_member_ids=distribute_member_ids,
+                )
+            return 0, []
 
     # 5. 拼接文本 (需要转换 role ID 为名字)
     # 加载名字映射 (使用 per-user 配置)
@@ -450,21 +476,22 @@ def _update_group_short_memory_locked(
 
     def render_row(row):
         _, ts, role, content = row
-        time_part = ts.split(' ')[1][:5]
-        name = "ユーザー" if role == "user" else id_to_name.get(role, role)
+        from core.time_utils import parse_beijing_timestamp
+        time_part = parse_beijing_timestamp(ts).astimezone(get_zone(zone)).strftime("%H:%M")
+        if role == "system" or is_system_prompt_message(content):
+            name = "System"
+        else:
+            name = "ユーザー" if role == "user" else id_to_name.get(role, role)
         return f"[{time_part}] {name}: {content}\n"
 
-    source_rows = [row for row in rows if not is_system_prompt_message(row[3])]
-    sessions = _split_conversation_sessions(source_rows)
     new_max_id = max(row[0] for row in rows)
-
     new_events = []
-    chunks = list(_pack_conversation_sessions(
-        sessions,
-        max_items=36,
-        max_chars=12000,
-        render=render_row,
-    ))
+    chunks = []
+    for epoch in split_memory_clock_epochs(rows, zone):
+        chunks.extend(_pack_conversation_sessions(
+            _split_conversation_sessions(epoch), max_items=36,
+            max_chars=12000, render=render_row,
+        ))
     for index, chunk in enumerate(chunks, start=1):
         chunk_rows = [row for session in chunk for row in session]
         source = "\n\n--- 会话段结束 / conversation segment ended ---\n\n".join(
@@ -475,6 +502,7 @@ def _update_group_short_memory_locked(
             source,
             "group_log",
             "system",
+            language=group_language(group_id),
             validator=_parse_short_summary_detailed,
         )
         if not summary_result.ok:
@@ -482,41 +510,62 @@ def _update_group_short_memory_locked(
                 f"   [Group Memory] 第 {index}/{len(chunks)} 批"
                 f"{summary_result.status}: {summary_result.message}，游标未推进"
             )
+            if scheduled:
+                raise ValueError("group summary incomplete")
             return 0, []
         batch_events = summary_result.parsed
         if not _short_summary_is_compressed(chunk_rows, batch_events):
             print(f"   [Group Memory] 第 {index}/{len(chunks)} 批未形成完整事件，游标未推进")
+            if scheduled:
+                raise ValueError("group summary incomplete")
             return 0, []
-        new_events.extend(batch_events)
+        new_events.extend(dated_memory_event(target_date_str, e, zone, chunk_rows) for e in batch_events)
 
-    # 8. 保存到群聊记忆 (追加模式)
-    final_events = new_events if force_reset else existing_events + new_events
+    with memory_file_lock(memory_file):
+        latest = load_calendar_memory(memory_file, zone)
+        # Newly appended messages belong to the next incremental run.
+        if (latest.get(target_date_str) != current_data.get(target_date_str)
+                or [row for row in read_rows() if row[0] <= new_max_id] != rows
+                or load_json_object(groups_cfg).get(group_id) != group_info):
+            raise GroupMemoryConflict("生成期间群记忆已更新，请刷新后重试。")
+        current_data = latest
+        # 8. 保存到群聊记忆 (追加模式)
+        final_events = new_events if force_reset else existing_events + new_events
 
-    # 如果是重置模式(last_id=0)，且原本有数据，这里可以加去重逻辑(类似单人)，这里暂略，直接追加
+        # 如果是重置模式(last_id=0)，且原本有数据，这里可以加去重逻辑(类似单人)，这里暂略，直接追加
 
-    current_data[target_date_str] = {
-        "events": final_events,
-        "last_id": new_max_id
-    }
+        current_data[target_date_str] = {
+            "events": final_events,
+            "last_id": new_max_id,
+            "coverage": [] if force_reset else day_data.get("coverage", []) if isinstance(day_data, dict) else [],
+            "timezone": zone,
+        }
 
-    atomic_write_json(memory_file, current_data)
+        if scheduled and new_events:
+            day_data = current_data[target_date_str]
+            day_data["pending_distribution"] = {"members": members, "name": group_name, "events": new_events}
+            atomic_write_json(memory_file, current_data)
+            deliver_pending()
+            return len(new_events), new_events
 
-    # ================= 关键修复点 =================
-    # 9. 【必须】调用分发函数，传给个人
-    if new_events or force_reset:
-        print(f"--- [Sync] 开始同步群聊记忆到个人文件 ---")
-        distribute_group_memory(
-            group_id,
-            group_name,
-            members,
-            new_events,
-            target_date_str,
-            replace=force_reset,
-            target_member_ids=distribute_member_ids,
-        )
-    # ============================================
+        atomic_write_json(memory_file, current_data)
 
-    return len(new_events), new_events
+        # ================= 关键修复点 =================
+        # 9. 【必须】调用分发函数，传给个人
+        if new_events or force_reset:
+            print(f"--- [Sync] 开始同步群聊记忆到个人文件 ---")
+            distribute_group_memory(
+                group_id,
+                group_name,
+                members,
+                new_events,
+                target_date_str,
+                replace=force_reset,
+                target_member_ids=distribute_member_ids,
+            )
+        # ============================================
+
+        return len(new_events), new_events
 
 
 def update_group_short_memory(
@@ -524,16 +573,19 @@ def update_group_short_memory(
     target_date_str,
     force_reset=False,
     distribute_member_ids=None,
+    *, scheduled=False,
 ):
     """Serialize group summarization across web workers and the scheduler."""
     group_dir = get_group_dir(group_id)
     memory_file = os.path.join(group_dir, "memory_short.json")
-    with memory_file_lock(memory_file):
+    # Only competing generators wait for the model. Editors use the data lock.
+    with memory_file_lock(memory_file + ".generation"):
         return _update_group_short_memory_locked(
             group_id,
             target_date_str,
             force_reset=force_reset,
             distribute_member_ids=distribute_member_ids,
+            scheduled=scheduled,
         )
 
 
@@ -552,7 +604,7 @@ def group_chat_view(group_id):
 
 @group_bp.route("/memory/group/<group_id>")
 def group_memory_view(group_id):
-    return render_template("group_memory.html")
+    return render_template("group_memory.html", memory_timezone=memory_timezone())
 
 
 # ==================== 群聊历史 / 聊天接口 ====================
@@ -565,16 +617,37 @@ def get_group_history(group_id):
     target_id = request.args.get('target_id', type=int)
     before_id = request.args.get('before_id', type=int)
     after_id = request.args.get('after_id', type=int)
+    target_date = request.args.get('target_date')
+    date_bounds = None
+    if target_date is not None:
+        from services.chat_history import history_date_bounds, find_date_message_id
+        from core.time_utils import get_user_timezone
+        from core.utils import _load_user_settings
+        if any(key in request.args for key in ('target_id', 'before_id', 'after_id')):
+            return jsonify({"error": "conflicting_history_target"}), 400
+        try:
+            date_bounds = history_date_bounds(target_date, get_user_timezone(_load_user_settings()))
+        except ValueError:
+            return jsonify({"error": "invalid_target_date"}), 400
 
     # 使用多用户命名空间下的群聊目录
     group_dir = get_group_dir(group_id)
+    extra = {}
+    header_mode = request.args.get('header')
+    if header_mode in ('1', 'only'):
+        extra['header'] = chat_poll_header(get_current_user_id(), _get_read_status_file(), current=('group', group_id))
+        if header_mode == 'only':
+            return jsonify(extra)
     db_path = os.path.join(group_dir, "chat.db")
     if not os.path.exists(db_path):
-        return jsonify({"messages": [], "total": 0})
+        return jsonify({**extra, "messages": [], "total": 0, "target_id": None, "has_before": False, "has_after": False})
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+
+    if date_bounds is not None:
+        target_id = find_date_message_id(cursor, date_bounds)
 
     messages = []
 
@@ -601,39 +674,45 @@ def get_group_history(group_id):
         after_msgs = [dict(row) for row in cursor.fetchall()]
         messages = before_msgs + target_msgs + after_msgs
 
+    # A date without messages must not fall back to the latest conversation.
+    elif date_bounds is not None:
+        messages = []
+
     # C. 默认加载
     else:
         cursor.execute("SELECT id, role, content, timestamp FROM messages ORDER BY id DESC LIMIT ?", (limit,))
         messages = [dict(row) for row in cursor.fetchall()][::-1]
 
     # 将 [表情]名称 解析为 [表情]path（搜索含该名称的表情→随机选一个地址）并写回 DB，刷新后不变，打开编辑时看到的也是改好的 path
-    for m in messages:
-        new_content = _sticker_content_from_ai(m["content"])
-        if new_content != m["content"]:
-            cursor.execute("UPDATE messages SET content = ? WHERE id = ?", (new_content, m["id"]))
-            m["content"] = new_content
-    conn.commit()
 
-    cursor.execute("SELECT COUNT(id) FROM messages")
-    total = cursor.fetchone()[0]
+    # Separate aggregates let SQLite use its fast count and primary-key endpoints.
+    cursor.execute(
+        "SELECT (SELECT COUNT(*) FROM messages), "
+        "(SELECT MIN(id) FROM messages), (SELECT MAX(id) FROM messages)"
+    )
+    total, first_id, last_id = cursor.fetchone()
     conn.close()
 
-    # 日语注音处理（不写回DB）
+    # 用户和角色消息使用同一显示策略；注音不写回 DB。
     for m in messages:
-        sender_role = m.get("role")
-        # 用户消息遵循群语言（未设置时使用用户全局语言）。
-        target_id = None if sender_role == "user" else sender_role
-        if get_ai_language(target_id, group_id=group_id) == "ja":
-            m["content"] = _add_furigana_to_japanese(m["content"])
+        m["raw_content"] = m["content"]
+        m["content"] = _add_furigana_to_japanese(m["content"])
 
-    return jsonify({"messages": messages, "total": total})
+    return jsonify({
+        **extra,
+        "messages": messages,
+        "total": total,
+        "target_id": target_id,
+        "has_before": bool(messages and first_id < messages[0]["id"]),
+        "has_after": bool(messages and last_id > messages[-1]["id"]),
+    })
 
 
 # --- 用户消息先落库：立即返回真实 ID，再由聊天接口生成回复 ---
 @group_bp.route("/api/group/<group_id>/messages", methods=["POST"])
 def create_group_user_message(group_id):
     data = request.json or {}
-    user_msg = str(data.get("message", "")).strip()
+    user_msg = canonicalize_message_tags(str(data.get("message", "")).strip())
     if not user_msg:
         return jsonify({"error": "empty message"}), 400
 
@@ -699,7 +778,7 @@ def group_chat(group_id):
 
     # 1. 基础准备
     data = request.json or {}
-    user_msg = data.get("message", "").strip()
+    user_msg = canonicalize_message_tags(data.get("message", "").strip())
     if not user_msg: return jsonify({"error": "empty"}), 400
     # 获取 user_id 用于后续 relay
     user_id = get_current_user_id()
@@ -1022,9 +1101,9 @@ def group_chat(group_id):
                     row['timestamp']
                 ).astimezone(now_dt.tzinfo)
                 if show_full_date:
-                    ts_str = dt_obj.strftime('[%m-%d %H:%M]')
+                    ts_str = '[' + format_prompt_time(dt_obj, '%m-%d %H:%M') + ']'
                 else:
-                    ts_str = dt_obj.strftime('[%H:%M]')
+                    ts_str = '[' + format_prompt_time(dt_obj, '%H:%M') + ']'
             except:
                 ts_str = ""
 
@@ -1176,7 +1255,7 @@ def group_chat(group_id):
     for rep in replies_for_frontend:
         # group chat 返回的是单个 string 还是分段？其实分段在前端分，这里 content 是 string
         s_id = rep.get("char_id")
-        if s_id and get_ai_language(s_id, group_id=group_id) == "ja":
+        if s_id:
                 rep["content"] = _add_furigana_to_japanese(rep["content"])
 
     # 7. 最终返回；记忆同步失败时附带提示
@@ -1398,7 +1477,7 @@ def save_group_chat_background(group_id):
 def serve_group_background(group_id, filename):
     """提供群聊背景图，重定向到 COS"""
     user_id = get_current_user_id()
-    bucket = os.getenv('COS_BUCKET')
+    bucket = None if LOCAL_TEST else os.getenv('COS_BUCKET')
     region = os.getenv('COS_REGION')
 
     if user_id and bucket and region:
@@ -1417,7 +1496,7 @@ def serve_group_background(group_id, filename):
 # --- 【修正】群聊快照接口 (真实实现) ---
 @group_bp.route("/api/group/<group_id>/memory/snapshot", methods=["POST"])
 def snapshot_group_memory(group_id):
-    now = beijing_now()
+    now = memory_now()
     today_str = now.strftime('%Y-%m-%d')
 
     total_new = 0
@@ -1449,6 +1528,8 @@ def snapshot_group_memory(group_id):
         else:
             return jsonify({"status": "no_data", "message": "暂无新群聊消息"})
 
+    except GroupMemoryConflict as exc:
+        return jsonify({"status": "conflict", "error": str(exc)}), 409
     except Exception as e:
         print(f"Group Snapshot Error: {e}")
         return jsonify({"error": str(e)}), 500
@@ -1475,8 +1556,8 @@ def get_group_prompts_data(group_id):
     # 读取群聊记忆
     if os.path.exists(memory_file):
         try:
-            with open(memory_file, "r", encoding="utf-8") as f:
-                data["short"] = json.load(f)
+            with memory_file_lock(memory_file):
+                data["short"] = load_calendar_memory(memory_file, memory_timezone())
         except:
             data["short"] = {}
 
@@ -1498,8 +1579,26 @@ def save_group_memory(group_id):
 
     try:
         # 3. 写入文件
-        with open(memory_file, "w", encoding="utf-8") as f:
-            json.dump(new_content, f, ensure_ascii=False, indent=2)
+        if not isinstance(new_content, dict):
+            return jsonify({"error": "Invalid memory document"}), 400
+        with memory_file_lock(memory_file):
+            zone = memory_timezone()
+            old = load_calendar_memory(memory_file, zone)
+            for day, info in new_content.items():
+                memory_day_bounds(day, zone)
+                info = dict(info) if isinstance(info, dict) else {"events": info, "last_id": 0}
+                info["timezone"] = zone
+                reset_progress = bool(info.pop("reset_progress", False))
+                if info.get("events") and not reset_progress:
+                    info["coverage"] = old.get(day, {}).get("coverage", [])
+                else:
+                    info["last_id"] = 0
+                    info.pop("coverage", None)
+                # UI edits wall clock values; recover timestamps when unchanged.
+                old_events = {(e.get("time"), e.get("event")): e for e in old.get(day, {}).get("events", [])}
+                info["events"] = [dated_memory_event(day, old_events.get((e.get("time"), e.get("event")), e), zone) for e in info.get("events", [])]
+                new_content[day] = info
+            atomic_write_json(memory_file, new_content)
         return jsonify({"status": "success"})
     except Exception as e:
         print(f"Save Group Memory Error: {e}")
@@ -1514,36 +1613,42 @@ def update_group_meta(group_id):
         return jsonify({"error": "Config not found"}), 404
 
     try:
-        with open(groups_cfg, "r", encoding="utf-8") as f:
-            all_groups = json.load(f)
+        with locked_group_catalog(groups_cfg) as all_groups:
+            if group_id not in all_groups:
+                return jsonify({"error": "Group not found"}), 404
 
-        if group_id not in all_groups:
-            return jsonify({"error": "Group not found"}), 404
+            data = request.json
+            # 更新字段
+            if "name" in data:
+                name = data["name"]
+                if not isinstance(name, str):
+                    return jsonify(error=GROUP_NAME_HINT), 400
+                name = name.strip()
+                if name != (all_groups[group_id].get("name") or "").strip() and not name_fits(name, GROUP_NAME_LIMIT):
+                    return jsonify(error=GROUP_NAME_HINT), 400
+                all_groups[group_id]["name"] = name
+            if "avatar" in data: all_groups[group_id]["avatar"] = data["avatar"].strip()
+            if "language" in data:
+                try: all_groups[group_id]["language"] = normalize_language(data["language"])
+                except ValueError: return jsonify(error="Invalid language"), 400
 
-        data = request.json
-        # 更新字段
-        if "name" in data: all_groups[group_id]["name"] = data["name"].strip()
-        if "avatar" in data: all_groups[group_id]["avatar"] = data["avatar"].strip()
-        if "language" in data: all_groups[group_id]["language"] = data["language"].strip()
+            # 【新增】主动消息开关
+            if "active_mode" in data:
+                all_groups[group_id]["active_mode"] = bool(data["active_mode"])
 
-        # 【新增】主动消息开关
-        if "active_mode" in data:
-            all_groups[group_id]["active_mode"] = bool(data["active_mode"])
+            # 置顶开关（与单聊一致，通讯录中置顶显示）
+            if "pinned" in data:
+                all_groups[group_id]["pinned"] = bool(data["pinned"])
 
-        # 置顶开关（与单聊一致，通讯录中置顶显示）
-        if "pinned" in data:
-            all_groups[group_id]["pinned"] = bool(data["pinned"])
+            # 群聊线上线下模式 (online/offline)
+            if "group_chat_mode" in data:
+                all_groups[group_id]["group_chat_mode"] = data["group_chat_mode"]
 
-        # 群聊线上线下模式 (online/offline)
-        if "group_chat_mode" in data:
-            all_groups[group_id]["group_chat_mode"] = data["group_chat_mode"]
+            # 是否包含用户
+            if "include_user" in data:
+                all_groups[group_id]["include_user"] = bool(data["include_user"])
 
-        # 是否包含用户
-        if "include_user" in data:
-            all_groups[group_id]["include_user"] = bool(data["include_user"])
-
-        with open(groups_cfg, "w", encoding="utf-8") as f:
-            json.dump(all_groups, f, ensure_ascii=False, indent=2)
+            safe_save_json(groups_cfg, all_groups)
 
         return jsonify({"status": "success"})
     except Exception as e:
@@ -1605,7 +1710,7 @@ def get_group_details(group_id):
 
     # 2. 尝试读取全局配置
     global_chars = {}
-    global_cfg_file = os.path.join(BASE_DIR, "configs", "characters.json")
+    global_cfg_file = os.path.join(DATA_ROOT, "configs", "characters.json")
     if os.path.exists(global_cfg_file):
         try:
             with open(global_cfg_file, "r", encoding="utf-8") as f:
@@ -1687,18 +1792,12 @@ def upload_group_avatar(group_id):
             # 3. 更新 groups.json 配置
             groups_cfg = _get_groups_config_file()
             if os.path.exists(groups_cfg):
-                with open(groups_cfg, "r", encoding="utf-8") as f:
-                    groups_config = json.load(f)
-
-                if group_id in groups_config:
+                with locked_group_catalog(groups_cfg) as groups_config:
+                    if group_id not in groups_config:
+                        return jsonify({"error": "Group config not found"}), 404
                     groups_config[group_id]["avatar"] = new_url
-
-                    # 使用安全保存
                     safe_save_json(groups_cfg, groups_config)
-
-                    return jsonify({"status": "success", "url": new_url})
-                else:
-                    return jsonify({"error": "Group config not found"}), 404
+                return jsonify({"status": "success", "url": new_url})
             else:
                 return jsonify({"error": "Groups config file missing"}), 500
 
@@ -1712,7 +1811,10 @@ def add_group():
     try:
         data = request.json
         new_id = data.get("id", "").strip()
-        new_name = data.get("name", "").strip()
+        new_name = data.get("name", "")
+        if not isinstance(new_name, str) or not name_fits(new_name.strip(), GROUP_NAME_LIMIT):
+            return jsonify(error=GROUP_NAME_HINT), 400
+        new_name = new_name.strip()
         members = data.get("members", []) # list of char_ids
 
         # 1. 校验
@@ -1726,50 +1828,30 @@ def add_group():
 
         # 2. 读取/初始化配置（per-user）
         groups_cfg = _get_groups_config_file()
-        groups_config = {}
-        if os.path.exists(groups_cfg):
-            with open(groups_cfg, "r", encoding="utf-8") as f:
-                groups_config = json.load(f)
+        with locked_group_catalog(groups_cfg) as groups_config:
+            if new_id in groups_config:
+                return jsonify({"error": "该群聊ID已存在"}), 400
 
-        if new_id in groups_config:
-            return jsonify({"error": "该群聊ID已存在"}), 400
-
-        # 3. 创建文件夹
-        target_group_dir = get_group_dir(new_id)
-        if not os.path.exists(target_group_dir):
-            os.makedirs(target_group_dir)
-
-        # 4. 初始化群聊数据库
-        db_path = os.path.join(target_group_dir, "chat.db")
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        # 群聊表结构与单人一致，但 role 字段可能会存具体的 char_id
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role TEXT NOT NULL,
-            content TEXT NOT NULL,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
-        conn.commit()
-        conn.close()
-
-        # 5. 更新配置（写入当前用户 groups.json）
-        groups_config[new_id] = {
-            "name": new_name,
-            "avatar": "/static/default_group.png", # 记得在static放个图
-            "pinned": False,
-            "members": members,
-            "active_mode": False,  # 新建群默认关闭，用户可在群设置中手动开启
-            "group_chat_mode": "online",
-        }
-
-        with open(groups_cfg, "w", encoding="utf-8") as f:
-            json.dump(groups_config, f, ensure_ascii=False, indent=2)
+            from core.user_resources import require_owned_character
+            if not isinstance(members, list):
+                return jsonify(error='Invalid members'), 400
+            for member in members:
+                require_owned_character(member, get_current_user_id())
+            ensure_group_chat_storage(new_id, user_id=get_current_user_id(), creating=True)
+            groups_config[new_id] = {
+                "name": new_name,
+                "avatar": "/static/default_group.png",
+                "pinned": False,
+                "members": members,
+                "active_mode": False,
+                "group_chat_mode": "online",
+            }
+            safe_save_json(groups_cfg, groups_config)
 
         return jsonify({"status": "success"})
 
+    except NotFound:
+        raise
     except Exception as e:
         print(f"Add Group Error: {e}")
         return jsonify({"error": str(e)}), 500
@@ -1782,20 +1864,16 @@ def delete_group_api(group_id):
         return jsonify({"error": "Config not found"}), 404
 
     try:
-        with open(groups_cfg, "r", encoding="utf-8") as f:
-            groups_config = json.load(f)
+        with locked_group_catalog(groups_cfg) as groups_config:
+            if group_id not in groups_config:
+                return jsonify({"error": "Group not found"}), 404
 
-        if group_id not in groups_config:
-            return jsonify({"error": "Group not found"}), 404
-
-        del groups_config[group_id]
-        with open(groups_cfg, "w", encoding="utf-8") as f:
-            json.dump(groups_config, f, ensure_ascii=False, indent=2)
-
-        group_dir = get_group_dir(group_id)
-        if os.path.exists(group_dir):
-            shutil.rmtree(group_dir)
-        remove_read_state(_get_read_status_file(), "group", group_id)
+            group_dir = get_group_dir(group_id)
+            del groups_config[group_id]
+            safe_save_json(groups_cfg, groups_config)
+            if os.path.exists(group_dir):
+                shutil.rmtree(group_dir)
+            remove_read_state(_get_read_status_file(), "group", group_id)
         return jsonify({"status": "success"})
 
     except Exception as e:

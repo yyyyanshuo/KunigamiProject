@@ -160,7 +160,7 @@ test('snapshot exposes stable references and enabled state', async () => {
 
     const page = {
         async waitForLoadState() {},
-        async evaluate(callback) {
+        async evaluate(callback, arg) {
             global.document = {
                 body: { innerText: '中国\n开始答题' },
                 querySelectorAll(selector) {
@@ -173,7 +173,7 @@ test('snapshot exposes stable references and enabled state', async () => {
             };
 
             try {
-                return callback();
+                return callback(arg);
             } finally {
                 global.document = originalDocument;
                 global.window = originalWindow;
@@ -199,6 +199,7 @@ test('includes the previous browser action result in the next AI prompt', async 
     global.fetch = async (_url, options) => {
         sentMessage = JSON.parse(options.body).message;
         return {
+            ok: true,
             async json() {
                 return { full_reply: '[WAIT]' };
             }
@@ -227,7 +228,50 @@ test('includes the previous browser action result in the next AI prompt', async 
     }
 
     assert.match(sentMessage, /【上一轮浏览器操作结果】/);
-    assert.match(sentMessage, /指令：\[CLICK_REF:btn-3\]/);
-    assert.match(sentMessage, /状态：失败/);
-    assert.match(sentMessage, /每轮只能输出一个网页操作指令/);
+    assert.match(sentMessage, /指令: \[CLICK_REF:btn-3\]/);
+    assert.match(sentMessage, /状态: 失败/);
+    assert.match(sentMessage, /每轮只能输出一个操作指令/);
+});
+
+const { messages, buildPrompt } = require('./agent_prompts');
+const { validateTarget } = require('./agent_universal');
+for (const lang of ['ja', 'en', 'zh-CN']) {
+    test(`runtime prompt, snapshot and action feedback use ${lang}`, async () => {
+        const t = messages(lang);
+        const snapshot = {url: 'https://example.org', text: 'Website in a different language', inputs: 'email', buttons: 'go'};
+        const prompt = buildPrompt(snapshot, {command: '[BACK]', success: false, message: t.actionFailed}, lang, 'French');
+        for (const key of ['page','inputs','buttons','previous','failure','language']) assert.ok(prompt.includes(t[key]));
+        for (const tag of ['CLICK_REF', 'CLICK', 'TYPE', 'GOTO', 'BACK', 'FINISH', 'ASK', 'WAIT']) assert.ok(prompt.includes('['+tag));
+        assert.ok(prompt.includes('"French"'));
+        if (lang === 'en') assert.doesNotMatch(prompt, /[\u4e00-\u9fff\u3040-\u30ff]/);
+        const button = makeElement({enabled: false, attributes: {'data-kunigami-agent-ref': 'btn-0'}});
+        const result = await executeCommands(new FakePage([button]), '[CLICK_REF:btn-0]', lang);
+        assert.equal(result.message, t.disabled);
+        const fallback = await captureSnapshot({async waitForLoadState(){}, async evaluate(){throw new Error('unavailable')}, url(){return snapshot.url}}, lang);
+        assert.equal(fallback.text, t.unavailable);
+    });
+}
+
+test('refuses file and script navigation without calling browser', async () => {
+    for (const url of ['file:///etc/passwd', 'javascript:alert(1)', 'https://user:pass@example.org', 'https://example.org:8010']) {
+        assert.throws(() => validateTarget(url));
+        let navigated = false;
+        const result = await executeCommands({async goto(){navigated=true;}}, `[GOTO:${url}]`, 'en');
+        assert.equal(result.success, false);
+        assert.equal(navigated, false);
+    }
+});
+
+test('does not click an empty label when a text target is requested', async () => {
+    const empty = makeElement();
+    const page = new FakePage([empty]);
+    assert.equal((await executeCommands(page, '[CLICK:Confirm]', 'en')).success, false);
+    assert.equal(empty.clicked, 0);
+});
+
+test('failed internal HTTP requests stop instead of being interpreted as model output', async () => {
+    const original = global.fetch;
+    global.fetch = async () => ({ok: false, status: 401, async json(){throw new Error('must not decode');}});
+    try { await assert.rejects(chatViaCharApi({url:'https://example.org',text:'page'},'hero',1,'session=synthetic'), /Chat request failed/); }
+    finally {global.fetch=original;}
 });

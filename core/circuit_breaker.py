@@ -1,7 +1,5 @@
 import sqlite3
 import os
-import time as _time
-import threading
 from datetime import datetime, timedelta
 from contextvars import ContextVar
 
@@ -11,44 +9,6 @@ _cb_info_var: ContextVar[dict | None] = ContextVar("circuit_breaker_info", defau
 
 AUTO_RESET_MINUTES = 30
 COOLDOWN_MINUTES = 10
-
-# --- 全局 Cloudflare WAF 拦截暂停（服务器级别，非按用户） ---
-_relay_pause_until: float = 0
-_relay_pause_lock = threading.Lock()
-CF_PAUSE_SECONDS = 180  # 默认暂停 3 分钟
-
-
-def check_relay_global_pause() -> dict | None:
-    """检查 relay 是否因 Cloudflare WAF 拦截被全局暂停。返回 None 表示放行。"""
-    with _relay_pause_lock:
-        now = _time.time()
-        if now < _relay_pause_until:
-            remaining = int(_relay_pause_until - now)
-            mins = max(1, remaining // 60)
-            return {
-                "type": "cooldown",
-                "message": f"中转服务器暂时不可用（安全拦截），请 {mins} 分钟后重试。",
-                "remaining_seconds": remaining,
-            }
-    return None
-
-
-def mark_relay_global_pause(duration_seconds: int = CF_PAUSE_SECONDS) -> None:
-    """触发全局 relay 暂停（Cloudflare HTML 403 被检测到时调用）。"""
-    with _relay_pause_lock:
-        global _relay_pause_until
-        _relay_pause_until = max(_relay_pause_until, _time.time() + duration_seconds)
-        print(f"[circuit_breaker] relay global pause {duration_seconds}s, until {datetime.fromtimestamp(_relay_pause_until)}")
-
-
-def _is_cloudflare_block(response_text: str) -> bool:
-    """检测响应是否为 Cloudflare WAF 拦截 HTML 页面。"""
-    if not response_text:
-        return False
-    upper = response_text.strip().upper()
-    looks_like_html = upper.startswith("<!DOCTYPE") or upper.startswith("<HTML")
-    return looks_like_html and "CLOUDFLARE" in upper
-
 
 def _get_conn():
     return sqlite3.connect(USERS_DB)

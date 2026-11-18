@@ -48,12 +48,6 @@
   font-size: 9px;
 }
 
-.ai-disclosure--sakura {
-  padding: 5px 0 0;
-  background: transparent;
-  border-top-color: rgba(240, 212, 215, 0.8);
-}
-
 .ai-disclosure.ai-disclosure--call {
   padding: 0 0 12px;
   color: rgba(255, 255, 255, 0.55);

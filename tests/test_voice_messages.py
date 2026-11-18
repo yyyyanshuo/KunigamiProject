@@ -69,6 +69,9 @@ def test_scribe_spoken_text_detection_ignores_audio_events():
     assert elevenlabs.scribe_has_spoken_text("（背景嘈杂）（敲门声）") is False
     assert elevenlabs.scribe_has_spoken_text("（背景嘈杂）你好，你听得到吗？") is True
     assert elevenlabs.scribe_has_spoken_text("嗯") is True
+    assert elevenlabs.scribe_has_spoken_text("مرحبا") is True
+    assert elevenlabs.scribe_has_spoken_text("Привет") is True
+    assert elevenlabs.scribe_has_spoken_text("…！？") is False
 
 
 def test_realtime_scribe_token_uses_platform_key(monkeypatch):

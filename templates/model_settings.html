@@ -1,0 +1,47 @@
+<link rel="stylesheet" href="/static/model-settings.css">
+<div class="section-container collapsed" id="module-api">
+  <div class="section-header" onclick="toggleSectionByHeader(this)">
+    <div class="section-header-main"><div class="section-title">🔌 {{ ui_t('线路与模型设置') }}</div></div>
+    <span class="section-arrow">▾</span>
+  </div>
+  <div class="section-body"><div class="config-card">
+    <p class="privacy-note" role="note">{{ ui_t('请求经本服务服务器发送，可能包含输入、历史对话、人设、记忆和图片。Key 由服务器保存并用于所选接口。广场试聊及语音识别使用另行配置的服务。') }}</p>
+    <div id="model-settings-message" role="status" aria-live="polite"></div>
+    <div id="api-view-mode">
+      <div class="model-heading"><strong>{{ ui_t('当前分配状态') }}</strong><button class="btn-edit-toggle" onclick="toggleApiEdit(true)">{{ ui_t('配置') }}</button></div>
+      <div class="api-status-grid" id="model-settings-overview"></div>
+      <p id="image-limit-overview" class="model-limit-overview"></p>
+    </div>
+    <div id="api-edit-mode" hidden>
+      <fieldset class="model-fieldset"><legend>{{ ui_t('选择线路') }}</legend>
+        <div class="model-routes">
+          {% for route, label in [('gemini','Gemini'),('openai','ChatGPT'),('anthropic','Claude'),('xai','Grok'),('custom','自填写')] %}
+          <label class="model-route"><input type="radio" name="route" value="{{ route }}" id="radio-{{ route }}" onchange="selectRoute(this.value)"><span>{{ ui_t(label) }}{% if route == 'gemini' %}<small>{{ ui_t('默认') }}</small>{% endif %}</span></label>
+          {% endfor %}
+        </div>
+      </fieldset>
+      <div id="custom-route-settings" hidden class="model-custom-fields">
+        <label>{{ ui_t('线路名称') }}<input id="custom-route-name" class="model-select" maxlength="80"></label>
+        <label>{{ ui_t('API 地址') }}<input id="custom-route-url" class="model-select" type="url" placeholder="https://api.example.com/v1" autocomplete="off"></label>
+        <label>{{ ui_t('接口格式') }}<select id="custom-route-protocol" class="model-select">
+          <option value="openai_chat">OpenAI Chat Completions</option><option value="openai_responses">OpenAI Responses</option><option value="anthropic">Claude Messages</option><option value="gemini">Gemini</option>
+        </select></label>
+      </div>
+      <div class="model-key-card">
+        <label for="route-key-input" id="route-key-label">API Key</label>
+        <div class="model-key-controls"><input type="password" id="route-key-input" autocomplete="new-password" maxlength="4096" placeholder="{{ ui_t('填写新 Key（不会回显已保存内容）') }}"><button type="button" class="btn" id="route-key-delete" onclick="stageRouteKeyDelete()">{{ ui_t('删除') }}</button></div>
+        <small id="route-key-status"></small>
+        <small id="route-endpoint-notice"></small>
+        <small>{{ ui_t('删除这里的 Key 不会撤销服务商账户中的 Key 或删除第三方数据。') }}</small>
+        <small>{{ ui_t('密钥和模型设置将在保存配置后生效。') }}</small>
+      </div>
+      <details class="model-advice" id="provider-model-advice"><summary>{{ ui_t('如何选择模型？') }}</summary>
+        <p id="provider-model-advice-text"></p>
+        <a id="provider-model-source" target="_blank" rel="noopener noreferrer">{{ ui_t('官方模型文档') }}</a>
+      </details>
+      <div id="model-task-fields" class="model-task-fields"></div>
+      <div class="action-bar"><button class="btn btn-cancel" onclick="toggleApiEdit(false)">{{ ui_t('取消') }}</button><button class="btn btn-save" onclick="saveApiConfig()">{{ ui_t('保存配置') }}</button></div>
+    </div>
+  </div></div>
+</div>
+<script defer src="/static/model-settings.js"></script>

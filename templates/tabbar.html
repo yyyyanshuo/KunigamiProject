@@ -16,14 +16,14 @@
     }
 
     .tab-item {
-        flex: 1; display: flex; flex-direction: column;
+        flex: 1; min-width: 0; display: flex; flex-direction: column;
         align-items: center; justify-content: center;
         height: 100%; text-decoration: none; color: #ccc;
         transition: all 0.2s; cursor: pointer;
     }
 
     .tab-item svg { width: 24px; height: 24px; fill: currentColor; margin-bottom: 2px; }
-    .tab-item span { font-size: 10px; font-weight: bold; }
+    .tab-item span { font-size: 10px; font-weight: bold; white-space: nowrap; }
 
     /* 选中状态：变成主题色 */
     .tab-item.active { color: var(--primary-color, #ffb6b9); }
@@ -87,14 +87,14 @@
         return `${year}-${month}-${day}`;
     }
 
-    function closeDailyDonateModal() {
-        const modal = document.getElementById('daily-donate-modal');
+    function closeDailyAnnouncementModal() {
+        const modal = document.getElementById('daily-announcement-modal');
         if (modal) modal.style.display = 'none';
     }
 
-    // 【全局】检查每日打赏弹窗，并在公告期内合并展示语音调整通知。
-    async function checkDailyDonateModal() {
-        const modal = document.getElementById('daily-donate-modal');
+    // 有有效公告时每日展示一次；无公告或请求失败时不展示。
+    async function checkDailyAnnouncementModal() {
+        const modal = document.getElementById('daily-announcement-modal');
         if (!modal) return;
 
         let announcement = null;
@@ -102,7 +102,8 @@
             const response = await fetch('/api/app/announcement', {cache: 'no-store'});
             if (response.ok) announcement = await response.json();
         } catch (e) {
-            console.warn('公告加载失败，将继续显示普通打赏弹窗', e);
+            console.warn('公告加载失败', e);
+            return;
         }
 
         const today = announcement?.server_date || localDateKey();
@@ -113,8 +114,7 @@
         const voiceSeenKey = voiceAnnouncement
             ? `announcement_seen:${voiceAnnouncement.id}:${today}` : '';
         const personaSeenKey = personaAnnouncement
-            ? `announcement_seen:${personaAnnouncement.id}` : '';
-        const shouldShowDonate = localStorage.getItem('last_donate_show') !== today;
+            ? `announcement_seen:${personaAnnouncement.id}:${today}` : '';
         const shouldShowVoice = !!voiceAnnouncement && !localStorage.getItem(voiceSeenKey);
         const shouldShowPersona = !!personaAnnouncement && !localStorage.getItem(personaSeenKey);
         const shouldShowAnnouncement = shouldShowVoice || shouldShowPersona;
@@ -133,9 +133,8 @@
         const personaSection = document.getElementById('persona-lock-announcement-section');
         if (personaSection) personaSection.style.display = shouldShowPersona ? 'block' : 'none';
 
-        if (shouldShowDonate || shouldShowAnnouncement) {
+        if (shouldShowAnnouncement) {
             modal.style.display = 'flex';
-            localStorage.setItem('last_donate_show', today);
             if (shouldShowVoice) localStorage.setItem(voiceSeenKey, '1');
             if (shouldShowPersona) localStorage.setItem(personaSeenKey, '1');
         }
@@ -143,14 +142,14 @@
 
     // 页面加载完成后检查弹窗
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', checkDailyDonateModal);
+        document.addEventListener('DOMContentLoaded', checkDailyAnnouncementModal);
     } else {
-        checkDailyDonateModal();
+        checkDailyAnnouncementModal();
     }
 </script>
 
-<!-- 打赏弹窗 (每日首次) -->
-<div class="modal-overlay" id="daily-donate-modal" style="position:fixed; display:none; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); backdrop-filter:blur(4px); z-index:3000; align-items:center; justify-content:center;">
+<!-- 有效公告（每日首次） -->
+<div class="modal-overlay" id="daily-announcement-modal" style="position:fixed; display:none; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); backdrop-filter:blur(4px); z-index:3000; align-items:center; justify-content:center;">
   <div style="background:#fff; padding:20px; border-radius:18px; width:90%; max-width:380px; box-shadow:0 10px 30px rgba(0,0,0,0.15); max-height:85vh; overflow-y:auto;">
     <div id="persona-lock-announcement-section" style="display:none; margin-bottom:18px; padding:16px; border-radius:14px; background:#f4f7ff; border:1px solid #d8e2fa; color:#42516d;">
       <div style="font-size:30px; text-align:center; margin-bottom:6px;">🔒</div>
@@ -162,43 +161,17 @@
     <div id="voice-announcement-section" style="display:none; margin-bottom:18px; padding:16px; border-radius:14px; background:#fff7f8; border:1px solid #ffd8df; color:#5a4650;">
       <div style="font-size:30px; text-align:center; margin-bottom:6px;">🔊</div>
       <h3 style="margin:0 0 10px; text-align:center; font-size:18px; color:#d94f70;">语音功能调整通知</h3>
-      <p style="font-size:13px; line-height:1.7; margin:0 0 8px;">角色 TTS、语音试听和音色克隆继续使用每位用户自己的 ElevenLabs API Key；用户发送语音时的文字识别由 Sakura 平台统一提供。</p>
-      <p style="font-size:13px; line-height:1.7; margin:0 0 8px; color:#c53d5b; font-weight:700;">重要：原先通过 Sakura 创建的音色将在本通知发布 7 天后（<span id="voice-announcement-delete-date">2026年08月13日</span>）统一删除，届时对应音色 ID 将无法继续使用。</p>
+      <p style="font-size:13px; line-height:1.7; margin:0 0 8px;">{{ ui_t('角色 TTS、语音试听和音色克隆继续使用每位用户自己的 ElevenLabs API Key；用户发送语音时的文字识别由 {brand} 平台统一提供。', brand=saki_brand) }}</p>
+      <p style="font-size:13px; line-height:1.7; margin:0 0 8px; color:#c53d5b; font-weight:700;">{{ ui_t('重要：原先通过 {brand} 创建的音色将在本通知发布 7 天后（', brand=saki_brand) }}<span id="voice-announcement-delete-date">2026年08月13日</span>）统一删除，届时对应音色 ID 将无法继续使用。</p>
       <p style="font-size:13px; line-height:1.7; margin:0 0 8px;">请为角色语音配置个人 ElevenLabs API Key；该 Key 不需要开通 Speech-to-Text 权限。Voice ID 只保存在你自己的角色档案中，不会随角色广场共享。</p>
       <p style="font-size:13px; line-height:1.7; margin:0 0 12px;">此前说明不准确给大家带来了困扰，非常抱歉。</p>
       <a id="voice-announcement-cta" href="https://try.elevenlabs.io/8f8ks0unlqsw" target="_blank" rel="noopener noreferrer sponsored" style="display:block; text-align:center; padding:9px 12px; border-radius:10px; background:var(--primary-color, #ff8fa3); color:#fff; text-decoration:none; font-size:13px; font-weight:600;">前往 ElevenLabs（邀请链接）</a>
     </div>
-    <div style="text-align:center; padding-bottom:16px; border-bottom:1px solid #eee;">
-      <div style="font-size:48px; margin-bottom:8px;">☕</div>
-      <h3 style="margin:0; font-size:18px; color:#2c3e50;">打赏开发者</h3>
-    </div>
-    <div style="padding:20px 0; font-size:13px; color:#8ca0b3; line-height:1.6; text-align:center;">
-      <p style="margin:0 0 8px 0;">开发者是用爱发电的卑微大学生，为了给大家提供不卡顿的 38ms 极速通道和最聪明的 AI，服务器每天都在疯狂燃烧我的余额😭</p>
-      <p style="margin:8px 0; font-weight:600; color:var(--primary-color, #ffb6b9);">如果这个角色曾经治愈过你，求老板请我喝瓶可乐续命！</p>
-      <p style="margin:8px 0 0 0;">你的每一分钱都会变成新功能开发的代码！</p>
-    </div>
-    
-    <!-- 直接显示收款码 -->
-    <div style="display:flex; gap:16px; justify-content:center; margin:20px 0; flex-wrap:wrap;">
-      <div style="text-align:center;">
-        <div style="width:120px; height:120px; border:1px solid #f0f0f0; border-radius:8px; display:flex; align-items:center; justify-content:center; background:#fafafa;">
-          <img src="/static/wechat_qr.png" alt="微信收款码" style="width:100%; height:100%; object-fit:cover; border-radius:6px;" onerror="this.alt='微信二维码未找到'">
-        </div>
-        <div style="margin-top:8px; font-size:12px; color:#666; font-weight:600;">微信</div>
-      </div>
-      <div style="text-align:center;">
-        <div style="width:120px; height:120px; border:1px solid #f0f0f0; border-radius:8px; display:flex; align-items:center; justify-content:center; background:#fafafa;">
-          <img src="/static/alipay_qr.png" alt="支付宝收款码" style="width:100%; height:100%; object-fit:cover; border-radius:6px;" onerror="this.alt='支付宝二维码未找到'">
-        </div>
-        <div style="margin-top:8px; font-size:12px; color:#666; font-weight:600;">支付宝</div>
-      </div>
-    </div>
-    
     <div style="display:flex; gap:12px; margin:20px 0 0 0;">
-      <button type="button" onclick="closeDailyDonateModal()" style="flex:1; background:#f5f5f5; color:#555; border:none; padding:10px; border-radius:10px; cursor:pointer; font-weight:600;">关闭</button>
+      <button type="button" onclick="closeDailyAnnouncementModal()" style="flex:1; background:#f5f5f5; color:#555; border:none; padding:10px; border-radius:10px; cursor:pointer; font-weight:600;">关闭</button>
     </div>
   </div>
 </div>
-  <!-- AI巡航悬浮球 -->
+  <!-- 管理员模拟登录状态 -->
   <script src="/static/ai-cruise.js"></script>
 <script defer src="/static/voice-call-incoming.js"></script>

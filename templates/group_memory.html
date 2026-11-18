@@ -1,6 +1,7 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="{{ ui_language }}" data-ai-brand-line="{{ ui_t('ai_brand_line', brand=saki_brand) }}">
 <head>
+  {% include "ui_language_head.html" %}
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>群聊管理</title>
@@ -56,7 +57,7 @@
         .back-btn { 
             font-size: 22px; cursor: pointer; color: var(--primary); 
             width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
-            background: var(--card-bg); border-radius: 50%; box-shadow: 0 2px 6px rgba(126,140,224,0.2);
+            background: var(--card-bg); border-radius: 50%; box-shadow: 0 2px 6px var(--primary-rgba-medium, rgba(0,0,0,0.08));
             transition: transform 0.2s;
         }
         .back-btn:active { transform: scale(0.9); }
@@ -97,7 +98,7 @@
         .avatar-wrapper { position: relative; display: inline-block; margin-bottom: 20px; cursor: pointer; }
         .avatar-img {
             width: 86px; height: 86px; border-radius: 28%; /* Squircle圆角 */
-            object-fit: cover; box-shadow: 0 6px 16px rgba(126,140,224,0.25);
+            object-fit: cover; box-shadow: 0 6px 16px var(--primary-rgba-strong, rgba(0,0,0,0.12));
             border: 3px solid #fff; transition: transform 0.2s;
         }
         .avatar-wrapper:active .avatar-img { transform: scale(0.95); }
@@ -115,14 +116,16 @@
             background: #f4f6f9; font-size: 14px; color: var(--text-main); outline: none; transition: all 0.2s;
             box-sizing: border-box; font-family: inherit;
         }
-        .input-full:focus { background: #fff; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(126,140,224,0.15); }
+        .input-full:focus { background: #fff; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-rgba-lighter, rgba(0,0,0,0.06)); }
 
         /* iOS 风格开关 */
         .switch-row {
             display: flex; align-items: center; justify-content: space-between;
             background: var(--primary-light); padding: 14px 16px; border-radius: var(--radius-md);
             margin: 20px 0;
+            text-align: left; gap: 12px;
         }
+        .switch-row > div { flex: 1; min-width: 0; overflow-wrap: anywhere; line-height: 1.6; }
         .switch { position: relative; display: inline-block; width: 46px; height: 26px; flex-shrink: 0; }
         .switch input { opacity: 0; width: 0; height: 0; }
         .slider {
@@ -151,7 +154,7 @@
             cursor: pointer; border: none; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center;
         }
         .btn:active { transform: scale(0.96); }
-        .btn-save { background: linear-gradient(135deg, var(--primary), #919ef0); color: #fff; box-shadow: 0 4px 12px rgba(126,140,224,0.3); }
+        .btn-save { background: linear-gradient(135deg, var(--primary), var(--primary-dark)); color: #fff; box-shadow: 0 4px 12px var(--primary-rgba-strong); }
         .btn-edit { background: #f0f2f5; color: var(--text-main); }
         .btn-del { background: var(--danger-light); color: var(--danger); width: 32px; padding: 0; border-radius: 8px; }
 
@@ -205,18 +208,19 @@
 
             <div style="text-align:left; margin-bottom: 16px;">
                 <label class="input-label">群名称</label>
-                <input type="text" id="group-name" class="input-full" placeholder="输入群聊名称..." onblur="saveGroupName()">
+                <input aria-describedby="group-name-hint" type="text" id="group-name" class="input-full" placeholder="输入群聊名称..." onblur="saveGroupName()">
+                <small id="group-name-hint">群聊名最多可用 15 个全角字符，两个半角字符算一个。</small>
             </div>
 
             <div style="text-align:left; margin-bottom: 16px;">
-                <label class="input-label">群回复语言 (Group Language)</label>
+                <label class="input-label">群聊交流语言</label>
                 <input type="text" id="group-language" class="input-full" placeholder="输入语言 (如: ja, en, zh, Spanish...)" onblur="saveGroupLanguage()" list="lang-list">
                 <datalist id="lang-list">
                     <option value="ja">日本語 (Japanese)</option>
                     <option value="zh">中文 (Chinese)</option>
                     <option value="en">English</option>
                 </datalist>
-                <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">影响 AI 群聊回复语言及翻译方向。</div>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">留空时用户发送跟随默认对话语言，角色回复保留各自语言。</div>
             </div>
 
             <!-- 主动消息开关 -->
@@ -316,7 +320,7 @@
     <div class="module collapsed" id="memory-module">
         <div class="mod-header collapsible-header" onclick="document.getElementById('memory-module').classList.toggle('collapsed')">
             <div style="display:flex; align-items:center;">
-                <span>🧠 群聊记忆 (Shared Memory)</span>
+                <span>🧠 群聊记忆 (Shared Memory)</span><small> · UTC+08:00</small>
                 <span class="chevron">▾</span>
             </div>
             <!-- 点击编辑按钮时阻止事件冒泡，防止触发折叠 -->
@@ -330,7 +334,8 @@
             </div>
 
             <!-- 编辑按钮组 -->
-            <div id="edit-actions" style="display:none; padding:16px 20px; border-top:1px solid var(--border-color); background:#fafbfc; display:flex; justify-content:flex-end; gap:12px;">
+            <div id="edit-actions" style="display:none; padding:16px 20px; border-top:1px solid var(--border-color); background:#fafbfc; justify-content:flex-end; flex-wrap:wrap; align-items:center; gap:12px;">
+                <input type="date" id="memory-entry-date" class="input-full" aria-label="日期" style="width:auto;">
                 <button class="btn btn-edit" onclick="addMemoryRow()">+ 添加条目</button>
                 <button class="btn btn-save" onclick="saveMemory()">保存修改</button>
             </div>
@@ -386,7 +391,7 @@
         } else {
             bgPreview.style.backgroundImage = 'none';
             bgText.style.display = 'block';
-            bgText.textContent = '点击上传背景';
+            bgText.textContent = SakiI18n.t('点击上传背景');
             clearBtn.style.display = 'none';
         }
     }
@@ -415,11 +420,11 @@
                 // 保存配置到服务器
                 saveChatBgConfig();
             } else {
-                alert('上传失败: ' + (result.error || '未知错误'));
+                alert(SakiI18n.t('上传失败: ') + (result.error || SakiI18n.t('未知错误')));
             }
         } catch(e) {
             console.error("Upload error:", e);
-            alert('网络错误或服务器异常: ' + e.message);
+            alert(SakiI18n.t('网络错误或服务器异常: ') + e.message);
         } finally {
             previewEl.style.opacity = '1';
             input.value = '';
@@ -428,7 +433,7 @@
 
     // 清除聊天背景
     function clearChatBg() {
-        if (confirm('确定要删除此群聊的背景吗？')) {
+        if (confirm(SakiI18n.t('确定要删除此群聊的背景吗？'))) {
             chatBgConfig = { filename: null };
             renderChatBackgroundUI();
             saveChatBgConfig();
@@ -498,28 +503,44 @@
         const data = globalData.short || {};
 
         if (Object.keys(data).length === 0) {
-            container.innerHTML = '<div style="text-align:center; color:#ccc; font-style:italic;">暂无群聊记忆</div>';
+            container.innerHTML = SakiI18n.fragment('<div style="text-align:center; color:#ccc; font-style:italic;">暂无群聊记忆</div>');
             return;
         }
 
-        let html = '';
+        container.replaceChildren();
         Object.keys(data).sort().reverse().forEach(date => {
             const dayInfo = data[date];
             const events = Array.isArray(dayInfo) ? dayInfo : (dayInfo.events || []);
-
-            if (events.length > 0) {
-                html += `<div style="margin-bottom:15px;">
-                  <div style="font-size:12px; color:#5c6bc0; font-weight:bold; border-bottom:1px dashed #ddd; margin-bottom:5px;">📅 ${date}</div>`;
-                events.forEach(e => {
-                    html += `<div style="display:flex; gap:10px; font-size:13px; margin-bottom:4px;">
-                      <span style="font-family:monospace; color:#888;">${e.time}</span>
-                      <span>${e.event}</span>
-                  </div>`;
-                });
-                html += `</div>`;
-            }
+            if (!events.length) return;
+            const day = document.createElement('div');
+            day.style.marginBottom = '15px';
+            const title = document.createElement('div');
+            title.style.cssText = 'font-size:12px; color:var(--primary-dark); font-weight:bold; border-bottom:1px dashed #ddd; margin-bottom:5px;';
+            title.textContent = '📅 ' + date;
+            day.appendChild(title);
+            events.forEach(event => {
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex; gap:10px; font-size:13px; margin-bottom:4px;';
+                const time = document.createElement('span');
+                time.style.cssText = 'font-family:monospace; color:#888;';
+                time.textContent = event.time;
+                const content = document.createElement('span');
+                content.setAttribute('data-model-output', '');
+                content.textContent = event.event;
+                row.append(time, content);
+                day.appendChild(row);
+            });
+            container.appendChild(day);
         });
-        container.innerHTML = html;
+    }
+
+    function memoryDateString(value = new Date()) {
+        const parts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: {{ memory_timezone | default('Asia/Shanghai') | tojson }},
+            year: 'numeric', month: '2-digit', day: '2-digit'
+        }).formatToParts(value);
+        const get = type => parts.find(part => part.type === type).value;
+        return `${get('year')}-${get('month')}-${get('day')}`;
     }
 
     // 切换编辑模式
@@ -530,60 +551,79 @@
         const toggleBtn = document.getElementById('editToggleBtn');
 
         if (isEditing) {
-            toggleBtn.textContent = '取消';
-            actionDiv.style.display = 'block';
+            toggleBtn.textContent = SakiI18n.t('取消');
+            actionDiv.style.display = 'flex';
+            document.getElementById('memory-entry-date').value = memoryDateString();
             renderMemoryEditor();
         } else {
-            toggleBtn.textContent = '编辑';
+            toggleBtn.textContent = SakiI18n.t('编辑');
             actionDiv.style.display = 'none';
             renderMemoryView(); // 恢复查看
         }
     }
 
-    // --- 【修正版】渲染编辑器 (带重置选项) ---
+    function createMemoryDay(date, events = []) {
+        const block = document.createElement('div');
+        block.className = 'day-block';
+        block.dataset.date = date;
+        block.style.cssText = 'margin-bottom:20px; border:1px solid #eee; padding:10px; border-radius:8px;';
+        block.innerHTML = SakiI18n.ui`<div style="font-weight:bold; margin-bottom:10px; color:var(--primary-dark); display:flex; justify-content:space-between; align-items:center;">
+            <span class="memory-date-label"></span>
+            <label style="font-size:12px; color:#666; font-weight:normal; display:flex; align-items:center; cursor:pointer;">
+                <input type="checkbox" class="reset-chk" style="margin-right:4px;">重置进度 (重新总结)
+            </label>
+        </div><div class="event-list"></div>
+        <button class="btn" style="width:100%; margin-top:5px; background:#fff; border:1px dashed #ccc; color:#888;" onclick="addEventRow(this)">+ 添加事件</button>`;
+        block.querySelector('.memory-date-label').textContent = date;
+        const list = block.querySelector('.event-list');
+        events.forEach(event => list.appendChild(createInputRow(event.time, event.event)));
+        return block;
+    }
+
     function renderMemoryEditor() {
         const container = document.getElementById('memory-container');
         const data = globalData.short || {};
-        container.innerHTML = '';
-
+        container.replaceChildren();
         Object.keys(data).sort().reverse().forEach(date => {
             const dayInfo = data[date];
             const events = Array.isArray(dayInfo) ? dayInfo : (dayInfo.events || []);
-
-            let html = `<div class="day-block" data-date="${date}" style="margin-bottom:20px; border:1px solid #eee; padding:10px; border-radius:8px;">
-              <div style="font-weight:bold; margin-bottom:10px; color:#5c6bc0; display:flex; justify-content:space-between; align-items:center;">
-                  <span>${date}</span>
-                  <!-- 【新增】重置进度复选框 -->
-                  <label style="font-size:12px; color:#666; font-weight:normal; display:flex; align-items:center; cursor:pointer;">
-                      <input type="checkbox" class="reset-chk" style="margin-right:4px;">
-                      重置进度 (重新总结)
-                  </label>
-              </div>
-              <div class="event-list">`;
-
-            events.forEach(e => {
-                html += createInputRow(e.time, e.event);
-            });
-
-            html += `</div><button class="btn" style="width:100%; margin-top:5px; background:#fff; border:1px dashed #ccc; color:#888;" onclick="addEventRow(this)">+ 添加事件</button></div>`;
-            container.innerHTML += html;
+            container.appendChild(createMemoryDay(date, events));
         });
     }
 
-    function createInputRow(time, event) {
-        return `
-      <div class="input-group">
-          <input type="text" class="input-full input-key" value="${time}" placeholder="HH:MM" style="width:70px;">
-          <input type="text" class="input-full input-val" value="${event}" placeholder="事件内容">
-          <button class="btn btn-del" onclick="this.parentElement.remove()">×</button>
-      </div>`;
+    function createInputRow(time = '', event = '') {
+        const row = document.createElement('div');
+        row.className = 'input-group';
+        row.innerHTML = SakiI18n.ui`<input type="text" class="input-full input-key" placeholder="HH:MM" style="width:70px;">
+            <input type="text" class="input-full input-val" placeholder="事件内容">
+            <button class="btn btn-del" onclick="this.parentElement.remove()">×</button>`;
+        row.querySelector('.input-key').value = time;
+        row.querySelector('.input-val').value = event;
+        return row;
+    }
+
+    function addMemoryRow() {
+        if (!isEditing) toggleEditMode();
+        const input = document.getElementById('memory-entry-date');
+        input.required = true;
+        if (!input.reportValidity()) return;
+        const date = input.value;
+        const container = document.getElementById('memory-container');
+        let block = Array.from(container.querySelectorAll('.day-block')).find(item => item.dataset.date === date);
+        if (!block) {
+            block = createMemoryDay(date);
+            const next = Array.from(container.children).find(item => item.dataset.date < date);
+            container.insertBefore(block, next || null);
+        }
+        const row = createInputRow();
+        block.querySelector('.event-list').appendChild(row);
+        row.querySelector('.input-key').focus();
     }
 
     window.addEventRow = function(btn) {
-        const list = btn.previousElementSibling;
-        const div = document.createElement('div');
-        div.innerHTML = createInputRow('', '');
-        list.appendChild(div.firstElementChild);
+        const row = createInputRow();
+        btn.previousElementSibling.appendChild(row);
+        row.querySelector('.input-key').focus();
     }
 
     // --- 【修正版】保存记忆 (支持重置 last_id) ---
@@ -603,7 +643,7 @@
             });
 
             // 获取原始 last_id
-            const oldInfo = globalData.short[date] || {};
+            const oldInfo = (globalData.short || {})[date] || {};
             let lastId = 0;
             if (!Array.isArray(oldInfo)) lastId = oldInfo.last_id || 0;
 
@@ -615,14 +655,15 @@
 
             newData[date] = {
                 events: newEvents,
-                last_id: lastId
+                last_id: lastId,
+                reset_progress: Boolean(resetChk && resetChk.checked)
             };
         });
 
         // 发送请求
         const btn = document.querySelector('#edit-actions .btn-save');
         const originalText = btn.textContent;
-        btn.textContent = '保存中...';
+        btn.textContent = SakiI18n.t('保存中...');
         btn.disabled = true;
 
         try {
@@ -635,12 +676,12 @@
             if (res.ok) {
                 globalData.short = newData;
                 toggleEditMode();
-                alert('保存成功！');
+                alert(SakiI18n.t('保存成功！'));
             } else {
-                alert('保存失败');
+                alert(SakiI18n.t('保存失败'));
             }
         } catch(e) {
-            alert('网络错误');
+            alert(SakiI18n.t('网络错误'));
         } finally {
             btn.textContent = originalText;
             btn.disabled = false;
@@ -656,8 +697,16 @@
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ name: name || globalData.meta?.name || '' })
             });
-            if (!res.ok) alert('群名称保存失败');
-        } catch (e) { alert('网络错误'); }
+            if (!res.ok) {
+                const error = await res.json();
+                alert(error.error || SakiI18n.t('群名称保存失败'));
+                return;
+            }
+            globalData.meta.name = name || globalData.meta.name;
+            if (!name && !document.getElementById('group-name').value.trim()) {
+                document.getElementById('group-name').value = globalData.meta.name;
+            }
+        } catch (e) { alert(SakiI18n.t('网络错误')); }
     }
 
     // 保存语言设置
@@ -669,8 +718,8 @@
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ language: lang })
             });
-            if (!res.ok) alert('语言设置保存失败');
-        } catch (e) { alert('网络错误'); }
+            if (!res.ok) alert(SakiI18n.t('语言设置保存失败'));
+        } catch (e) { alert(SakiI18n.t('网络错误')); }
     }
 
     // 置顶开关即时保存
@@ -683,11 +732,11 @@
                 body: JSON.stringify({ pinned: pinned })
             });
             if (!res.ok) {
-                alert('置顶状态保存失败');
+                alert(SakiI18n.t('置顶状态保存失败'));
                 document.getElementById('group-pinned-chk').checked = !pinned;
             }
         } catch (e) {
-            alert('网络错误');
+            alert(SakiI18n.t('网络错误'));
             document.getElementById('group-pinned-chk').checked = !pinned;
         }
     }
@@ -703,11 +752,11 @@
                 body: JSON.stringify({ group_chat_mode: mode })
             });
             if (!res.ok) {
-                alert('群聊模式保存失败');
+                alert(SakiI18n.t('群聊模式保存失败'));
                 document.getElementById('group-mode-chk').checked = !isOffline;
             }
         } catch (e) {
-            alert('网络错误');
+            alert(SakiI18n.t('网络错误'));
             document.getElementById('group-mode-chk').checked = !isOffline;
         }
     }
@@ -722,11 +771,11 @@
                 body: JSON.stringify({ include_user: include })
             });
             if (!res.ok) {
-                alert('保存失败');
+                alert(SakiI18n.t('保存失败'));
                 document.getElementById('include-user-chk').checked = !include;
             }
         } catch (e) {
-            alert('网络错误');
+            alert(SakiI18n.t('网络错误'));
             document.getElementById('include-user-chk').checked = !include;
         }
     }
@@ -760,13 +809,13 @@
             if (result.status === 'success') {
                 imgEl.src = result.url;
                 imgEl.style.opacity = '1';
-                alert('群头像更新成功！');
+                alert(SakiI18n.t('群头像更新成功！'));
             } else {
-                alert('上传失败: ' + result.error);
+                alert(SakiI18n.t('上传失败: ') + result.error);
                 imgEl.style.opacity = '1';
             }
         } catch (e) {
-            alert('网络错误');
+            alert(SakiI18n.t('网络错误'));
             imgEl.style.opacity = '1';
         }
 
@@ -778,7 +827,7 @@
 
     // --- 【新增】删除群聊 ---
     async function deleteGroup() {
-        const confirm1 = confirm("⚠️ 警告：您确定要解散这个群聊吗？");
+        const confirm1 = confirm(SakiI18n.t("⚠️ 警告：您确定要解散这个群聊吗？"));
         if (!confirm1) return;
 
         try {
@@ -788,13 +837,13 @@
             const result = await res.json();
 
             if (result.status === 'success') {
-                alert("群聊已解散。");
+                alert(SakiI18n.t("群聊已解散。"));
                 window.location.href = '/'; // 跳回首页
             } else {
-                alert("删除失败: " + result.error);
+                alert(SakiI18n.t("删除失败: ") + result.error);
             }
         } catch(e) {
-            alert("网络错误");
+            alert(SakiI18n.t("网络错误"));
         }
     }
 
@@ -808,11 +857,11 @@
                 body: JSON.stringify({ active_mode: isChecked })
             });
             if (!res.ok) {
-                alert('保存失败');
+                alert(SakiI18n.t('保存失败'));
                 document.getElementById('group-active-chk').checked = !isChecked;
             }
         } catch (e) {
-            alert('网络错误');
+            alert(SakiI18n.t('网络错误'));
             document.getElementById('group-active-chk').checked = !isChecked;
         }
     }

@@ -1,10 +1,12 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="{{ ui_language }}" data-ai-brand-line="{{ ui_t('ai_brand_line', brand=saki_brand) }}">
 <head>
+  {% include "ui_language_head.html" %}
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 
 <title>上传表情包</title>
+<script src="/static/theme-loader.js"></script>
 
 <style>
 
@@ -13,13 +15,27 @@ box-sizing:border-box;
 -webkit-tap-highlight-color:transparent;
 }
 
+:root{
+--primary-color:#ffb6b9;
+--primary-dark:#f09598;
+--primary-rgba-light:rgba(255,182,185,.1);
+--primary-rgba-lighter:rgba(255,182,185,.15);
+--primary-rgba-medium:rgba(255,182,185,.2);
+--primary-rgba-strong:rgba(255,182,185,.3);
+--primary-rgba-darker:rgba(255,182,185,.5);
+--bg-color:linear-gradient(180deg,#fff7f8,#ffeef1);
+--text-main:#2c3e50;
+--text-muted:#8ca0b3;
+--border-color:#edf1f5;
+}
+
 body{
 margin:0;
 font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;
 
-background:linear-gradient(180deg,#fff7f8,#ffeef1);
+background:var(--bg-color);
 
-color:#333;
+color:var(--text-main);
 
 padding:18px 16px 90px;
 }
@@ -41,21 +57,33 @@ margin-bottom:22px;
 
 text-decoration:none;
 
-color:#ff8da1;
+width:36px;height:36px;border-radius:50%;flex-shrink:0;
 
-font-size:15px;
+display:flex;align-items:center;justify-content:center;
+
+background:rgba(255,255,255,.9);
+
+color:var(--text-main);
+
+font-size:17px;
+
+box-shadow:0 2px 8px rgba(0,0,0,.06);
+
+transition:transform .2s ease;
 }
+
+.back-link:active{transform:scale(.92);}
 
 .title{
 
 position:absolute;
 left:50%;
 transform:translateX(-50%);
-font-size:18px;
+font-size:17px;
 
-font-weight:600;
+font-weight:700;
 
-color:#444;
+color:var(--text-main);
 }
 
 
@@ -63,17 +91,17 @@ color:#444;
 
 .card{
 
-background:rgba(255,255,255,0.8);
+background:rgba(255,255,255,0.85);
 
 border-radius:16px;
 
-padding:16px;
+padding:18px 16px;
 
 margin-bottom:16px;
 
 backdrop-filter:blur(10px);
 
-box-shadow:0 6px 18px rgba(255,170,190,0.18);
+box-shadow:0 2px 8px rgba(0,0,0,0.05);
 }
 
 
@@ -83,9 +111,11 @@ box-shadow:0 6px 18px rgba(255,170,190,0.18);
 
 font-size:13px;
 
-color:#666;
+font-weight:600;
 
-margin-bottom:6px;
+color:var(--text-muted);
+
+margin-bottom:8px;
 
 display:block;
 }
@@ -101,11 +131,22 @@ padding:11px 12px;
 
 border-radius:10px;
 
-border:1px solid #eee;
+border:1px solid var(--border-color);
 
 font-size:14px;
 
 background:#fff;
+
+outline:none;
+
+transition:border-color .2s ease, box-shadow .2s ease;
+}
+
+.input:focus{
+
+border-color:var(--primary-color);
+
+box-shadow:0 0 0 3px var(--primary-rgba-lighter);
 }
 
 
@@ -119,9 +160,38 @@ padding:10px;
 
 border-radius:10px;
 
-border:1px dashed #ffb6b9;
+border:1.5px dashed var(--primary-rgba-darker);
 
 background:#fff;
+
+font-size:13px;
+
+color:var(--text-muted);
+}
+
+/* 原生文件按钮胶囊化 */
+
+input[type="file"]::file-selector-button{
+
+border:none;
+
+border-radius:999px;
+
+padding:7px 14px;
+
+margin-right:10px;
+
+background:var(--primary-rgba-lighter);
+
+color:var(--primary-dark);
+
+font-size:13px;
+
+font-weight:600;
+
+cursor:pointer;
+
+font-family:inherit;
 }
 
 
@@ -149,9 +219,11 @@ margin-bottom:10px;
 
 background:#fff;
 
+border:1px solid var(--border-color);
+
 border-radius:12px;
 
-box-shadow:0 4px 10px rgba(255,160,180,0.15);
+box-shadow:0 2px 6px rgba(0,0,0,0.04);
 }
 
 
@@ -173,13 +245,15 @@ padding:8px 10px;
 
 border-radius:8px;
 
-border:1px solid #eee;
+border:1px solid var(--border-color);
 
 font-size:13px;
 
 background:#fff;
 
 min-width:0;
+
+outline:none;
 }
 
 
@@ -195,13 +269,15 @@ background:#fff0f2;
 
 color:#d9305c;
 
-border-radius:8px;
+border-radius:999px;
 
-padding:6px 10px;
+padding:6px 12px;
 
 cursor:pointer;
 
 font-size:13px;
+
+font-weight:600;
 }
 
 
@@ -215,17 +291,26 @@ padding:12px;
 
 margin-top:8px;
 
-border-radius:12px;
+border-radius:999px;
 
-border:2px dashed #ffb6b9;
+border:1.5px dashed var(--primary-rgba-darker);
 
 background:#fff;
 
-color:#ff8da1;
+color:var(--primary-dark);
 
 font-size:14px;
 
+font-weight:600;
+
 cursor:pointer;
+
+transition:background .2s ease;
+}
+
+.btn-add-row:hover{
+
+background:var(--primary-rgba-light);
 }
 
 
@@ -243,19 +328,19 @@ right:16px;
 
 border:none;
 
-border-radius:24px;
+border-radius:999px;
 
 padding:15px;
 
 font-size:16px;
 
-font-weight:600;
+font-weight:700;
 
 color:#fff;
 
-background:linear-gradient(135deg,#ffb6b9,#ffa0c5);
+background:linear-gradient(135deg,var(--primary-color),var(--primary-dark));
 
-box-shadow:0 6px 20px rgba(255,140,160,0.4);
+box-shadow:0 6px 20px var(--primary-rgba-dark, rgba(255,140,160,0.4));
 
 cursor:pointer;
 }
@@ -276,13 +361,15 @@ box-shadow:none;
 
 <div class="header">
 
-<a href="javascript:history.back()" class="back-link">← 返回</a>
+<a href="javascript:history.back()" class="back-link" aria-label="返回">←</a>
 
 <div class="title">上传表情包</div>
 
-<div></div>
+<div style="width:36px;flex-shrink:0"></div>
 
 </div>
+
+<p class="privacy-note" role="note" style="font-size:12px;color:var(--text-muted);line-height:1.6;background:rgba(255,255,255,0.75);border:1px solid var(--border-color);border-radius:12px;padding:10px 12px;margin:0 0 16px;">{{ ui_t('此表情包将向其他登录用户公开，并可被保存。请确认图片和名称适合公开。') }}</p>
 
 
 <form id="uploadForm">
@@ -346,7 +433,7 @@ let allowedDescriptions=[];
 
 function buildSelectName(i){
 
-var html='<select class="sticker-name" name="sticker_name_'+i+'" required><option value="">请选择描述</option>';
+var html='<select class="sticker-name" name="sticker_name_'+i+SakiI18n.fragment('" required><option value="">请选择描述</option>');
 
 var list=Array.isArray(allowedDescriptions)?allowedDescriptions:[];
 
@@ -384,7 +471,7 @@ div.innerHTML=
 
 buildSelectName(i)+
 
-'<button type="button" class="btn-del">删除</button>';
+SakiI18n.fragment('<button type="button" class="btn-del">删除</button>');
 
 div.querySelector('.btn-del').onclick=function(){
 
@@ -456,7 +543,7 @@ const cover=document.getElementById('cover').files[0];
 
 if(!name){
 
-alert('请填写表情包名称');
+alert(SakiI18n.t('请填写表情包名称'));
 
 return;
 
@@ -466,7 +553,7 @@ return;
 
 if(!cover){
 
-alert('请选择封面图');
+alert(SakiI18n.t('请选择封面图'));
 
 return;
 
@@ -490,7 +577,7 @@ if(inp.files && inp.files[0]) hasFile=true;
 
 if(!hasFile){
 
-alert('请至少添加一个表情');
+alert(SakiI18n.t('请至少添加一个表情'));
 
 return;
 
@@ -498,9 +585,10 @@ return;
 
 
 
+if(!confirm(SakiI18n.t("此表情包将向其他登录用户公开，并可被保存。请确认图片和名称适合公开。"))) return;
 btn.disabled=true;
 
-btn.textContent='上传中…';
+btn.textContent=SakiI18n.t('上传中…');
 
 
 
@@ -538,11 +626,11 @@ if(!desc){ descError=true; }
 
 if(descError){
 
-alert('请为每个表情选择描述');
+alert(SakiI18n.t('请为每个表情选择描述'));
 
 btn.disabled=false;
 
-btn.textContent='上传表情包';
+btn.textContent=SakiI18n.t('上传表情包');
 
 return;
 
@@ -586,11 +674,11 @@ return;
 
 
 
-alert(data.message || '上传失败');
+alert(data.message || SakiI18n.t('上传失败'));
 
 }catch(err){
 
-alert('上传失败');
+alert(SakiI18n.t('上传失败'));
 
 }
 
@@ -598,7 +686,7 @@ alert('上传失败');
 
 btn.disabled=false;
 
-btn.textContent='上传表情包';
+btn.textContent=SakiI18n.t('上传表情包');
 
 };
 

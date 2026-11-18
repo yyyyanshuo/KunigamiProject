@@ -1,0 +1,13 @@
+Result=success
+ExecMainStatus=0
+ActiveState=inactive
+SubState=dead
+Starting saki-attachments-release-20261118.service - /usr/bin/python3 -I -B /home/ubuntu/saki-releases/saki-attachments-20261118/install.py...
+ISOLATED_PROBE_OK single/group transfer captions/replay; prompt persistence/isolation; mixed-image shared instructions; three guides; original transfer yellow and white surfaces; 15px CSS
+active
+active
+active
+RELEASE_OK public login and three guides; installed hashes match
+saki-attachments-release-20261118.service: Deactivated successfully.
+Finished saki-attachments-release-20261118.service - /usr/bin/python3 -I -B /home/ubuntu/saki-releases/saki-attachments-20261118/install.py.
+saki-attachments-release-20261118.service: Consumed 2.060s CPU time.

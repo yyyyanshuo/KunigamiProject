@@ -1,5 +1,8 @@
 from unittest.mock import patch
 
+import pytest
+
+from core.message_tags import ALIASES
 from agent_utils import (
     _normalize_character_lookup_key,
     _resolve_char_id,
@@ -95,6 +98,29 @@ def test_voice_directive_is_preserved_for_frontend_renderer():
     assert cleaned == raw
     assert affinity_delta is None
     assert directive is None
+
+
+@pytest.mark.parametrize("tag", sorted(set(ALIASES.values())))
+def test_canonical_message_tags_survive_agent_cleanup(tag):
+    raw = f"Bonjour\n[{tag}:100€|Pour tes cafés.]"
+    cleaned, delta, directive, events = process_agent_actions(
+        "speaker", raw + "\n[NONE]", return_events=True
+    )
+    assert cleaned == raw
+    assert delta is None
+    assert directive is None
+    assert events == []
+    assert process_agent_actions("speaker", cleaned)[0] == cleaned
+
+
+def test_transfer_survives_while_unknown_and_malformed_actions_are_removed():
+    raw = (
+        "[TRANSFER:100€|Pour tes cafés.]\n"
+        "[TRANSFER_FAKE:100€]\n[UNKNOWN_COMMAND:value]\n"
+        "[SET_EMOTION:arrogant]\n[UPDATE_AFFINITY:user,-1]"
+    )
+    cleaned, _, _ = process_agent_actions("speaker", raw)
+    assert cleaned == "[TRANSFER:100€|Pour tes cafés.]"
 
 
 def test_character_lookup_normalizes_middle_dot_variants():

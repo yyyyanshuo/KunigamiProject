@@ -268,7 +268,7 @@ def scribe_has_spoken_text(text: str) -> bool:
     value = re.sub(r"（[^（）]{1,40}）", "", value)
     value = re.sub(r"\([^()]{1,40}\)", "", value)
     value = re.sub(r"\[[^\[\]]{1,40}\]", "", value)
-    return bool(re.search(r"[A-Za-z0-9\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]", value))
+    return any(character.isalnum() for character in value)
 
 
 def transcribe_speech(

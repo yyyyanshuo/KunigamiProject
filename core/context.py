@@ -1,5 +1,5 @@
 from contextvars import ContextVar
-from flask import session
+from flask import has_request_context, session
 
 from core.config import USERS_DB
 import sqlite3
@@ -9,12 +9,31 @@ import os
 _background_user_var: ContextVar[int | None] = ContextVar("background_user_id", default=None)
 
 
+_account_lease = ContextVar("background_account_lease", default=None)
+
+
 def set_background_user(user_id: int | None) -> None:
+    if user_id is None:
+        clear_background_user()
+        return
+    if _background_user_var.get() == user_id and _account_lease.get() is not None:
+        return
+    from core.account_lifecycle import activity, request_activity
+    if has_request_context() and session.get('user_id') == user_id:
+        request_activity(user_id)
+        return
+    lease = activity(user_id)
+    clear_background_user()
+    _account_lease.set(lease)
     _background_user_var.set(user_id)
 
 
 def clear_background_user() -> None:
     _background_user_var.set(None)
+    lease = _account_lease.get()
+    _account_lease.set(None)
+    if lease is not None:
+        lease.close()
 
 
 # --- 主动任务 API 致命错误上下文 ---
@@ -114,7 +133,8 @@ def list_all_user_ids() -> list[int]:
         cur.execute("SELECT id FROM users ORDER BY id ASC")
         rows = cur.fetchall()
         conn.close()
-        return [r[0] for r in rows]
+        from core.account_lifecycle import pending
+        return [r[0] for r in rows if not pending(r[0])]
     except Exception as e:
         print(f"[list_all_user_ids] 错误: {e}")
         return []

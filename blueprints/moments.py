@@ -1,4 +1,8 @@
+from services.memory_store import memory_now
+from core.runtime import DATA_ROOT
 import os
+from copy import deepcopy
+from werkzeug.exceptions import Conflict
 import re
 import json
 import threading
@@ -25,18 +29,34 @@ from core.time_utils import (
 from core.utils import (
     get_paths, safe_save_json, _get_characters_config_file,
     get_characters_config_for_current_user, get_current_username,
-    _load_user_settings, _get_groups_config_file,
+    _load_user_settings, _get_groups_config_file, locked_group_catalog,
     is_character_available_for_group_chat,
 )
 from services.memory_store import append_short_memory_events
+from services.moment_memory import (
+    format_moment_memory, moment_comment_snapshot, moment_reply_source,
+)
 from services.image_tags import build_image_tag
+from services.moment_visibility import (
+    blocked_ids, normalize_blocked_ids, extract_block_lines,
+    remove_blocked_reactions, visibility_prompt,
+)
+from services.memory_store import memory_file_lock, atomic_write_json
+from services.character_state import character_state_lock
 
 # --- Fallback constants (redefined in blueprint scope) ---
-MOMENTS_DATA_FILE = os.path.join(BASE_DIR, "configs", "moments_data.json")
-MOMENTS_LAST_POST_FILE = os.path.join(BASE_DIR, "configs", "moments_last_post.json")
-ACTIVE_MOMENTS_ENABLED_FILE = os.path.join(BASE_DIR, "configs", "active_moments_enabled.json")
+MOMENTS_DATA_FILE = os.path.join(DATA_ROOT, "configs", "moments_data.json")
+MOMENTS_LAST_POST_FILE = os.path.join(DATA_ROOT, "configs", "moments_last_post.json")
+ACTIVE_MOMENTS_ENABLED_FILE = os.path.join(DATA_ROOT, "configs", "active_moments_enabled.json")
 
 moments_bp = Blueprint('moments', __name__, template_folder='templates')
+
+
+@moments_bp.errorhandler(Conflict)
+def _moment_save_conflict(_error):
+    from core.localization import tr
+    return jsonify(error=tr("朋友圈已更新，请刷新后重试。"), code="moment_save_conflict"), 409
+
 
 
 # =============================================================================
@@ -64,8 +84,9 @@ def clean_moments_agent_instructions(text):
     pattern = r'[\[【]\s*(?:UPDATE_AFFINITY|SET_EMOTION|SET_PERSONALITY|SET_SLEEP_TIME|SET_RELATION|ADD_SCHEDULE|ADD_PERSONA|DELETE_PERSONA|EDIT_PERSONA|REWRITE_PERSONA|ADD_RELATION|DELETE_RELATION|EDIT_RELATION|REWRITE_RELATION|ADD_PLAN|DELETE_PLAN|EDIT_PLAN|REWRITE_PLAN|MOOD|DIRECT_TO_GROUP|DIRECT_TO_USER|DIRECT_END|NONE|MOVE_TO|MOVE_TO_COORD|EXPLORE|SET_CHAT_MODE|MUSIC_[A-Z0-9_]+)(?::|：)?\s*.*?[\]】]'
     text = re.sub(pattern, '', text, flags=re.IGNORECASE | re.DOTALL)
 
-    # 额外兜底清理所有大写加下划线的指令标签，避免未定义或畸形的指令流出（不清理 SEARCH_IMG 和 GENERATE_IMAGE）
-    general_pattern = r'[\[【]\s*(?!(?:SEARCH_IMG|GENERATE_IMAGE)\b)(?:[A-Z_][A-Z0-9_]*)(?::|：)?\s*.*?[\]】]'
+    # 额外兜底清理所有大写加下划线的指令标签，避免未定义或畸形的指令流出
+    # （不清理 SEARCH_IMG 和 GENERATE_IMAGE；IMAGE 为搜图/生图转化后的图片标签前缀 [IMAGE](文件名)(描述)，必须保留）
+    general_pattern = r'[\[【]\s*(?!(?:SEARCH_IMG|GENERATE_IMAGE|IMAGE)\b)(?:[A-Z_][A-Z0-9_]*)(?::|：)?\s*.*?[\]】]'
     text = re.sub(general_pattern, '', text, flags=re.IGNORECASE | re.DOTALL)
 
     # 移除可能产生的多余空行
@@ -120,16 +141,18 @@ def _set_active_moments_enabled(enabled):
 
 def _get_moments_id_display(user_id=None):
     """返回 (id -> avatar, id -> remark) 用于朋友圈展示。含 user 与所有角色。"""
+    from core.localization import tr
     avatars, remarks = {}, {}
     # 当前登录用户的头像与昵称
     try:
-        user_cfg = _load_user_settings(user_id=user_id)
+        from core.localization import read_settings
+        user_cfg = read_settings(user_id)
         avatars["user"] = user_cfg.get("avatar") or "/user_avatar"
-        remarks["user"] = user_cfg.get("current_user_name") or "我"
+        remarks["user"] = user_cfg.get("current_user_name") or tr("我")
     except Exception:
         pass
     if not avatars.get("user"): avatars["user"] = "/user_avatar"
-    if not remarks.get("user"): remarks["user"] = "我"
+    if not remarks.get("user"): remarks["user"] = tr("我")
     cfg_file = _get_characters_config_file(user_id=user_id)
     if os.path.exists(cfg_file):
         try:
@@ -164,6 +187,133 @@ def _find_moment_post(raw, char_id, timestamp_str):
         if post.get("char_id") == char_id and post.get("timestamp") == timestamp_str:
             return i, post
     return None, None
+
+
+def _read_moment(moment, user_id=None):
+    path, _ = get_moments_paths(user_id=user_id)
+    try:
+        with open(path, encoding="utf-8-sig") as handle:
+            _, current = _find_moment_post(json.load(handle), moment['char_id'], moment['timestamp'])
+        return current
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def _moment_allows(moment, character_id, user_id=None):
+    # A missing context is supported for standalone generator callers; all post entry points pass one.
+    if moment is None:
+        return True
+    current = _read_moment(moment, user_id)
+    return current is not None and character_id not in (blocked_ids(moment) | blocked_ids(current))
+
+
+def _visibility_error():
+    return jsonify({'error': '该角色对此条朋友圈不可见', 'code': 'moment_not_visible'}), 403
+
+
+def _moment_directive(directive, moment):
+    result = dict(directive, source_scene='moments')
+    if moment is not None:
+        result['moment_visibility'] = {key: moment[key] for key in ('char_id', 'timestamp')}
+    return result
+
+
+def moment_directive_allowed(directive, member_ids, user_id=None):
+    moment = directive.get('moment_visibility')
+    return moment is None or all(_moment_allows(moment, cid, user_id) for cid in member_ids)
+
+
+class _MomentSnapshot(list):
+    def __init__(self, posts, original=None):
+        super().__init__(posts)
+        self.original = deepcopy(posts) if original is None else original
+
+
+def _load_moments_snapshot(path):
+    try:
+        with open(path, encoding='utf-8-sig') as handle:
+            return _MomentSnapshot(json.load(handle))
+    except FileNotFoundError:
+        return _MomentSnapshot([])
+
+
+def _moment_key(post):
+    return post.get('char_id'), post.get('timestamp')
+
+
+def _save_moments(path, data):
+    """Apply only the requested changes against the current locked snapshot."""
+    with memory_file_lock(path):
+        current = _load_moments_snapshot(path)
+        def grouped(rows):
+            by_key = {}
+            for post in rows:
+                by_key.setdefault(_moment_key(post), []).append(post)
+            return by_key
+
+        previous, proposed, live = map(grouped, (data.original, data, current))
+        missing = object()
+        for key in dict.fromkeys([*proposed, *previous]):
+            old_rows = previous.get(key, [])
+            new_rows = proposed.get(key, [])
+            if old_rows == new_rows:
+                continue
+            latest_rows = live.get(key, [])
+            if max(len(old_rows), len(new_rows), len(latest_rows)) > 1:
+                raise Conflict()
+            if not new_rows:
+                live.pop(key, None)
+                continue
+            old = old_rows[0] if old_rows else None
+            post = new_rows[0]
+            latest = latest_rows[0] if latest_rows else None
+            if old is None:
+                if latest is not None:
+                    raise Conflict()
+                latest = deepcopy(post)
+                live[key] = [latest]
+            else:
+                if latest is None:
+                    raise Conflict()
+                for field in old.keys() | post.keys():
+                    if field == 'blocked_character_ids':
+                        continue
+                    before = old.get(field, missing)
+                    after = post.get(field, missing)
+                    if before == after:
+                        continue
+                    actual = latest.get(field, missing)
+                    if actual != before and actual != after:
+                        raise Conflict()
+                    if after is missing:
+                        latest.pop(field, None)
+                    else:
+                        latest[field] = deepcopy(after)
+            ids = blocked_ids(latest) | blocked_ids(post)
+            if ids or 'blocked_character_ids' in post:
+                latest['blocked_character_ids'] = sorted(ids)
+            remove_blocked_reactions(latest)
+        existing = {_moment_key(post) for post in current}
+        merged = [post for post in current if _moment_key(post) in live]
+        merged.extend(post for key, rows in live.items() if key not in existing for post in rows)
+        atomic_write_json(path, merged)
+        data.original = deepcopy(list(data))
+
+
+def _append_moment_reactions(moment, likers, comments, user_id=None):
+    path, _ = get_moments_paths(user_id=user_id)
+    with memory_file_lock(path):
+        if not os.path.exists(path):
+            return
+        with open(path, encoding='utf-8-sig') as handle:
+            data = json.load(handle)
+        _, current = _find_moment_post(data, moment['char_id'], moment['timestamp'])
+        if current is None:
+            return
+        current.setdefault('likers', []).extend(likers)
+        current.setdefault('comments', []).extend(comments)
+        remove_blocked_reactions(current)
+        atomic_write_json(path, data)
 
 
 def process_moments_media_tags(text, char_id, user_id=None):
@@ -213,31 +363,22 @@ def process_moments_media_tags(text, char_id, user_id=None):
 def append_moment_event_to_short_memory(
     char_id, context_text, user_id=None, timestamp_str=None
 ):
-    """
-    将朋友圈互动用 AI 总结为一句话，追加到角色的当日短期记忆中。
-    使用与记忆总结相同的模型（summary），context_text 为互动描述。
-    """
+    """将朋友圈原文和互动内容直接追加到短期记忆，不调用模型或截断内容。"""
     if not char_id or char_id == "user" or not (context_text or "").strip():
         return
-    from app import call_ai_to_summarize
     try:
-        summary = call_ai_to_summarize((context_text or "").strip(), "moment", char_id, user_id=user_id)
-        if not summary:
-            return
-        line = summary.strip().split("\n")[0].strip()
-        line = re.sub(r"^-\s*\[\d{2}:\d{2}\]\s*", "", line).strip()
-        if not line:
-            return
+        content = context_text.strip()
         _, prompts_dir = get_paths(char_id, user_id=user_id)
         short_file = os.path.join(prompts_dir, "6_memory_short.json")
         now_bjt = parse_beijing_timestamp(timestamp_str) or beijing_now()
         date_str = now_bjt.strftime("%Y-%m-%d")
         time_str = now_bjt.strftime("%H:%M")
-        event_text = line if line.startswith("[朋友圈]") else f"[朋友圈] {line}"
+        event_text = content if content.startswith("[朋友圈]") else f"[朋友圈] {content}"
         append_short_memory_events(
             short_file,
             date_str,
-            [{"time": time_str, "event": event_text}],
+            [{"time": time_str, "event": event_text, "timestamp": now_bjt.isoformat()}],
+            user_id=user_id,
         )
     except Exception as e:
         print(f"   [Moments] 写入短期记忆失败 [{char_id}]: {e}")
@@ -248,7 +389,7 @@ def sync_memory_before_moments(char_id, user_id=None):
     发朋友圈前，同步该角色的单聊及群聊记忆。
     """
     from app import sync_memory_before_single_chat, update_short_memory_for_date
-    now = beijing_now()
+    now = memory_now(user_id)
     today_str = now.strftime("%Y-%m-%d")
     yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
     dates = [yesterday_str, today_str]
@@ -345,11 +486,13 @@ def _weighted_sample_no_replacement(candidates, k):
     return result
 
 
-def _generate_moment_comment(commenter_id, post_author_id, post_content, is_mentioned=False, user_id=None):
+def _generate_moment_comment(commenter_id, post_author_id, post_content, is_mentioned=False, user_id=None, moment=None):
     """
     为朋友圈生成一条简短评论。
     is_mentioned: 是否是被 @ 提及的角色
     """
+    if not _moment_allows(moment, commenter_id, user_id):
+        return None
     from app import (
         call_gemini, call_openrouter, get_model_config, get_ai_language,
         should_use_prompt_v2, build_system_prompt_v2, build_system_prompt,
@@ -463,11 +606,15 @@ def _generate_moment_comment(commenter_id, post_author_id, post_content, is_ment
         {"role": "user", "content": user_msg}
     ]
     try:
+        if not _moment_allows(moment, commenter_id, user_id):
+            return None
         route, current_model = get_model_config("moments", user_id=user_id)
         if route == "relay":
             text = call_openrouter(messages, char_id=commenter_id, model_name=current_model, user_id=user_id)
         else:
             text = call_gemini(messages, char_id=commenter_id, model_name=current_model, user_id=user_id)
+        if not _moment_allows(moment, commenter_id, user_id):
+            return None
         if text:
             text = text.strip().strip('"\'')
             text, _, directive = process_agent_actions(commenter_id, text, user_id or get_current_user_id())
@@ -476,31 +623,32 @@ def _generate_moment_comment(commenter_id, post_author_id, post_content, is_ment
             text = clean_moments_agent_instructions(text)
 
             author_ref = "用户" if post_author_id == "user" else author_name
-            mem_ctx = f"看到{author_ref}的朋友圈：「{post_content[:100]}」。你评论说：「{text}」。"
+            mem_ctx = format_moment_memory(post_content, author_name=author_ref, comment_content=text)
             append_moment_event_to_short_memory(commenter_id, mem_ctx, user_id=user_id)
 
             if directive:
                 uid = user_id or get_current_user_id()
-                _d = dict(directive, source_scene="moments")
+                _d = _moment_directive(directive, moment)
                 _cid = commenter_id
                 _txt = f"朋友圈原文：{post_content}\n你的评论：{text}"
                 def _bg(): set_background_user(uid); _execute_directive(_d, _cid, _txt)
                 threading.Thread(target=_bg, daemon=True).start()
 
-            # (底层不再自动写入记忆，由调用方统一处理)
             return text
     except Exception as e:
         print(f"   [Moments] 评论生成失败 {commenter_id}: {e}")
     return None
 
 
-def _generate_moment_reply_to_user(author_char_id, post_content, user_comment, user_id=None):
+def _generate_moment_reply_to_user(author_char_id, post_content, user_comment, user_id=None, moment=None):
     """让朋友圈作者（角色）对用户的评论生成一条简短回复。
-    流程：总结短期记忆 -> 生成回复 -> 记录到短期记忆。
+    流程：同步已有记忆 -> 生成回复 -> 将原文、上游评论和回复直接写入短期记忆。
     """
     if user_id is None:
         from core.context import get_current_user_id
         user_id = get_current_user_id()
+    if not _moment_allows(moment, author_char_id, user_id):
+        return None
     from app import (
         call_gemini, call_openrouter, get_model_config, get_ai_language,
         should_use_prompt_v2, build_system_prompt_v2, build_system_prompt,
@@ -548,11 +696,15 @@ def _generate_moment_reply_to_user(author_char_id, post_content, user_comment, u
         {"role": "user", "content": user_msg}
     ]
     try:
+        if not _moment_allows(moment, author_char_id, user_id):
+            return None
         route, current_model = get_model_config("moments", user_id=user_id)
         if route == "relay":
             text = call_openrouter(messages, char_id=author_char_id, model_name=current_model, user_id=user_id)
         else:
             text = call_gemini(messages, char_id=author_char_id, model_name=current_model, user_id=user_id)
+        if not _moment_allows(moment, author_char_id, user_id):
+            return None
         if text:
             text = text.strip().strip('"\'')
             text, _, directive = process_agent_actions(author_char_id, text, user_id or get_current_user_id())
@@ -560,17 +712,19 @@ def _generate_moment_reply_to_user(author_char_id, post_content, user_comment, u
                 text = text[:200]
 
             text = clean_moments_agent_instructions(text)
-            mem_ctx = f"你在朋友圈发了内容：「{post_content}」。对于用户的评论「{user_comment}」，你回复说：「{text}」。"
+            mem_ctx = format_moment_memory(
+                post_content, author_name="我", comment_content=text,
+                reply_to_name="用户", upstream_content=user_comment,
+            )
             append_moment_event_to_short_memory(author_char_id, mem_ctx, user_id=user_id)
 
             if directive:
                 uid = user_id or get_current_user_id()
-                _d = dict(directive, source_scene="moments")
+                _d = _moment_directive(directive, moment)
                 _cid = author_char_id
                 _txt = f"你的朋友圈：{post_content}\n用户评论：{user_comment}\n你的回复：{text}"
                 def _bg(): set_background_user(uid); _execute_directive(_d, _cid, _txt)
                 threading.Thread(target=_bg, daemon=True).start()
-            # (底层不再自动写入记忆，由调用方统一处理)
             return text
     except Exception as e:
         print(f"   [Moments] 角色回复评论失败 {author_char_id}: {e}")
@@ -591,9 +745,13 @@ def _execute_directive(directive, char_id, message_text):
         process_agent_actions, get_char_name, _get_char_chat_mode,
         init_char_db, sync_memory_before_single_chat, sync_memory_before_group_chat,
         build_group_relationship_prompt, ensure_directive_chat, get_group_dir,
+        _moment_directive_can_start,
     )
     user_id = get_current_user_id()
+    directive = dict(directive, source_scene="moments")
     try:
+        if not _moment_directive_can_start(directive, char_id):
+            return
         char_name = get_char_name(char_id)
         print(f"  [_execute_directive] 开始执行, char={char_name}({char_id}), directive={directive}", flush=True)
         if directive.get("type") == "user":
@@ -653,6 +811,8 @@ def _execute_directive(directive, char_id, message_text):
                 return
             s_clean, _, _ = process_agent_actions(char_id, s_clean, user_id)
 
+            if not _moment_directive_can_start(directive, char_id):
+                return
             if s_clean:
                 s_conn2 = sqlite3.connect(s_db_path)
                 s_cursor2 = s_conn2.cursor()
@@ -774,6 +934,8 @@ def _execute_directive(directive, char_id, message_text):
         init_reply = re.sub(init_name_pat, '', init_reply).strip()
         print(f"  FIRST MESSAGE: {init_reply}")
 
+        if not _moment_directive_can_start(directive, char_id):
+            return
         if init_reply:
             d_conn = sqlite3.connect(d_db_path)
             d_cursor = d_conn.cursor()
@@ -917,13 +1079,15 @@ def _execute_directive(directive, char_id, message_text):
         traceback.print_exc()
 
 
-def _generate_ai_reply_to_any_comment(replying_char_id, post_author_id, post_content, comments_list, target_comment_index, user_id=None):
+def _generate_ai_reply_to_any_comment(replying_char_id, post_author_id, post_content, comments_list, target_comment_index, user_id=None, moment=None):
     """
     让 replying_char_id 对朋友圈的某条特定评论进行回复。
     """
     if user_id is None:
         from core.context import get_current_user_id
         user_id = get_current_user_id()
+    if not _moment_allows(moment, replying_char_id, user_id):
+        return None
     from app import (
         call_gemini, call_openrouter, get_model_config, get_ai_language,
         should_use_prompt_v2, build_system_prompt_v2, build_system_prompt,
@@ -933,9 +1097,10 @@ def _generate_ai_reply_to_any_comment(replying_char_id, post_author_id, post_con
     from core.circuit_breaker import (
         get_circuit_breaker_info, clear_circuit_breaker_info,
     )
+    from services.ai_client import is_ai_error_response
     # 生成前：同步该角色的短期记忆
     try:
-        sync_memory_before_moments(replying_char_id)
+        sync_memory_before_moments(replying_char_id, user_id=user_id)
     except Exception as e:
         print(f"   [Moment Any Reply] 记忆同步失败 {replying_char_id}: {e}，继续生成")
 
@@ -1025,12 +1190,18 @@ def _generate_ai_reply_to_any_comment(replying_char_id, post_author_id, post_con
     ]
 
     try:
+        if not _moment_allows(moment, replying_char_id, user_id):
+            return None
         route, current_model = get_model_config("moments", user_id=user_id)
         if route == "relay":
             text = call_openrouter(messages, char_id=replying_char_id, model_name=current_model, user_id=user_id)
         else:
             text = call_gemini(messages, char_id=replying_char_id, model_name=current_model, user_id=user_id)
 
+        if is_ai_error_response(text):
+            return None
+        if not _moment_allows(moment, replying_char_id, user_id):
+            return None
         if text:
             text = text.strip().strip('"\'')
             text, _, directive = process_agent_actions(replying_char_id, text, user_id or get_current_user_id())
@@ -1038,15 +1209,15 @@ def _generate_ai_reply_to_any_comment(replying_char_id, post_author_id, post_con
                 text = text[:200]
 
             text = clean_moments_agent_instructions(text)
-            memory_event = (
-                f"在{post_author_name}的朋友圈：「{post_content[:100]}」下，"
-                f"你回复了{target_author_name}的评论「{target_comment_content}」，你说：「{text}」。"
+            memory_event = format_moment_memory(
+                post_content, author_name=post_author_name, comment_content=text,
+                reply_to_name=target_author_name, upstream_content=target_comment_content,
             )
             append_moment_event_to_short_memory(replying_char_id, memory_event, user_id=user_id)
 
             if directive:
                 uid = user_id or get_current_user_id()
-                _d = dict(directive, source_scene="moments")
+                _d = _moment_directive(directive, moment)
                 _cid = replying_char_id
                 _txt = (
                     f"朋友圈原文：{post_content}\n目标评论：{target_comment_content}\n"
@@ -1054,7 +1225,6 @@ def _generate_ai_reply_to_any_comment(replying_char_id, post_author_id, post_con
                 )
                 def _bg(): set_background_user(uid); _execute_directive(_d, _cid, _txt)
                 threading.Thread(target=_bg, daemon=True).start()
-            # (底层不再自动写入记忆，由调用方统一处理)
             return text
     except Exception as e:
         print(f"   [Moments] 任意回复评论生成失败 {replying_char_id}: {e}")
@@ -1067,12 +1237,13 @@ def _disable_char_active_messaging(char_id, user_id=None):
     if not os.path.exists(cfg_file):
         return
     try:
-        with open(cfg_file, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-        if char_id in cfg:
-            cfg[char_id]["light_sleep"] = True
-            safe_save_json(cfg_file, cfg)
-            print(f"  [AutoStop] 角色 {char_id} 已自动开启浅睡眠，停止主动消息。")
+        with character_state_lock(cfg_file):
+            with open(cfg_file, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            if char_id in cfg:
+                cfg[char_id]["light_sleep"] = True
+                safe_save_json(cfg_file, cfg)
+                print(f"  [AutoStop] 角色 {char_id} 已自动开启浅睡眠，停止主动消息。")
     except Exception as e:
         print(f"  [AutoStop] 停止角色 {char_id} 主动消息失败: {e}")
 
@@ -1083,12 +1254,11 @@ def _disable_group_active_messaging(group_id):
     if not os.path.exists(cfg_file):
         return
     try:
-        with open(cfg_file, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-        if group_id in cfg:
-            cfg[group_id]["active_mode"] = False
-            safe_save_json(cfg_file, cfg)
-            print(f"  [AutoStop] 群 {group_id} 已自动关闭主动消息。")
+        with locked_group_catalog(cfg_file) as cfg:
+            if group_id in cfg:
+                cfg[group_id]["active_mode"] = False
+                safe_save_json(cfg_file, cfg)
+                print(f"  [AutoStop] 群 {group_id} 已自动关闭主动消息。")
     except Exception as e:
         print(f"  [AutoStop] 停止群 {group_id} 主动消息失败: {e}")
 
@@ -1115,6 +1285,9 @@ def _background_generate_moment_reactions(user_id, char_id, post_ts_str, post_co
             if m_ids is None:
                 m_ids = []
 
+            moment = _read_moment({'char_id': char_id, 'timestamp': post_ts_str}, user_id)
+            if moment is None:
+                return
             new_likers = []
             new_comments = []
 
@@ -1134,6 +1307,7 @@ def _background_generate_moment_reactions(user_id, char_id, post_ts_str, post_co
                 rel_score_map = {cid: score for cid, score in rel_candidates}
 
             for target_cid, info in chars_config.items():
+                if not _moment_allows(moment, target_cid, user_id): continue
                 if target_cid == char_id: continue # 自己不给自己点赞评论
                 if target_cid in m_ids: continue # 已经同步处理过了
 
@@ -1163,7 +1337,7 @@ def _background_generate_moment_reactions(user_id, char_id, post_ts_str, post_co
                     new_likers.append({"liker_id": target_cid, "timestamp": _generate_random_ts_within_24h(post_ts_str)})
 
                 if should_comment:
-                    comment_text = _generate_moment_comment(target_cid, char_id, post_content, user_id=user_id)
+                    comment_text = _generate_moment_comment(target_cid, char_id, post_content, user_id=user_id, moment=moment)
                     if comment_text:
                         print(f"   [Moments Background] Generated comment from {target_cid}: {comment_text[:30]}...")
                         comment_ts = _generate_random_ts_within_24h(post_ts_str)
@@ -1179,26 +1353,7 @@ def _background_generate_moment_reactions(user_id, char_id, post_ts_str, post_co
                 print(f"  [Moments Background] No new reactions generated for post {post_ts_str}, worker finished.")
                 return
 
-            # 回填到文件
-            moments_path, _ = get_moments_paths(user_id=user_id)
-            if os.path.exists(moments_path):
-                with open(moments_path, "r", encoding="utf-8-sig") as f:
-                    data = json.load(f)
-
-                # 寻找匹配的帖子
-                found = False
-                for post in data:
-                    if post.get("char_id") == char_id and post.get("timestamp") == post_ts_str:
-                        post.setdefault("likers", []).extend(new_likers)
-                        post.setdefault("comments", []).extend(new_comments)
-                        found = True
-                        break
-
-                if found:
-                    safe_save_json(moments_path, data)
-                    print(f"  [Moments Background] Successfully saved {len(new_likers)} likes and {len(new_comments)} comments for post {post_ts_str}.")
-                else:
-                    print(f"  [Moments Background] Could not find post with ts {post_ts_str} to save reactions.")
+            _append_moment_reactions(moment, new_likers, new_comments, user_id)
 
         except Exception as e:
             print(f"  [Moments Background] An unexpected error occurred in worker: {e}")
@@ -1208,7 +1363,7 @@ def _background_generate_moment_reactions(user_id, char_id, post_ts_str, post_co
     threading.Thread(target=worker, args=(mentioned_ids,), daemon=True).start()
 
 
-def _generate_likes_comments_for_user_moment(post_ts_str, post_content, only_mentioned=False, user_id=None):
+def _generate_likes_comments_for_user_moment(post_ts_str, post_content, only_mentioned=False, user_id=None, moment=None):
     """用户发朋友圈后，根据各角色亲密度随机生成点赞和评论。返回 (likers, comments)。"""
     now = beijing_now().replace(tzinfo=None)
     try:
@@ -1217,12 +1372,12 @@ def _generate_likes_comments_for_user_moment(post_ts_str, post_content, only_men
         post_dt = now
     end_dt = post_dt + timedelta(hours=24)
 
-    def random_ts_in_24h():
+    def random_ts_in_24h(info):
         """生成24小时内的随机时间戳，避免在23:00~7:00之间（深睡眠时间）"""
         while True:
             delta_sec = random.randint(0, 24 * 3600)
             t = post_dt + timedelta(seconds=delta_sec)
-            hour = t.hour
+            hour = parse_beijing_timestamp(t).astimezone(get_zone(get_character_timezone(info))).hour
             # 避开23:00~7:00的时间段
             if not (hour >= 23 or hour < 7):
                 return t.strftime("%Y-%m-%d %H:%M:%S")
@@ -1249,6 +1404,8 @@ def _generate_likes_comments_for_user_moment(post_ts_str, post_content, only_men
                 mentioned_ids.append(cid)
 
     for char_id, info in chars_config.items():
+        if not _moment_allows(moment, char_id, user_id):
+            continue
         # 如果是被 @ 的角色，必须生成评论，且时间与朋友圈相同
         is_mentioned = char_id in mentioned_ids
 
@@ -1264,13 +1421,13 @@ def _generate_likes_comments_for_user_moment(post_ts_str, post_content, only_men
         should_like = is_mentioned or (random.random() < p_like)
 
         if should_like:
-            ts = post_ts_str if is_mentioned else random_ts_in_24h()
+            ts = post_ts_str if is_mentioned else random_ts_in_24h(info)
             likers.append({"liker_id": char_id, "timestamp": ts})
 
         if should_comment:
-            comment_text = _generate_moment_comment(char_id, "user", post_content, is_mentioned=is_mentioned, user_id=user_id)
+            comment_text = _generate_moment_comment(char_id, "user", post_content, is_mentioned=is_mentioned, user_id=user_id, moment=moment)
             if comment_text:
-                ts = post_ts_str if is_mentioned else random_ts_in_24h()
+                ts = post_ts_str if is_mentioned else random_ts_in_24h(info)
                 comments.append({
                     "commenter_id": char_id,
                     "content": comment_text,
@@ -1339,6 +1496,8 @@ def trigger_active_moments(char_id, user_id=None, instruction=None):
         "Output ONLY the post body, without quotes or prefixes. If redirecting, append exactly one redirect tag on a new line; the tag is not part of the post body."
     )
 
+    trigger_msg += visibility_prompt(get_characters_config_for_current_user(), char_id)
+
     if instruction and instruction.strip():
         trigger_msg += (
             f"\n\n**SPECIAL REQUIREMENT / 特别要求:**\n{instruction.strip()}\n"
@@ -1370,6 +1529,9 @@ def trigger_active_moments(char_id, user_id=None, instruction=None):
         if not content:
             return False
 
+        content, selected_blocks = extract_block_lines(content, get_characters_config_for_current_user(), char_id)
+        if not content:
+            return False
         content, _, directive_m = process_agent_actions(char_id, content, user_id or get_current_user_id())
 
         # --- 朋友圈媒体标签解析 ---
@@ -1393,12 +1555,30 @@ def trigger_active_moments(char_id, user_id=None, instruction=None):
             if cid not in mentioned_ids:
                 mentioned_ids.append(cid)
 
+    new_post = {
+        "char_id": char_id,
+        "content": content,
+        "timestamp": post_ts_str,
+        "likers": likers_data,
+        "comments": comments_data,
+        "blocked_character_ids": selected_blocks
+    }
+    if instruction and instruction.strip():
+        new_post["instruction"] = instruction.strip()
+
+    # 保存帖子
+    moments_path, last_post_path = get_moments_paths(user_id=user_id)
+    raw = _load_moments_snapshot(moments_path)
+    raw.append(new_post)
+    _save_moments(moments_path, raw)
+
     if mentioned_ids:
         print(f"  [Moments] 检测到 @ 提及: {mentioned_ids}")
         for mid in mentioned_ids:
+            if not _moment_allows(new_post, mid, user_id): continue
             if mid == "user" or mid == char_id: continue
             likers_data.append({"liker_id": mid, "timestamp": post_ts_str})
-            comment_text = _generate_moment_comment(mid, char_id, content, is_mentioned=True, user_id=user_id)
+            comment_text = _generate_moment_comment(mid, char_id, content, is_mentioned=True, user_id=user_id, moment=new_post)
             if comment_text:
                 print(f"   -> [Sync Reply] {mid} 已回复")
                 comments_data.append({
@@ -1407,29 +1587,11 @@ def trigger_active_moments(char_id, user_id=None, instruction=None):
                     "timestamp": post_ts_str
                 })
 
-    new_post = {
-        "char_id": char_id,
-        "content": content,
-        "timestamp": post_ts_str,
-        "likers": likers_data,
-        "comments": comments_data
-    }
-    if instruction and instruction.strip():
-        new_post["instruction"] = instruction.strip()
+    _append_moment_reactions(new_post, likers_data, comments_data, user_id)
 
-    # 保存帖子
-    moments_path, last_post_path = get_moments_paths(user_id=user_id)
-    raw = []
-    if os.path.exists(moments_path):
-        try:
-            with open(moments_path, "r", encoding="utf-8-sig") as f:
-                raw = json.load(f)
-        except: raw = []
-    raw.append(new_post)
-    safe_save_json(moments_path, raw)
 
     # 记录发帖者记忆
-    ctx = f"你发了一条朋友圈，内容：「{(content or '')[:300]}」。"
+    ctx = format_moment_memory(content)
     append_moment_event_to_short_memory(
         char_id, ctx, user_id=user_id, timestamp_str=post_ts_str
     )
@@ -1437,7 +1599,7 @@ def trigger_active_moments(char_id, user_id=None, instruction=None):
     # 朋友圈事件已落库并写入短期记忆后，才允许切换到单聊或群聊。
     if directive_m:
         uid = user_id or get_current_user_id()
-        _d = dict(directive_m, source_scene="moments")
+        _d = _moment_directive(directive_m, new_post)
         _cid, _txt = char_id, content
         def _bg(): set_background_user(uid); _execute_directive(_d, _cid, _txt)
         threading.Thread(target=_bg, daemon=True).start()
@@ -1493,7 +1655,10 @@ def set_active_moments_enabled():
 def get_moments_characters():
     """获取所有有权发朋友圈的角色列表。用于前端筛选。"""
     user_id = get_current_user_id()
-    _, remarks = _get_moments_id_display(user_id=user_id)
+    avatars, remarks = _get_moments_id_display(user_id=user_id)
+    if request.args.get('details') == '1':
+        return jsonify([{'id': cid, 'name': name, 'avatar': avatars.get(cid)}
+                        for cid, name in remarks.items() if cid != 'user'])
     # 移除 user，前端单独处理
     if "user" in remarks:
         remarks.pop("user")
@@ -1612,8 +1777,11 @@ def get_moments():
             elif char_id != filter_char_id:
                 continue
 
+        blocked = blocked_ids(post)
         comments_ok = []
         for src_idx, c in enumerate(post.get("comments", [])):
+            if c.get("commenter_id") in blocked or c.get("reply_to") in blocked:
+                continue
             try:
                 ts = datetime.strptime(c["timestamp"], "%Y-%m-%d %H:%M:%S")
                 if ts <= now:
@@ -1631,8 +1799,8 @@ def get_moments():
                     })
             except: pass
         # 支持新格式 likers: [{liker_id, timestamp}] 与旧格式 liker_ids: []
-        liker_ids_raw = post.get("liker_ids", [])
-        likers_with_ts = post.get("likers", [])
+        liker_ids_raw = [cid for cid in post.get("liker_ids", []) if cid not in blocked]
+        likers_with_ts = [row for row in post.get("likers", []) if row.get("liker_id") not in blocked]
         if likers_with_ts:
             liker_ids_ok = []
             for like in likers_with_ts:
@@ -1653,7 +1821,11 @@ def get_moments():
             "remark": remarks.get(char_id, char_id),
             "liker_ids": liker_ids_ok,
             "liker_remarks": liker_remarks,
-            "comments": comments_ok
+            "comments": comments_ok,
+            "blocked_character_ids": sorted(blocked),
+            "blocked_characters": [{'id': cid, 'name': remarks.get(cid, cid),
+                                    'avatar': avatars.get(cid, '/static/default_avatar.png')}
+                                   for cid in sorted(blocked)]
         })
     moments.sort(key=lambda x: x["timestamp"], reverse=True)
 
@@ -1678,8 +1850,7 @@ def moments_like():
     if not os.path.exists(moments_path):
         return jsonify({"error": "暂无朋友圈数据"}), 404
     try:
-        with open(moments_path, "r", encoding="utf-8-sig") as f:
-            raw = json.load(f)
+        raw = _load_moments_snapshot(moments_path)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1694,7 +1865,7 @@ def moments_like():
         likers.append({"liker_id": "user", "timestamp": beijing_now().strftime("%Y-%m-%d %H:%M:%S")})
         post["likers"] = likers
         raw[idx] = post
-        safe_save_json(moments_path, raw)
+        _save_moments(moments_path, raw)
 
     return jsonify({"status": "success", "liked": True})
 
@@ -1713,8 +1884,7 @@ def moments_unlike():
     if not os.path.exists(moments_path):
         return jsonify({"error": "暂无朋友圈数据"}), 404
     try:
-        with open(moments_path, "r", encoding="utf-8-sig") as f:
-            raw = json.load(f)
+        raw = _load_moments_snapshot(moments_path)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1737,7 +1907,7 @@ def moments_unlike():
     if changed:
         post["likers"] = new_likers
         raw[idx] = post
-        safe_save_json(moments_path, raw)
+        _save_moments(moments_path, raw)
 
     return jsonify({"status": "success", "liked": False})
 
@@ -1761,8 +1931,7 @@ def moments_comment():
     if not os.path.exists(moments_path):
         return jsonify({"error": "暂无朋友圈数据"}), 404
     try:
-        with open(moments_path, "r", encoding="utf-8-sig") as f:
-            raw = json.load(f)
+        raw = _load_moments_snapshot(moments_path)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1781,10 +1950,11 @@ def moments_comment():
 
     now = beijing_now().strftime("%Y-%m-%d %H:%M:%S")
     comments = post.get("comments", [])
-    comments.append({"commenter_id": "user", "content": content, "timestamp": now})
+    user_comment = {"commenter_id": "user", "content": content, "timestamp": now}
+    comments.append(user_comment)
     post["comments"] = comments
     raw[idx] = post
-    safe_save_json(moments_path, raw)
+    _save_moments(moments_path, raw)
 
     # 仅当评论的不是用户自己的朋友圈时，才由作者生成回复和记忆
     author_char_id = char_id
@@ -1792,13 +1962,16 @@ def moments_comment():
 
     replied_ids = set()
     if author_char_id != "user":
-        reply_text = _generate_moment_reply_to_user(author_char_id, post_content, content)
+        reply_text = _generate_moment_reply_to_user(author_char_id, post_content, content, user_id=user_id, moment=post)
         if reply_text:
             comments = post.get("comments", [])
-            comments.append({"commenter_id": author_char_id, "content": reply_text, "timestamp": now, "reply_to": "user"})
+            comments.append({
+                "commenter_id": author_char_id, "content": reply_text, "timestamp": now,
+                "reply_to": "user", "reply_to_comment": moment_comment_snapshot(user_comment),
+            })
             post["comments"] = comments
             raw[idx] = post
-            safe_save_json(moments_path, raw)
+            _save_moments(moments_path, raw)
             replied_ids.add(author_char_id)
 
     # 处理评论中的 @ 提及（支持 name、remark、cid 三种标识）
@@ -1810,16 +1983,16 @@ def moments_comment():
             mentioned_ids.append(name_to_id[name])
 
     for m_id in mentioned_ids:
-        if m_id != "user" and m_id not in replied_ids:
+        if m_id != "user" and m_id not in replied_ids and _moment_allows(post, m_id, user_id):
             # 被 @ 的角色也发表评论
             user_id = get_current_user_id()
-            ai_comment = _generate_moment_comment(m_id, author_char_id, post_content, is_mentioned=True, user_id=user_id)
+            ai_comment = _generate_moment_comment(m_id, author_char_id, post_content, is_mentioned=True, user_id=user_id, moment=post)
             if ai_comment:
                 comments = post.get("comments", [])
                 comments.append({"commenter_id": m_id, "content": ai_comment, "timestamp": now})
                 post["comments"] = comments
                 raw[idx] = post
-                safe_save_json(moments_path, raw)
+                _save_moments(moments_path, raw)
                 replied_ids.add(m_id)
 
     return jsonify({"status": "success", "comment": {"commenter_id": "user", "content": content, "timestamp": now}})
@@ -1848,8 +2021,7 @@ def moments_comment_regenerate():
     if not os.path.exists(moments_path):
         return jsonify({"error": "暂无朋友圈数据"}), 404
     try:
-        with open(moments_path, "r", encoding="utf-8-sig") as f:
-            raw = json.load(f)
+        raw = _load_moments_snapshot(moments_path)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1866,6 +2038,8 @@ def moments_comment_regenerate():
     if not commenter_id or commenter_id == "user":
         return jsonify({"error": "该评论不支持重生成"}), 400
 
+    if not _moment_allows(post, commenter_id, user_id):
+        return _visibility_error()
     post_author_id = post.get("char_id", "")
     post_content = post.get("content", "")
     old_ts = old_comment.get("timestamp", beijing_now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -1880,9 +2054,9 @@ def moments_comment_regenerate():
             if prev.get("commenter_id") == "user":
                 user_comment_text = prev.get("content", "")
                 break
-        new_text = _generate_moment_reply_to_user(commenter_id, post_content, user_comment_text or "谢谢你的评论", user_id=get_current_user_id())
+        new_text = _generate_moment_reply_to_user(commenter_id, post_content, user_comment_text or "谢谢你的评论", user_id=get_current_user_id(), moment=post)
     else:
-        new_text = _generate_moment_comment(commenter_id, post_author_id, post_content, user_id=get_current_user_id())
+        new_text = _generate_moment_comment(commenter_id, post_author_id, post_content, user_id=get_current_user_id(), moment=post)
 
     if not new_text:
         return jsonify({"error": "重生成失败"}), 500
@@ -1893,7 +2067,7 @@ def moments_comment_regenerate():
     comments[comment_index] = old_comment
     post["comments"] = comments
     raw[idx] = post
-    safe_save_json(moments_path, raw)
+    _save_moments(moments_path, raw)
 
     return jsonify({"status": "success"})
 
@@ -1901,7 +2075,7 @@ def moments_comment_regenerate():
 @moments_bp.route("/api/moments/memory/regenerate", methods=["POST"])
 def moments_memory_regenerate():
     """
-    重新生成朋友圈对应的短期记忆。
+    用朋友圈原文和互动内容直接重建短期记忆，不调用模型。
     body: { char_id, timestamp, comment_index? }
     - 不传 comment_index：重新生成发帖者自身的记忆
     - 传 comment_index：重新生成该评论者的记忆
@@ -1921,8 +2095,7 @@ def moments_memory_regenerate():
     if not os.path.exists(moments_path):
         return jsonify({"error": "暂无朋友圈数据"}), 404
     try:
-        with open(moments_path, "r", encoding="utf-8-sig") as f:
-            raw = json.load(f)
+        raw = _load_moments_snapshot(moments_path)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1952,31 +2125,22 @@ def moments_memory_regenerate():
         reply_to = comment.get("reply_to")
 
         author_name = get_char_name(post_author) if post_author != "user" else "用户"
-        if reply_to and reply_to != "user":
-            ctx = f"在{author_name}的朋友圈：「{post_content}」下，你回复了{reply_to}的评论，你说：「{comment_text}」。"
-        elif reply_to == "user":
-            user_comment_text = ""
-            for i in range(comment_index - 1, -1, -1):
-                prev = comments[i]
-                if prev.get("commenter_id") == "user":
-                    user_comment_text = prev.get("content", "")
-                    break
-            if target_id == post_author:
-                ctx = f"你在朋友圈发了内容：「{post_content}」。对于用户的评论「{user_comment_text}」，你回复说：「{comment_text}」。"
-            else:
-                ctx = f"在{author_name}的朋友圈：「{post_content}」下，你回复了用户的评论「{user_comment_text}」，你说：「{comment_text}」。"
-        else:
-            if target_id == post_author:
-                ctx = f"你发了一条朋友圈，内容：「{post_content}」。"
-            else:
-                ctx = f"看到{author_name}的朋友圈：「{post_content}」。你评论说：「{comment_text}」。"
+        source = moment_reply_source(comments, comment_index)
+        reply_to_name = ("用户" if reply_to == "user" else get_char_name(reply_to)) if reply_to else None
+        ctx = format_moment_memory(
+            post_content, author_name=author_name, comment_content=comment_text,
+            reply_to_name=reply_to_name,
+            upstream_content=source.get("content", "") if source is not None else None,
+        )
     else:
         target_id = post_author
         if not target_id or target_id == "user":
             return jsonify({"error": "用户的朋友圈没有可生成的记忆"}), 400
 
-        ctx = f"你发了一条朋友圈，内容：「{post_content}」。"
+        ctx = format_moment_memory(post_content)
 
+    if not _moment_allows(post, target_id, user_id):
+        return _visibility_error()
     memory_ts = comment.get("timestamp") if comment_index is not None else timestamp_str
     append_moment_event_to_short_memory(
         target_id, ctx, user_id=user_id, timestamp_str=memory_ts
@@ -2024,8 +2188,7 @@ def moments_ai_comment_to_post():
         return jsonify({"error": "暂无朋友圈数据"}), 404
 
     try:
-        with open(moments_path, "r", encoding="utf-8-sig") as f:
-            raw = json.load(f)
+        raw = _load_moments_snapshot(moments_path)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -2033,8 +2196,12 @@ def moments_ai_comment_to_post():
     if idx is None:
         return jsonify({"error": "未找到该条朋友圈"}), 404
 
+    if not isinstance(commenter_id, str) or commenter_id not in get_characters_config_for_current_user():
+        return jsonify({'error': '请求无效，请检查输入后重试。'}), 400
+    if not _moment_allows(post, commenter_id, user_id):
+        return _visibility_error()
     comments = post.get("comments", [])
-    comment_text = _generate_moment_comment(commenter_id, post_char_id, post.get("content", ""), user_id=get_current_user_id())
+    comment_text = _generate_moment_comment(commenter_id, post_char_id, post.get("content", ""), user_id=get_current_user_id(), moment=post)
 
     if comment_text:
         comments.append({
@@ -2044,10 +2211,75 @@ def moments_ai_comment_to_post():
         })
         post["comments"] = comments
         raw[idx] = post
-        safe_save_json(moments_path, raw)
+        _save_moments(moments_path, raw)
         return jsonify({"status": "success", "comment": comments[-1]})
     else:
         return jsonify({"error": "AI 评论生成失败"}), 500
+
+
+@moments_bp.route("/api/moments/comment/ai_reply", methods=["POST"])
+def moments_ai_reply_to_comment():
+    """让当前用户的角色回复指定评论，保留目标评论者作为 reply_to。"""
+    user_id = get_current_user_id()
+    data = request.get_json()
+    if not isinstance(data, dict):
+        return jsonify({"error": "请求无效，请检查输入后重试。"}), 400
+
+    post_char_id = data.get("char_id")
+    timestamp_str = data.get("timestamp")
+    replying_char_id = data.get("replying_char_id")
+    if not all(isinstance(value, str) and value.strip()
+               for value in (post_char_id, timestamp_str, replying_char_id)):
+        return jsonify({"error": "缺少必要参数"}), 400
+
+    comment_index = data.get("comment_index")
+    if isinstance(comment_index, str) and re.fullmatch(r"[0-9]+", comment_index):
+        comment_index = int(comment_index)
+    if type(comment_index) is not int:
+        return jsonify({"error": "comment_index 无效"}), 400
+
+    characters = get_characters_config_for_current_user()
+    if replying_char_id == "user" or replying_char_id not in characters:
+        return jsonify({"error": "请求无效，请检查输入后重试。"}), 400
+
+    moments_path, _ = get_moments_paths(user_id=user_id)
+    if not os.path.exists(moments_path):
+        return jsonify({"error": "暂无朋友圈数据"}), 404
+    raw = _load_moments_snapshot(moments_path)
+
+    idx, post = _find_moment_post(raw, post_char_id, timestamp_str)
+    if idx is None:
+        return jsonify({"error": "未找到该条朋友圈"}), 404
+    comments = post.get("comments", [])
+    if comment_index < 0 or comment_index >= len(comments):
+        return jsonify({"error": "评论索引不存在"}), 404
+
+    if not _moment_allows(post, replying_char_id, user_id):
+        return _visibility_error()
+    reply_text = _generate_ai_reply_to_any_comment(
+        replying_char_id=replying_char_id,
+        post_author_id=post_char_id,
+        post_content=post.get("content", ""),
+        comments_list=comments,
+        target_comment_index=comment_index,
+        user_id=user_id, moment=post,
+    )
+    if not reply_text:
+        return jsonify({"error": "AI 评论生成失败"}), 502
+
+    comment = {
+        "commenter_id": replying_char_id,
+        "content": reply_text,
+        "timestamp": beijing_now().strftime("%Y-%m-%d %H:%M:%S"),
+        "reply_to": comments[comment_index].get("commenter_id"),
+        "reply_to_comment": moment_comment_snapshot(comments[comment_index]),
+    }
+    comments.append(comment)
+    post["comments"] = comments
+    raw[idx] = post
+    # Propagate write failures to the API handler.
+    _save_moments(moments_path, raw)
+    return jsonify({"status": "success", "comment": comment})
 
 
 @moments_bp.route("/api/moments/comment/user_reply", methods=["POST"])
@@ -2080,8 +2312,7 @@ def moments_user_reply_to_comment():
         return jsonify({"error": "暂无朋友圈数据"}), 404
 
     try:
-        with open(moments_path, "r", encoding="utf-8-sig") as f:
-            raw = json.load(f)
+        raw = _load_moments_snapshot(moments_path)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -2099,6 +2330,8 @@ def moments_user_reply_to_comment():
     if target_commenter_id == "user":
         return jsonify({"error": "不能回复自己的评论"}), 400
 
+    if not _moment_allows(post, target_commenter_id, user_id):
+        return _visibility_error()
     now = beijing_now().strftime("%Y-%m-%d %H:%M:%S")
 
     # 1. 保存用户的回复
@@ -2106,7 +2339,8 @@ def moments_user_reply_to_comment():
         "commenter_id": "user",
         "content": content,
         "timestamp": now,
-        "reply_to": target_commenter_id
+        "reply_to": target_commenter_id,
+        "reply_to_comment": moment_comment_snapshot(target_comment),
     }
     comments.append(user_comment_obj)
 
@@ -2119,7 +2353,7 @@ def moments_user_reply_to_comment():
         post_author_id=post_char_id,
         post_content=post_content,
         comments_list=comments,
-        target_comment_index=len(comments)-1
+        target_comment_index=len(comments)-1, user_id=user_id, moment=post
     )
 
     if ai_reply_text:
@@ -2127,14 +2361,15 @@ def moments_user_reply_to_comment():
             "commenter_id": target_commenter_id,
             "content": ai_reply_text,
             "timestamp": now,
-            "reply_to": "user"
+            "reply_to": "user",
+            "reply_to_comment": moment_comment_snapshot(user_comment_obj),
         }
         comments.append(ai_reply_obj)
 
 
     post["comments"] = comments
     raw[idx] = post
-    safe_save_json(moments_path, raw)
+    _save_moments(moments_path, raw)
 
     return jsonify({"success": True})
 
@@ -2149,16 +2384,22 @@ def moments_user_post():
     from blueprints.media import (
         _compress_chat_image_to_jpg,
         _generate_image_description,
-        _public_base_url,
     )
     from cos_utils import upload_to_cos
-    from services.image_tags import normalize_image_description
+    from services.image_tags import normalize_image_description, normalize_vision_prompt
 
     user_id = get_current_user_id()
     if not user_id:
         return jsonify({"error": "请先登录"}), 401
 
     content = (request.form.get("content") or "").strip()
+    try:
+        selected_blocks = normalize_blocked_ids(
+            json.loads(request.form.get('blocked_character_ids', '[]')),
+            get_characters_config_for_current_user(),
+        )
+    except (ValueError, TypeError):
+        return jsonify({'error': '屏蔽名单包含无效角色'}), 400
     files = request.files.getlist("images")
 
     if not content and not files:
@@ -2196,6 +2437,13 @@ def moments_user_post():
             return jsonify({"error": str(exc)}), 400
         normalized_metadata.append({"mode": mode, "description": description})
 
+    try:
+        # One instruction per post, applied only to pictures in AI mode.
+        vision_prompt = (normalize_vision_prompt(request.form.get("vision_prompt"))
+                         if any(item["mode"] == "ai" for item in normalized_metadata) else "")
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+
     now_dt = beijing_now()
     now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -2213,27 +2461,24 @@ def moments_user_post():
                 continue
 
             base_name = uuid.uuid4().hex
-            tmp_dir = os.path.join(BASE_DIR, "tmp")
+            tmp_dir = os.path.join(USERS_ROOT, str(user_id), "tmp")
             os.makedirs(tmp_dir, exist_ok=True)
 
             tmp_raw_path = os.path.join(tmp_dir, f"{base_name}_raw")
             file.save(tmp_raw_path)
 
             compressed_path = os.path.join(tmp_dir, f"{base_name}.jpg")
-            public_file_path = None
             try:
                 # 压缩
                 _compress_chat_image_to_jpg(tmp_raw_path, compressed_path, max_edge=1024, max_bytes=500 * 1024)
                 metadata = normalized_metadata[file_index]
                 description = metadata["description"]
                 if metadata["mode"] == "ai":
-                    static_upload_dir = os.path.join(BASE_DIR, "static", "uploads")
-                    os.makedirs(static_upload_dir, exist_ok=True)
-                    public_filename = f"tmp_vision_{base_name}.jpg"
-                    public_file_path = os.path.join(static_upload_dir, public_filename)
-                    shutil.copy2(compressed_path, public_file_path)
-                    public_image_url = f"{_public_base_url()}/static/uploads/{public_filename}"
-                    description = _generate_image_description(public_image_url)
+                    import base64
+                    with open(compressed_path, "rb") as image_file:
+                        image_data = "data:image/jpeg;base64," + base64.b64encode(image_file.read()).decode("ascii")
+                    description = (_generate_image_description(image_data, vision_prompt=vision_prompt)
+                                   if vision_prompt else _generate_image_description(image_data))
 
                 # 上传 COS
                 # 路径规则：users/<user_id>/moments/<YYYYMM>/<timestamp_uuid>.png
@@ -2256,7 +2501,6 @@ def moments_user_post():
                     "image_index": file_index,
                 }), status_code
             finally:
-                if public_file_path and os.path.exists(public_file_path): os.remove(public_file_path)
                 if os.path.exists(tmp_raw_path): os.remove(tmp_raw_path)
                 if os.path.exists(compressed_path): os.remove(compressed_path)
 
@@ -2279,27 +2523,20 @@ def moments_user_post():
     if mentioned_ids:
         print(f"  [User Moment] 检测到 @ 提及: {mentioned_ids}")
 
-    # 同步生成 @ 提到的回复
-    likers, comments = _generate_likes_comments_for_user_moment(now_str, final_content, only_mentioned=True, user_id=user_id)
-
     new_post = {
-        "char_id": "user",
-        "content": final_content,
-        "timestamp": now_str,
-        "likers": likers,
-        "comments": comments
+        'char_id': 'user', 'content': final_content, 'timestamp': now_str,
+        'blocked_character_ids': selected_blocks, 'likers': [], 'comments': [],
     }
 
     moments_path, _ = get_moments_paths(user_id=user_id)
-    raw = []
-    if os.path.exists(moments_path):
-        try:
-            with open(moments_path, "r", encoding="utf-8-sig") as f:
-                raw = json.load(f)
-        except Exception:
-            raw = []
+    raw = _load_moments_snapshot(moments_path)
     raw.append(new_post)
-    safe_save_json(moments_path, raw)
+    _save_moments(moments_path, raw)
+    likers, comments = _generate_likes_comments_for_user_moment(
+        now_str, final_content, only_mentioned=True, user_id=user_id, moment=new_post)
+    _append_moment_reactions(new_post, likers, comments, user_id)
+    new_post = _read_moment(new_post, user_id) or new_post
+
 
 
     # 启动后台任务：处理其余非 @ 角色的随机互动
@@ -2330,8 +2567,7 @@ def moments_regenerate():
     if not os.path.exists(moments_path):
         return jsonify({"error": "暂无朋友圈数据"}), 404
     try:
-        with open(moments_path, "r", encoding="utf-8-sig") as f:
-            raw = json.load(f)
+        raw = _load_moments_snapshot(moments_path)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -2354,9 +2590,10 @@ def moments_regenerate():
 
     if char_id == "user":
         post_content = post.get("content", "")
-        likers, comments = _generate_likes_comments_for_user_moment(timestamp_str, post_content, user_id=user_id)
+        likers, comments = _generate_likes_comments_for_user_moment(timestamp_str, post_content, user_id=user_id, moment=post)
         post["likers"] = likers
         post["comments"] = comments
+        _save_moments(moments_path, raw)
     else:
         directive_m = None
         try:
@@ -2432,6 +2669,8 @@ def moments_regenerate():
                 f"2. Your assigned language is {lang}. Please post in this language."
             )
 
+        trigger_msg += visibility_prompt(get_characters_config_for_current_user(), char_id)
+
         regenerating_instruction = post.get("instruction", "").strip()
         if regenerating_instruction:
             trigger_msg += (
@@ -2449,11 +2688,16 @@ def moments_regenerate():
             if content:
                 content = content.strip().strip('"\'')
                 if content:
+                    content, selected_blocks = extract_block_lines(content, get_characters_config_for_current_user(), char_id)
+                    if not content:
+                        return jsonify({'error': '内容或图片不能为空'}), 400
+                    post['blocked_character_ids'] = sorted(blocked_ids(post) | set(selected_blocks))
                     content, _, directive_m = process_agent_actions(char_id, content, user_id or get_current_user_id())
                     # --- 重新生成也需要解析媒体标签 ---
                     content = process_moments_media_tags(content, char_id, user_id=user_id or get_current_user_id())
                     content = clean_moments_agent_instructions(content)
                     post["content"] = content
+                    _save_moments(moments_path, raw)
 
                     # --- 重新生成也需要解析 @ 提及并生成回复（支持 name、remark、cid，不区分大小写） ---
                     name_to_id = _get_moments_name_to_id(user_id=user_id)
@@ -2470,12 +2714,13 @@ def moments_regenerate():
                         # 清空旧的同步回复（可选，或者直接追加）
                         # 这里我们选择追加新的回复
                         for mid in mentioned_ids:
+                            if not _moment_allows(post, mid, user_id): continue
                             if mid == "user" or mid == char_id: continue
                             # 检查是否已经回复过（避免重复）
                             if any(c.get("commenter_id") == mid for c in post.get("comments", [])):
                                 continue
 
-                            comment_text = _generate_moment_comment(mid, char_id, content, is_mentioned=True, user_id=user_id)
+                            comment_text = _generate_moment_comment(mid, char_id, content, is_mentioned=True, user_id=user_id, moment=post)
                             if comment_text:
                                 post.setdefault("comments", []).append({
                                     "commenter_id": mid,
@@ -2486,21 +2731,23 @@ def moments_regenerate():
                         # 触发后台互动（为其补充非 @ 角色的互动）
                         user_id = get_current_user_id()
                         _background_generate_moment_reactions(user_id, char_id, timestamp_str, content, mentioned_ids=mentioned_ids)
+        except Conflict:
+            raise
         except Exception as e:
             print(f"  [Moments] 重新生成内容失败: {e}")
             return jsonify({"error": "生成失败"}), 500
 
         raw[idx] = post
-        safe_save_json(moments_path, raw)
+        _save_moments(moments_path, raw)
 
         # 重新生成后的朋友圈先写入短期记忆，再执行转向。
+        ctx = format_moment_memory(post.get("content", ""))
+        append_moment_event_to_short_memory(
+            char_id, ctx, user_id=user_id, timestamp_str=timestamp_str
+        )
         if directive_m:
-            ctx = f"你重新发布了一条朋友圈，内容：「{(post.get('content') or '')[:300]}」。"
-            append_moment_event_to_short_memory(
-                char_id, ctx, user_id=user_id, timestamp_str=timestamp_str
-            )
             uid = user_id or get_current_user_id()
-            _d = dict(directive_m, source_scene="moments")
+            _d = _moment_directive(directive_m, post)
             _cid, _txt = char_id, post.get("content", "")
             def _bg(): set_background_user(uid); _execute_directive(_d, _cid, _txt)
             threading.Thread(target=_bg, daemon=True).start()
@@ -2520,8 +2767,7 @@ def moments_delete():
     if not os.path.exists(moments_path):
         return jsonify({"error": "暂无朋友圈数据"}), 404
     try:
-        with open(moments_path, "r", encoding="utf-8-sig") as f:
-            raw = json.load(f)
+        raw = _load_moments_snapshot(moments_path)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -2530,7 +2776,7 @@ def moments_delete():
         return jsonify({"error": "未找到该条朋友圈"}), 404
 
     del raw[idx]
-    safe_save_json(moments_path, raw)
+    _save_moments(moments_path, raw)
     return jsonify({"status": "success"})
 
 
@@ -2550,8 +2796,7 @@ def moments_edit():
     if not os.path.exists(moments_path):
         return jsonify({"error": "暂无朋友圈数据"}), 404
     try:
-        with open(moments_path, "r", encoding="utf-8-sig") as f:
-            raw = json.load(f)
+        raw = _load_moments_snapshot(moments_path)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -2561,7 +2806,7 @@ def moments_edit():
 
     post["content"] = clean_moments_agent_instructions(new_content)
     raw[idx] = post
-    safe_save_json(moments_path, raw)
+    _save_moments(moments_path, raw)
     return jsonify({"status": "success"})
 
 
@@ -2581,8 +2826,7 @@ def moments_comment_delete():
     if not os.path.exists(moments_path):
         return jsonify({"error": "暂无数据"}), 404
     try:
-        with open(moments_path, "r", encoding="utf-8-sig") as f:
-            raw = json.load(f)
+        raw = _load_moments_snapshot(moments_path)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -2595,7 +2839,7 @@ def moments_comment_delete():
         del comments[comment_index]
         post["comments"] = comments
         raw[idx] = post
-        safe_save_json(moments_path, raw)
+        _save_moments(moments_path, raw)
         return jsonify({"status": "success"})
     return jsonify({"error": "评论未找到"}), 404
 
@@ -2622,8 +2866,7 @@ def moments_comment_edit():
     if not os.path.exists(moments_path):
         return jsonify({"error": "暂无数据"}), 404
     try:
-        with open(moments_path, "r", encoding="utf-8-sig") as f:
-            raw = json.load(f)
+        raw = _load_moments_snapshot(moments_path)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -2636,6 +2879,6 @@ def moments_comment_edit():
         comments[comment_index]["content"] = clean_moments_agent_instructions(new_content)
         post["comments"] = comments
         raw[idx] = post
-        safe_save_json(moments_path, raw)
+        _save_moments(moments_path, raw)
         return jsonify({"status": "success"})
     return jsonify({"error": "评论未找到"}), 404

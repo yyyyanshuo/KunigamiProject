@@ -50,7 +50,8 @@ def test_persona_prompt_only_reuses_generation_prompt_without_calling_model(monk
         "snippet": "Official character facts.",
     }]
     monkeypatch.setattr(app_module, "get_current_user_id", lambda: 7)
-    monkeypatch.setattr(app_module, "get_ai_language", lambda user_id=None: "zh")
+    monkeypatch.setattr(app_module, "character_language", lambda *args, **kwargs: "zh")
+    monkeypatch.setattr(app_module, "user_language", lambda *args: "zh-CN")
     monkeypatch.setattr(app_module, "_call_serper_web_search", lambda query: ("success", sources))
 
     def fail_model_call(*args, **kwargs):
@@ -71,14 +72,14 @@ def test_persona_prompt_only_reuses_generation_prompt_without_calling_model(monk
     assert data["status"] == "success"
     assert data["search_status"] == "success"
     assert data["sources"] == sources
-    assert "# System" in data["prompt"]
+    assert "# 系统指令" in data["prompt"]
     assert "你是一位资深的角色设定师" in data["prompt"]
     assert "[[LOCK]]" in data["prompt"]
     assert "至少输出一个合法锁定区块" in data["prompt"]
     assert "Official character facts." in data["prompt"]
-    assert "# User" in data["prompt"]
-    assert "キャラクター名: 国神炼介" in data["prompt"]
-    assert "作品名: 蓝色监狱" in data["prompt"]
+    assert "# 用户资料" in data["prompt"]
+    assert "角色名：国神炼介" in data["prompt"]
+    assert "作品名：蓝色监狱" in data["prompt"]
     assert "如果是蓝色监狱的角色" not in data["prompt"]
     assert "寝室（床位顺序）" not in data["prompt"]
     assert "寝室配置" not in data["prompt"]
@@ -110,7 +111,8 @@ def test_generated_persona_discards_removed_fields():
 
 def test_generate_persona_surfaces_upstream_error_instead_of_lock_error(monkeypatch):
     monkeypatch.setattr(app_module, "get_current_user_id", lambda: 7)
-    monkeypatch.setattr(app_module, "get_ai_language", lambda user_id=None: "zh")
+    monkeypatch.setattr(app_module, "character_language", lambda *args, **kwargs: "zh")
+    monkeypatch.setattr(app_module, "user_language", lambda *args: "zh-CN")
     monkeypatch.setattr(app_module, "get_model_config", lambda *args, **kwargs: ("relay", "test-model"))
     monkeypatch.setattr(
         app_module,
@@ -139,7 +141,8 @@ def test_generate_persona_retries_once_when_model_omits_lock(monkeypatch):
     ])
     calls = []
     monkeypatch.setattr(app_module, "get_current_user_id", lambda: 7)
-    monkeypatch.setattr(app_module, "get_ai_language", lambda user_id=None: "zh")
+    monkeypatch.setattr(app_module, "character_language", lambda *args, **kwargs: "zh")
+    monkeypatch.setattr(app_module, "user_language", lambda *args: "zh-CN")
     monkeypatch.setattr(app_module, "get_model_config", lambda *args, **kwargs: ("relay", "test-model"))
 
     def fake_call(messages, **kwargs):
@@ -174,7 +177,8 @@ def test_generate_persona_retries_concisely_after_max_tokens(monkeypatch):
     ])
     calls = []
     monkeypatch.setattr(app_module, "get_current_user_id", lambda: 7)
-    monkeypatch.setattr(app_module, "get_ai_language", lambda user_id=None: "zh")
+    monkeypatch.setattr(app_module, "character_language", lambda *args, **kwargs: "zh")
+    monkeypatch.setattr(app_module, "user_language", lambda *args: "zh-CN")
     monkeypatch.setattr(app_module, "get_model_config", lambda *args, **kwargs: ("relay", "test-model"))
 
     def fake_call(messages, **kwargs):

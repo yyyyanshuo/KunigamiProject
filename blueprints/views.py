@@ -1,8 +1,9 @@
 import os
 from datetime import datetime
 
-from flask import Blueprint, render_template, make_response, send_from_directory, request, jsonify
+from flask import Blueprint, render_template, send_from_directory, jsonify
 
+from core.runtime import SOURCE_ROOT
 from core.time_utils import BEIJING_TZ, beijing_now
 from core.legal import get_legal_document, get_legal_documents
 
@@ -66,7 +67,7 @@ def _voice_announcement_payload(now=None):
             "id": PERSONA_LOCK_ANNOUNCEMENT_ID,
             "kind": "persona_lock",
             "active": True,
-            "show_once": True,
+            "show_once": False,
             "starts_at": persona_start.isoformat(),
             "ends_at": persona_end.isoformat(),
             "title": "人设 AI 编辑保护功能上线",
@@ -80,12 +81,20 @@ def _voice_announcement_payload(now=None):
 
 @views_bp.route('/manifest.json')
 def manifest():
-    return send_from_directory('static', 'manifest.json')
+    import json
+    from core.branding import request_brand_name
+    payload = json.loads((SOURCE_ROOT / 'static' / 'manifest.json').read_text())
+    brand = request_brand_name()
+    payload.update(name=brand, short_name=brand)
+    response = jsonify(payload)
+    response.headers['Cache-Control'] = 'private, no-store'
+    response.headers['Vary'] = 'Cookie, Accept-Language'
+    return response
 
 
 @views_bp.route('/sw.js')
 def service_worker():
-    response = send_from_directory('static', 'sw.js')
+    response = send_from_directory(str(SOURCE_ROOT / 'static'), 'sw.js')
     response.headers['Content-Type'] = 'application/javascript'
     response.headers['Service-Worker-Allowed'] = '/'
     return response
@@ -146,41 +155,7 @@ def chat_view(char_id):
     )
 
 
-@views_bp.route("/sakura")
-def sakura_chat_view():
-    return render_template("sakura_chat.html")
-
-
-@views_bp.route("/api/sakura/chat", methods=["POST"])
-def sakura_chat_api():
-    from services.ai_client import call_gemini
-    data = request.get_json(force=True) or {}
-    user_message = str(data.get("message", "")).strip()
-    history = data.get("history", [])
-
-    if not user_message:
-        return jsonify({"reply": "请输入消息内容", "error": True})
-
-    if not isinstance(history, list):
-        history = []
-
-    history = history[-40:]
-
-    system_msg = {
-        "role": "system",
-        "content": "你叫Sakura，是一个简洁、友好、乐于助人的AI聊天助手。用中文回复（除非用户用其他语言提问）。回答简洁明了。"
-    }
-
-    messages = [system_msg] + history + [{"role": "user", "content": user_message}]
-
-    try:
-        reply = call_gemini(messages, char_id="sakura", model_name="gemini-3.5-flash", user_id="1")
-    except Exception as e:
-        return jsonify({"reply": f"服务暂时不可用：{e}", "error": True})
-
-    return jsonify({"reply": reply, "error": False})
-
-
 @views_bp.route("/memory/<char_id>")
 def memory_view(char_id):
-    return send_from_directory("templates", "memory.html")
+    from services.memory_store import memory_timezone
+    return render_template("memory.html", memory_timezone=memory_timezone())

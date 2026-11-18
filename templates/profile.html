@@ -1,6 +1,7 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="{{ ui_language }}" data-ai-brand-line="{{ ui_t('ai_brand_line', brand=saki_brand) }}">
 <head>
+  {% include "ui_language_head.html" %}
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>个人中心</title>
@@ -24,13 +25,13 @@
       --primary-light: #fff3f8;
       --primary-lighter: #ffe9e1;
       --card-bg: #ffffff;
-      --text-main: #2c3e50;
-      --text-muted: #8ca0b3;
-      --border-color: #eef0f5;
-      --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
-      --shadow-md: 0 8px 16px rgba(0, 0, 0, 0.06);
-      --radius-lg: 16px;
-      --radius-md: 10px;
+      --text-main: #253041;
+      --text-muted: #8a97a8;
+      --border-color: #eef0f4;
+      --shadow-sm: 0 2px 10px rgba(15, 23, 42, 0.04);
+      --shadow-md: 0 12px 28px rgba(15, 23, 42, 0.08);
+      --radius-lg: 18px;
+      --radius-md: 12px;
     }
 
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -41,17 +42,20 @@
       margin: 0;
       padding: 0 0 88px 0;
       color: var(--text-main);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
     }
 
     /* 头部样式（带柔和渐变） */
     .header {
-      background: linear-gradient(135deg, var(--primary-light) 0%, #ffffff 100%);
-      padding: 38px 16px 24px;
+      background: linear-gradient(165deg, var(--primary-light) 0%, #ffffff 75%);
+      padding: 38px 16px 26px;
+      padding-top: calc(38px + env(safe-area-inset-top));
       text-align: center;
-      border-bottom-left-radius: 24px;
-      border-bottom-right-radius: 24px;
+      border-bottom-left-radius: 28px;
+      border-bottom-right-radius: 28px;
       box-shadow: var(--shadow-sm);
-      margin-bottom: 14px;
+      margin-bottom: 16px;
     }
 
     .avatar-wrapper {
@@ -61,11 +65,11 @@
     }
 
     .avatar-large {
-      width: 80px; height: 80px;
+      width: 86px; height: 86px;
       border-radius: 50%;
       background: #eee;
       border: 3px solid #fff;
-      box-shadow: 0 6px 14px var(--primary-rgba-strong);
+      box-shadow: 0 8px 18px var(--primary-rgba-strong), 0 0 0 1px rgba(15, 23, 42, 0.03);
       object-fit: cover;
       transition: transform 0.3s ease;
     }
@@ -73,15 +77,15 @@
 
     .camera-badge {
       position: absolute; bottom: 2px; right: 0;
-      background: var(--primary-color); color: white;
-      border-radius: 50%; width: 24px; height: 24px;
+      background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color: white;
+      border-radius: 50%; width: 26px; height: 26px;
       display: flex; align-items: center; justify-content: center;
-      border: 2px solid #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+      border: 2px solid #fff; box-shadow: 0 2px 6px rgba(15, 23, 42, 0.16);
       transition: background 0.3s;
     }
 
     .username-wrapper {
-      margin-top: 12px;
+      margin-top: 14px;
       display: block;
       width: 100%;
       text-align: center;
@@ -91,52 +95,61 @@
       position: relative;
     }
     .username-edit-icon {
-      width: 16px; height: 16px;
-      color: #adb5bd; cursor: pointer;
+      width: 15px; height: 15px;
+      color: #b6bdc7; cursor: pointer;
       position: absolute;
-      right: -20px;
+      right: -22px;
       top: 50%;
       transform: translateY(-50%);
+      transition: color 0.2s;
     }
-    
+    .username-edit-icon:hover { color: var(--primary-dark); }
+
     .username-input {
-      font-size: 17px; font-weight: 700; color: var(--text-main);
+      font-size: 18px; font-weight: 700; color: var(--text-main);
+      letter-spacing: 0.01em;
       text-align: center; border: none; background: transparent;
       width: auto; min-width: 80px; max-width: 200px; padding: 4px 8px; border-radius: 8px;
       transition: all 0.2s;
     }
     .username-input:focus {
-      background: rgba(255, 182, 185, 0.1); outline: none;
+      background: var(--primary-rgba-light); outline: none;
     }
 
     /* 模块通用卡片样式 */
     .section-container {
-      margin: 0 14px 12px;
+      margin: 0 16px 14px;
       background: var(--card-bg);
       border-radius: var(--radius-lg);
       box-shadow: var(--shadow-sm);
+      border: 1px solid rgba(15, 23, 42, 0.03);
       overflow: hidden;
       transition: box-shadow 0.3s;
     }
     .section-container:active { box-shadow: none; }
 
     .section-header {
-      padding: 14px 16px;
+      padding: 16px 18px;
       display: flex; justify-content: space-between; align-items: center;
       cursor: pointer; background: var(--card-bg);
       user-select: none;
+      transition: background 0.2s;
+    }
+    @media (hover: hover) {
+      .section-header:hover { background: #fafbfc; }
     }
 
     .section-header-main {
       display: flex; align-items: center; gap: 6px;
     }
 
-    .section-title { 
-      font-size: 14px; color: var(--text-main); font-weight: 600; 
+    .section-title {
+      font-size: 14.5px; color: var(--text-main); font-weight: 650;
+      letter-spacing: 0.01em;
     }
 
     .section-arrow {
-      font-size: 14px; color: var(--text-muted);
+      font-size: 12px; color: #b6bdc7;
       transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       display: inline-block;
     }
@@ -152,38 +165,42 @@
       max-height: 0; opacity: 0; overflow: hidden; border-top: none; display: none; /* 若原JS依赖display:none则保留 */
     }
 
-    .config-card { padding: 12px 16px; }
+    .config-card { padding: 14px 18px; }
 
     .guide-entry {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 15px 16px; color: var(--text-main); text-decoration: none;
+      padding: 16px 18px; color: var(--text-main); text-decoration: none;
+      transition: background 0.2s;
     }
-    .guide-entry-main { display: flex; align-items: center; gap: 10px; }
+    @media (hover: hover) {
+      .guide-entry:hover { background: #fafbfc; }
+    }
+    .guide-entry-main { display: flex; align-items: center; gap: 12px; }
     .guide-entry-icon {
-      width: 34px; height: 34px; border-radius: 10px;
+      width: 36px; height: 36px; border-radius: 12px;
       display: flex; align-items: center; justify-content: center;
       background: var(--primary-rgba-light); font-size: 18px;
     }
-    .guide-entry-title { font-size: 14px; font-weight: 600; }
-    .guide-entry-tip { margin-top: 2px; font-size: 11px; color: var(--text-muted); }
-    .guide-entry-arrow { color: var(--text-muted); font-size: 18px; }
+    .guide-entry-title { font-size: 14.5px; font-weight: 600; }
+    .guide-entry-tip { margin-top: 3px; font-size: 11.5px; color: var(--text-muted); }
+    .guide-entry-arrow { color: #c3cad3; font-size: 18px; }
 
     /* 表单与输入框 */
     .field-row {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 8px 0; border-bottom: 1px dashed var(--border-color);
+      padding: 10px 0; border-bottom: 1px dashed var(--border-color);
     }
     .field-row:last-child { border-bottom: none; padding-bottom: 0; }
 
     .field-label {
-      font-size: 12px; color: var(--text-muted); font-weight: 500;
+      font-size: 12.5px; color: var(--text-muted); font-weight: 500;
       flex-shrink: 0; min-width: 84px;
     }
 
     .field-input {
       flex: 1; font-size: 13px; color: var(--text-main);
-      padding: 6px 10px; background: #f8f9fa;
-      border: 1px solid transparent; border-radius: var(--radius-md);
+      padding: 8px 12px; background: #f6f7f9;
+      border: 1px solid transparent; border-radius: 10px;
       text-align: left; box-sizing: border-box; width: 100%;
       transition: all 0.2s;
     }
@@ -191,78 +208,102 @@
       background: #fff; border-color: var(--primary-color);
       box-shadow: 0 0 0 3px var(--primary-rgba-medium); outline: none;
     }
-    .field-input::placeholder { color: #c0c4cc; }
+    .field-input::placeholder { color: #c0c6cf; }
 
     select.field-input { appearance: none; background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238ca0b3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e"); background-repeat: no-repeat; background-position: right 10px center; background-size: 14px; padding-right: 30px; }
 
+    /* Keep every account control in the same column; labels may wrap. */
+    #account-notification-settings .field-row {
+      display: grid;
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.6fr);
+      gap: 12px;
+      padding: 12px 0;
+    }
+    #account-notification-settings .field-label {
+      min-width: 0;
+      line-height: 1.6;
+      overflow-wrap: anywhere;
+      white-space: normal;
+    }
+    #account-notification-settings .field-input { min-width: 0; }
+    #account-notification-settings .field-row > input[type="checkbox"] { justify-self: start; margin: 0; }
+    #account-notification-settings .account-field-controls {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0;
+    }
+    #account-notification-settings .account-field-controls > .field-input { flex: 1 1 100%; }
+    #account-notification-settings .account-field-controls > small { overflow-wrap: anywhere; }
+    #account-notification-settings:not(.collapsed) .section-body { max-height: none; }
+
     /* 按钮样式 */
     .btn {
-      padding: 6px 16px; border-radius: 18px; font-size: 12px; 
+      padding: 7px 16px; border-radius: 999px; font-size: 12px;
       cursor: pointer; font-weight: 600; border: none; transition: all 0.2s;
       display: inline-flex; align-items: center; justify-content: center;
+      letter-spacing: 0.01em;
     }
     .btn:active { transform: scale(0.96); }
-    .btn-cancel { background: #f1f3f5; color: #495057; }
-    .btn-save { background: var(--primary-color); color: #fff; box-shadow: 0 4px 10px var(--primary-rgba-dark); }
-    
+    .btn-cancel { background: #f2f4f7; color: #5b6472; }
+    .btn-save { background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color: #fff; box-shadow: 0 4px 10px var(--primary-rgba-dark); }
+
     .btn-edit-toggle {
-      color: #3b82f6; font-size: 13px; background: rgba(59,130,246,0.1); 
-      border: none; cursor: pointer; font-weight: 600; 
-      padding: 4px 12px; border-radius: 12px; transition: all 0.2s;
-      margin-right: 10px;
+      color: #3b82f6; font-size: 12.5px; background: rgba(59,130,246,0.08);
+      border: none; cursor: pointer; font-weight: 600;
+      padding: 5px 12px; border-radius: 999px; transition: all 0.2s;
+      margin-right: 8px;
     }
-    .btn-edit-toggle:active { background: rgba(59,130,246,0.2); }
+    .btn-edit-toggle:active { background: rgba(59,130,246,0.16); }
 
     /* 编辑器样式 */
     .view-box {
-      font-size: 13px; line-height: 1.55; color: var(--text-main);
+      font-size: 13px; line-height: 1.6; color: var(--text-main);
       white-space: pre-wrap; min-height: 20px; padding: 4px 0;
     }
     .edit-box { display: none; }
     .editor-area {
-      width: 100%; min-height: 100px; padding: 10px;
-      border: 1px solid var(--border-color); border-radius: var(--radius-md); 
-      outline: none; font-size: 13px; line-height: 1.55; 
-      resize: vertical; box-sizing: border-box; color: var(--text-main); 
-      background: #fcfcfd; font-family: inherit;
+      width: 100%; min-height: 100px; padding: 12px;
+      border: 1px solid var(--border-color); border-radius: 12px;
+      outline: none; font-size: 13px; line-height: 1.6;
+      resize: vertical; box-sizing: border-box; color: var(--text-main);
+      background: #f8f9fb; font-family: inherit;
+      transition: all 0.2s;
     }
-    .editor-area:focus { border-color: var(--primary-color); }
-    
+    .editor-area:focus { border-color: var(--primary-color); background: #fff; box-shadow: 0 0 0 3px var(--primary-rgba-lighter); }
+
     .action-bar { margin-top: 12px; display: flex; gap: 8px; justify-content: flex-end; }
     .editing .view-box { display: none; }
     .editing .edit-box { display: block; }
     .editing .btn-edit-toggle { display: none; }
-    .empty-tip { color: #adb5bd; font-style: italic; }
+    .empty-tip { color: #b6bdc7; font-style: italic; }
 
     /* API 设置特有样式 */
     .api-status-grid {
       display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
-      background: #f8f9fa; padding: 12px; border-radius: var(--radius-md);
+      background: #f7f8fa; padding: 14px; border-radius: 12px;
     }
     .api-status-item { display: flex; flex-direction: column; gap: 4px; }
     .api-label { font-size: 12px; color: var(--text-muted); }
     .api-value { font-size: 13px; font-weight: 600; color: var(--text-main); word-break: break-all; }
     .api-value.highlight { color: #d81b60; font-size: 14px; }
-    .api-badge { 
-      font-family: monospace; background: #fff; border: 1px solid #e2e8f0; 
-      padding: 3px 8px; border-radius: 6px; display: inline-block; font-size: 12px; 
+    .api-badge {
+      font-family: monospace; background: #fff; border: 1px solid #e5e9ef;
+      padding: 3px 8px; border-radius: 6px; display: inline-block; font-size: 12px;
     }
 
     .radio-card {
-      flex: 1; border: 2px solid transparent; padding: 10px 6px; 
-      border-radius: var(--radius-md); cursor: pointer; text-align: center; 
-      font-size: 12px; color: var(--text-muted); background: #f8f9fa; 
+      flex: 1; border: 2px solid transparent; padding: 10px 6px;
+      border-radius: 12px; cursor: pointer; text-align: center;
+      font-size: 12px; color: var(--text-muted); background: #f7f8fa;
       transition: all 0.2s; font-weight: 500;
     }
     .radio-card:has(input:checked) {
-      border-color: var(--primary-color); background: var(--primary-rgba-light); 
+      border-color: var(--primary-color); background: var(--primary-rgba-light);
       color: var(--primary-dark); font-weight: 600;
     }
     .radio-card input { display: none; }
-    
+
     .model-select {
-      width: 100%; padding: 8px 10px; border: 1px solid #eef0f5; 
-      border-radius: var(--radius-md); font-size: 13px; background: #fff;
+      width: 100%; padding: 8px 10px; border: 1px solid var(--border-color);
+      border-radius: 10px; font-size: 13px; background: #fff;
       color: var(--text-main); outline: none; transition: border-color 0.2s;
     }
     .model-select:focus { border-color: var(--primary-color); }
@@ -270,97 +311,27 @@
 
     /* 表格样式优化 */
     .table-container {
-      max-height: 300px; overflow-y: auto; 
-      border-radius: var(--radius-md); border: 1px solid var(--border-color);
+      max-height: 300px; overflow-y: auto;
+      border-radius: 12px; border: 1px solid var(--border-color);
     }
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    th { 
+    th {
       background: rgba(248, 249, 250, 0.95); backdrop-filter: blur(4px);
       color: var(--text-muted); font-weight: 600; position: sticky; top: 0;
-      padding: 10px 8px; z-index: 10;
+      padding: 10px 8px; z-index: 10; font-size: 11.5px; letter-spacing: 0.03em;
     }
     td { padding: 10px 8px; border-bottom: 1px solid var(--border-color); color: var(--text-main); }
     tbody tr:last-child td { border-bottom: none; }
-    tbody tr:hover { background: #fbfbfc; }
-
-    /* 打赏模块样式 */
-    .donate-section {
-      background: linear-gradient(135deg, var(--primary-light) 0%, var(--primary-lighter) 100%);
-      border-radius: var(--radius-lg);
-      padding: 16px;
-      margin: 20px 16px;
-      text-align: center;
-      box-shadow: var(--shadow-sm);
-    }
-    .donate-title {
-      font-size: 16px;
-      font-weight: 700;
-      color: var(--text-main);
-      margin-bottom: 8px;
-    }
-    .donate-desc {
-      font-size: 12px;
-      color: var(--text-muted);
-      line-height: 1.5;
-      margin-bottom: 12px;
-    }
-    .donate-button {
-      background: var(--primary-color);
-      color: white;
-      border: none;
-      padding: 10px 24px;
-      border-radius: 16px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-      box-shadow: 0 4px 10px var(--primary-rgba-strong);
-    }
-    .donate-button:active {
-      transform: scale(0.95);
-      box-shadow: 0 2px 6px var(--primary-rgba-strong);
-    }
-    .donate-codes {
-      display: flex;
-      justify-content: center;
-      gap: 16px;
-      margin-top: 12px;
-    }
-    .qr-box {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 8px;
-    }
-    .qr-code {
-      width: 160px;
-      height: 160px;
-      background: #f8f9fa;
-      border: 2px solid #eee;
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-    }
-    .qr-code img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-    .qr-label {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-main);
-    }
+    tbody tr:hover { background: #fafbfc; }
 
     /* 问题反馈模块样式 */
     .feedback-section {
       background: #fff;
       border-radius: var(--radius-lg);
-      padding: 16px;
-      margin: 12px 14px;
+      padding: 16px 18px;
+      margin: 0 16px 14px;
       box-shadow: var(--shadow-sm);
+      border: 1px solid rgba(15, 23, 42, 0.03);
     }
     .feedback-contact-item {
       display: flex;
@@ -381,69 +352,77 @@
       background: var(--primary-rgba-light);
       color: var(--primary-dark);
       border: none;
-      padding: 4px 10px;
-      border-radius: 8px;
+      padding: 5px 12px;
+      border-radius: 999px;
       font-size: 11px;
       font-weight: 600;
       cursor: pointer;
+      transition: all 0.2s;
     }
     .btn-copy:active { opacity: 0.7; }
 
     /* 底部按钮区 */
     .bottom-actions {
-      display: flex; justify-content: center; align-items: center; gap: 12px;
-      margin: 22px 16px 36px;
+      display: flex; justify-content: center; align-items: center; gap: 10px;
+      flex-wrap: wrap;
+      margin: 26px 16px 40px;
     }
     .btn-switch {
-      padding: 8px 16px; border-radius: 22px; border: 1px solid var(--primary-dark); 
-      background: transparent; color: var(--primary-dark); font-size: 13px; font-weight: 600;
+      padding: 9px 16px; border-radius: 999px; border: 1px solid var(--primary-dark);
+      background: transparent; color: var(--primary-dark); font-size: 12.5px; font-weight: 600;
       cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px;
+      white-space: nowrap;
     }
     .btn-switch:active { background: var(--primary-rgba-light); }
     .btn-logout {
-      color: var(--text-muted); text-decoration: none; font-size: 13px; 
-      display: flex; align-items: center; gap: 6px; padding: 8px; transition: color 0.2s;
+      color: var(--text-muted); text-decoration: none; font-size: 12.5px;
+      display: flex; align-items: center; gap: 6px; padding: 9px 6px; transition: color 0.2s;
+      white-space: nowrap;
     }
     .btn-logout:active { color: var(--primary-color); }
     .btn-delete-account {
-      padding: 8px 16px; border-radius: 22px; border: 1px solid rgba(239, 68, 68, 0.45);
-      background: transparent; color: #ef4444; font-size: 13px; font-weight: 600;
+      padding: 9px 16px; border-radius: 999px; border: 1px solid rgba(239, 68, 68, 0.4);
+      background: transparent; color: #ef4444; font-size: 12.5px; font-weight: 600;
       cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px;
+      white-space: nowrap;
     }
     .btn-delete-account:active { background: rgba(239, 68, 68, 0.08); }
     .btn-danger {
-      border: none; border-radius: 20px; padding: 10px 14px; cursor: pointer;
+      border: none; border-radius: 999px; padding: 11px 14px; cursor: pointer;
       background: #ef4444; color: #fff; font-size: 13px; font-weight: 700;
+      transition: all 0.2s;
     }
     .btn-danger:disabled { opacity: 0.6; cursor: not-allowed; }
     .delete-warning-box {
-      background: rgba(239, 68, 68, 0.06); border: 1px solid rgba(239, 68, 68, 0.18);
-      border-radius: 12px; padding: 12px; margin: 12px 0 16px;
+      background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.16);
+      border-radius: 12px; padding: 12px 14px; margin: 12px 0 16px;
       font-size: 13px; line-height: 1.7; color: var(--text-muted);
     }
     .delete-input {
       width: 100%; box-sizing: border-box; border: 1px solid var(--border-color); border-radius: 12px;
-      padding: 10px 12px; margin-top: 10px; font-size: 14px; outline: none;
+      padding: 11px 13px; margin-top: 10px; font-size: 14px; outline: none;
+      background: #f8f9fb; transition: all 0.2s;
     }
-    .delete-input:focus { border-color: #ef4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12); }
+    .delete-input:focus { border-color: #ef4444; background: #fff; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12); }
     .delete-error { min-height: 18px; margin: 10px 0; font-size: 12px; color: #ef4444; }
 
     /* 模态框优化 */
     .modal-overlay {
-      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-      background: rgba(0,0,0,0.4); backdrop-filter: blur(4px);
+      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(15, 23, 42, 0.42); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
       z-index: 3000; align-items: center; justify-content: center;
       animation: fadeIn 0.2s ease;
     }
     .modal-card {
-      background: #fff; padding: 20px; border-radius: 18px; width: 85%; max-width: 360px; 
-      box-shadow: 0 10px 30px rgba(0,0,0,0.15); animation: slideUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      background: #fff; padding: 24px 22px; border-radius: 20px; width: 85%; max-width: 360px;
+      box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18); animation: slideUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     }
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
   </style>
 </head>
 <body>
+{% include "ui_language_select.html" %}
 
 <!-- 【新增】主题加载屏幕 -->
 <div id="theme-loading-screen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:#f5f5f5;display:flex;align-items:center;justify-content:center;z-index:10000;opacity:1;">
@@ -507,7 +486,7 @@
 </div>
 
 <!-- 账号与通知设置 -->
-<div class="section-container collapsed">
+<div class="section-container collapsed" id="account-notification-settings">
   <div class="section-header" onclick="toggleSectionByHeader(this)">
     <div class="section-header-main">
       <div class="section-title">⚙️ 账号与通知设置</div>
@@ -516,6 +495,7 @@
   </div>
   <div class="section-body">
     <div class="config-card">
+
       <div class="field-row">
         <label class="field-label">年龄 (自动+1)</label>
         <input type="number" id="user-age-input" placeholder="留空表示未设置" min="1" max="150" class="field-input" onblur="saveUserAge(this)">
@@ -526,9 +506,9 @@
       </div>
       <div class="field-row">
         <label class="field-label">登录密码</label>
-        <div style="display:flex; gap:8px; width:100%; flex-wrap:wrap;">
-          <input type="password" id="current-password-input" autocomplete="current-password" placeholder="当前密码" class="field-input" style="flex:1; min-width:130px;">
-          <input type="password" id="new-password-input" autocomplete="new-password" placeholder="新密码（至少 8 位）" class="field-input" style="flex:1; min-width:130px;">
+        <div class="account-field-controls">
+          <input type="password" id="current-password-input" autocomplete="current-password" placeholder="当前密码" class="field-input">
+          <input type="password" id="new-password-input" autocomplete="new-password" placeholder="新密码（至少 8 位）" class="field-input">
           <button class="btn" style="background:var(--primary-color); color:white; border-radius:16px; padding:6px 12px; font-size:12px;"
                   onclick="savePassword()">
             修改
@@ -540,11 +520,13 @@
         <input type="email" id="user-email-input" placeholder="用于接收通知的邮箱" class="field-input" onblur="saveUserEmail(this)">
       </div>
       <div class="field-row">
-        <label class="field-label">AI 语言设置</label>
-        <select id="ai-lang-select" onchange="saveAiLanguage(this)" class="field-input">
-          <option value="ja">🇯🇵 日本語 (默认)</option>
-          <option value="zh">🇨🇳 中文 (Chinese)</option>
-        </select>
+        <label class="field-label">默认对话语言</label>
+        <input id="ai-lang-select" class="field-input" list="conversation-languages" placeholder="跟随用户语言" onblur="saveAiLanguage(this)">
+        <datalist id="conversation-languages"><option value="ja">日本語</option><option value="en">English</option><option value="zh">中文</option></datalist>
+      </div>
+      <p class="privacy-note">{{ ui_t('默认对话语言用于和角色聊天、自己发朋友圈，相当于你世界观中的语言。内置翻译可将待发送内容译为该语言；角色或群聊单独设置的交流语言优先。用户语言用于网站界面和阅读译文，两者可以不同。') }}</p>
+      <div class="field-row"><label class="field-label" for="furigana-enabled">日语注音</label>
+        <input type="checkbox" id="furigana-enabled" onchange="saveFurigana(this)">
       </div>
       <div class="field-row">
         <label class="field-label">用户时区</label>
@@ -556,27 +538,9 @@
         <datalist id="user-timezone-options"></datalist>
       </div>
       <div class="field-row">
-        <label class="field-label">Gemini Key</label>
-        <div style="display:flex; gap:8px; width:100%; flex-wrap:wrap; align-items:center;">
-          <input type="password" id="gemini-key-input" autocomplete="new-password" placeholder="填写新 Key（不会回显已保存内容）" class="field-input" style="flex:1; min-width:180px;">
-          <button class="btn" type="button" onclick="saveApiCredential('gemini', 'gemini-key-input')">保存/覆盖</button>
-          <button class="btn" type="button" onclick="deleteApiCredential('gemini', 'gemini-key-input')">删除</button>
-          <small id="gemini-key-status" style="width:100%; color:#888;">未配置</small>
-        </div>
-      </div>
-      <div class="field-row">
-        <label class="field-label">OpenRouter</label>
-        <div style="display:flex; gap:8px; width:100%; flex-wrap:wrap; align-items:center;">
-          <input type="password" id="openrouter-key-input" autocomplete="new-password" placeholder="填写新 Key（不会回显已保存内容）" class="field-input" style="flex:1; min-width:180px;">
-          <button class="btn" type="button" onclick="saveApiCredential('openrouter', 'openrouter-key-input')">保存/覆盖</button>
-          <button class="btn" type="button" onclick="deleteApiCredential('openrouter', 'openrouter-key-input')">删除</button>
-          <small id="openrouter-key-status" style="width:100%; color:#888;">未配置</small>
-        </div>
-      </div>
-      <div class="field-row">
         <label class="field-label">ElevenLabs</label>
-        <div style="display:flex; gap:8px; width:100%; flex-wrap:wrap; align-items:center;">
-          <input type="password" id="elevenlabs-key-input" autocomplete="new-password" placeholder="填写个人 ElevenLabs API Key（不会回显）" class="field-input" style="flex:1; min-width:180px;">
+        <div class="account-field-controls">
+          <input type="password" id="elevenlabs-key-input" autocomplete="new-password" placeholder="填写个人 ElevenLabs API Key（不会回显）" class="field-input">
           <button class="btn" type="button" onclick="saveApiCredential('elevenlabs', 'elevenlabs-key-input')">保存/覆盖</button>
           <button class="btn" type="button" onclick="deleteApiCredential('elevenlabs', 'elevenlabs-key-input')">删除</button>
           <small id="elevenlabs-key-status" style="width:100%; color:#888;">未配置</small>
@@ -635,149 +599,7 @@
   </div>
 </div>
 
-<!-- API 线路与模型设置 -->
-<div class="section-container collapsed" id="module-api">
-  <div class="section-header" onclick="toggleSectionByHeader(this)">
-    <div class="section-header-main">
-      <div class="section-title">🔌 线路与模型设置 (API)</div>
-    </div>
-    <span class="section-arrow">▾</span>
-  </div>
-
-  <div class="section-body">
-    <div class="config-card">
-      <!-- 1. 查看模式 -->
-      <div class="view-mode" id="api-view-mode">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-          <div style="font-weight:600; color:var(--text-main); font-size:14px;">当前分配状态</div>
-          <button class="btn-edit-toggle" style="margin:0;" onclick="toggleApiEdit(true)">配置 Configuration</button>
-        </div>
-
-        <div class="api-status-grid">
-          <div class="api-status-item" style="grid-column: span 2;">
-            <div class="api-label">当前执行线路</div>
-            <div id="view-route-name" class="api-value highlight">-</div>
-          </div>
-          <div class="api-status-item">
-            <div class="api-label">聊天 (Chat)</div>
-            <div id="view-chat-model" class="api-badge">-</div>
-          </div>
-          <div class="api-status-item">
-            <div class="api-label">语音通话 (Call)</div>
-            <div id="view-call-model" class="api-badge">-</div>
-          </div>
-          <div class="api-status-item">
-            <div class="api-label">翻译 (Translate)</div>
-            <div id="view-translation-model" class="api-badge">-</div>
-          </div>
-          <div class="api-status-item">
-            <div class="api-label">朋友圈 (Moments)</div>
-            <div id="view-moments-model" class="api-badge">-</div>
-          </div>
-          <div class="api-status-item">
-            <div class="api-label">识图 (Vision)</div>
-            <div id="view-vision-model" class="api-badge">-</div>
-          </div>
-          <div class="api-status-item">
-            <div class="api-label">记忆 (Summary)</div>
-            <div id="view-summary-model" class="api-badge">-</div>
-          </div>
-          <div class="api-status-item">
-            <div class="api-label">人设 (Persona)</div>
-            <div id="view-gen-model" class="api-badge">-</div>
-          </div>
-          <div class="api-status-item">
-            <div class="api-label">生图 (Image)</div>
-            <div id="view-image-model" class="api-badge">-</div>
-          </div>
-          <div class="api-status-item">
-            <div class="api-label">论坛 (Forum)</div>
-            <div id="view-forum-model" class="api-badge">-</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 2. 编辑模式 -->
-      <div class="edit-mode" id="api-edit-mode" style="display:none;">
-        <div style="margin-bottom: 20px;">
-          <div class="input-label" style="font-weight:600; color:var(--text-main);">1. 选择 API 线路 (Route)</div>
-          <div style="display:flex; gap:12px; margin-top:8px;">
-            <label class="radio-card">
-              <input type="radio" name="route" value="gemini" id="radio-gemini" onchange="selectRoute('gemini')">
-              <span>🚀 Gemini 直连</span>
-            </label>
-            <label class="radio-card">
-              <input type="radio" name="route" value="relay" id="radio-relay" onchange="selectRoute('relay')">
-              <span>⚡ 国内中转</span>
-            </label>
-          </div>
-        </div>
-
-        <!-- 【新增】国内中转 - 中转商选择（移到模型设置前面） -->
-        <div id="relay-provider-settings" style="margin-bottom: 20px; display:none;">
-          <div class="input-label" style="font-weight:600; color:var(--text-main);">2. 中转商选择 (Relay Provider)</div>
-          <div style="display:flex; gap:12px; margin-top:8px; flex-wrap: wrap;">
-            <label class="radio-card">
-              <input type="radio" name="relay_provider" value="new" id="relay_new" onchange="selectRelayProvider('new')">
-              <span>🆕 新中转商 (api2d)</span>
-            </label>
-            <label class="radio-card">
-              <input type="radio" name="relay_provider" value="old" id="relay_old" onchange="selectRelayProvider('old')">
-              <span>📡 旧中转商 (vg)</span>
-            </label>
-            <label class="radio-card">
-              <input type="radio" name="relay_provider" value="custom" id="relay_custom" onchange="selectRelayProvider('custom')">
-              <span>🔧 自定义网址</span>
-            </label>
-          </div>
-          <div id="custom-url-input-container" style="display:none; margin-top:12px;">
-            <input type="text" id="relay_custom_url" placeholder="输入自定义API网址，如 https://api.example.com/v1" style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:4px; font-size:14px;">
-            <div style="font-size:12px; color:var(--text-secondary); margin-top:6px;">
-              请输入完整的API网址，末尾无需带 /chat/completions
-            </div>
-          </div>
-          <div style="font-size:12px; color:var(--text-secondary); margin-top:8px;">
-            新中转商：https://api2d.com | 旧中转商：https://vg.a3e.top/ | 自定义：自行配置
-          </div>
-        </div>
-
-        <div id="model-settings" style="margin-bottom: 20px;">
-          <div class="input-label" style="font-weight:600; color:var(--text-main);">3. 为功能指派模型 (Select Models)</div>
-          <div style="display:grid; grid-template-columns: 1fr; gap:12px; margin-top:8px;">
-            <div><div class="input-label">聊天对话</div><select id="model-chat" class="model-select"></select></div>
-            <div><div class="input-label">语音通话</div><select id="model-call" class="model-select"></select></div>
-            <div><div class="input-label">翻译功能</div><select id="model-translation" class="model-select"></select></div>
-            <div><div class="input-label">朋友圈生成</div><select id="model-moments" class="model-select"></select></div>
-            <div><div class="input-label">识图理解</div><select id="model-vision" class="model-select"></select></div>
-            <div><div class="input-label">记忆提取总结</div><select id="model-summary" class="model-select"></select></div>
-            <div><div class="input-label">人设自动演进</div><select id="model-gen" class="model-select"></select></div>
-            <div><div class="input-label">AI 生图模型</div><select id="model-image" class="model-select"></select></div>
-            <div><div class="input-label">论坛生成</div><select id="model-forum" class="model-select"></select></div>
-          </div>
-        </div>
-
-        <hr style="border:0; border-top:1px dashed var(--border-color); margin:24px 0;">
-
-        <div style="margin-bottom: 20px;">
-          <div class="input-label" style="font-weight:600; color:var(--text-main);">
-            4. 扩展模型列表
-            <span id="manage-route-name" style="font-weight:normal; color:var(--primary-color); margin-left:6px;">-</span>
-          </div>
-          <div id="model-tags-list" style="display:flex; flex-wrap:wrap; gap:8px; margin: 10px 0;"></div>
-          <div style="display:flex; gap:8px;">
-            <input type="text" id="new-model-input" placeholder="输入模型ID (如 gpt-4o)" class="model-select">
-            <button class="btn" style="background:#e3f2fd; color:#1565c0; border-radius:10px; padding: 0 16px; flex-shrink:0;" onclick="addNewModel()">+ 添加</button>
-          </div>
-        </div>
-
-        <div class="action-bar">
-          <button class="btn btn-cancel" onclick="toggleApiEdit(false)">取消</button>
-          <button class="btn btn-save" onclick="saveApiConfig()">保存配置</button>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
+{% include "model_settings.html" %}
 
 <!-- API 消耗日志面板 -->
 <div class="section-container collapsed">
@@ -873,7 +695,7 @@
            style="display:flex; justify-content:space-between; gap:12px; padding:12px; border:1px solid var(--border-color); border-radius:12px; color:var(--text-main); text-decoration:none; background:var(--card-bg);">
           <span>
             <strong style="display:block; font-size:14px;">用户协议</strong>
-            <small style="color:var(--text-muted);">版本 {{ legal_documents.terms.version }} · {{ legal_documents.terms.effective_date }}</small>
+            <small style="color:var(--text-muted);">{{ ui_t('审阅稿 · {version}', version=legal_documents.terms.version) }}</small>
           </span>
           <span style="color:var(--primary-color); align-self:center;">查看全文 ›</span>
         </a>
@@ -881,18 +703,19 @@
            style="display:flex; justify-content:space-between; gap:12px; padding:12px; border:1px solid var(--border-color); border-radius:12px; color:var(--text-main); text-decoration:none; background:var(--card-bg);">
           <span>
             <strong style="display:block; font-size:14px;">隐私政策</strong>
-            <small style="color:var(--text-muted);">版本 {{ legal_documents.privacy.version }} · {{ legal_documents.privacy.effective_date }}</small>
+            <small style="color:var(--text-muted);">{{ ui_t('审阅稿 · {version}', version=legal_documents.privacy.version) }}</small>
           </span>
           <span style="color:var(--primary-color); align-self:center;">查看全文 ›</span>
         </a>
       </div>
 
+      <p class="privacy-note">{{ ui_t('当前文件为未正式生效的审阅稿；这里只记录阅读确认。') }}</p>
       <div id="legal-consent-status" style="margin-top:14px; padding:12px; border-radius:12px; background:var(--bg-color); color:var(--text-muted); font-size:12px; line-height:1.7;">
         正在读取你的协议确认记录…
       </div>
       <button id="legal-consent-button" class="btn btn-save" type="button"
               style="display:none; width:100%; margin-top:10px;" onclick="confirmCurrentLegalDocuments()">
-        确认同意当前版本
+        确认已阅读当前审阅稿
       </button>
       <div id="legal-consent-error" style="display:none; margin-top:8px; color:#c62828; font-size:12px;"></div>
     </div>
@@ -913,64 +736,13 @@
         如果您在使用过程中遇到任何问题，或者有好的建议，欢迎通过以下方式联系开发者。
       </div>
       
-      <!-- 社交群聊二维码 -->
-      <div style="display: flex; gap: 12px; margin-bottom: 16px; overflow-x: auto; padding-bottom: 8px;">
-        <div class="qr-box" style="flex-shrink: 0;">
-          <div class="qr-code" style="width: 120px; height: 120px; cursor: pointer;" onclick="zoomImage('/static/xhs_qr.png')">
-            <img src="/static/xhs_qr.png" alt="小红书" onerror="this.src='https://via.placeholder.com/120?text=Wait+Upload'">
-          </div>
-          <div class="qr-label">小红书</div>
-        </div>
-        <div class="qr-box" style="flex-shrink: 0;">
-          <div class="qr-code" style="width: 120px; height: 120px; cursor: pointer;" onclick="zoomImage('/static/qq_qr.png')">
-            <img src="/static/qq_qr.png" alt="QQ群" onerror="this.src='https://via.placeholder.com/120?text=Wait+Upload'">
-          </div>
-          <div class="qr-label">QQ</div>
-        </div>
-      </div>
-
-      <hr style="border:0; border-top:1px dashed var(--border-color); margin:12px 0;">
-
-      <!-- 个人联系方式 -->
       <div class="feedback-contact-item">
         <div class="contact-info">
-          <span class="contact-label">微信 WeChat</span>
-          <span class="contact-value" id="val-wechat">SuShih10370108</span>
-        </div>
-        <button class="btn-copy" onclick="copyToClipboard('SuShih10370108', this)">复制</button>
-      </div>
-      <div class="feedback-contact-item">
-        <div class="contact-info">
-          <span class="contact-label">邮箱 Email</span>
+          <span class="contact-label">邮箱</span>
           <span class="contact-value" id="val-email">yyyyanshuo@foxmail.com</span>
         </div>
         <button class="btn-copy" onclick="copyToClipboard('yyyyanshuo@foxmail.com', this)">复制</button>
       </div>
-    </div>
-  </div>
-</div>
-
-<!-- 打赏模块 -->
-<div class="donate-section" id="donate-section">
-  <div class="donate-title">☕ 打赏开发者</div>
-  <div class="donate-desc">
-    开发者是用爱发电的卑微大学生，为了给大家提供不卡顿的 38ms 极速通道和最聪明的 AI，服务器每天都在疯狂燃烧我的余额😭。
-    <br><br>
-    如果这个角色曾经治愈过你，求老板请我喝瓶可乐续命！你的每一分钱都会变成新功能开发的代码！
-  </div>
-  <button class="donate-button" onclick="toggleDonateQR()">显示收款码</button>
-  <div class="donate-codes" id="donate-codes" style="display:none;">
-    <div class="qr-box">
-      <div class="qr-code" style="cursor:zoom-in;">
-        <img src="/static/wechat_qr.png" alt="微信收款码" onclick="zoomImage(this.src)" onerror="this.alt='微信二维码未找到'">
-      </div>
-      <div class="qr-label">微信</div>
-    </div>
-    <div class="qr-box">
-      <div class="qr-code" style="cursor:zoom-in;">
-        <img src="/static/alipay_qr.png" alt="支付宝收款码" onclick="zoomImage(this.src)" onerror="this.alt='支付宝二维码未找到'">
-      </div>
-      <div class="qr-label">支付宝</div>
     </div>
   </div>
 </div>
@@ -1008,7 +780,7 @@
   </div>
 </div>
 
-<!-- 打赏弹窗已移至 tabbar.html -->
+
 
   <script>
     let currentLegalVersions = {
@@ -1017,10 +789,10 @@
     };
 
     function formatLegalConsentTime(value) {
-      if (!value) return '尚未确认';
+      if (!value) return SakiI18n.t('尚未确认');
       const parsed = new Date(value);
       if (Number.isNaN(parsed.getTime())) return value;
-      return parsed.toLocaleString('zh-CN', { hour12: false });
+      return parsed.toLocaleString(document.documentElement.lang, { hour12: false });
     }
 
     function renderLegalConsentStatus(payload) {
@@ -1031,9 +803,9 @@
       const privacy = documents.privacy || {};
 
       statusEl.innerHTML = [
-        '<strong style="color:var(--text-main);">你的确认记录</strong>',
-        '用户协议：' + (terms.is_current ? '已确认当前版本' : '尚未确认当前版本') + '（' + formatLegalConsentTime(terms.accepted_at) + '）',
-        '隐私政策：' + (privacy.is_current ? '已确认当前版本' : '尚未确认当前版本') + '（' + formatLegalConsentTime(privacy.accepted_at) + '）'
+        SakiI18n.fragment('<strong style="color:var(--text-main);">你的确认记录</strong>'),
+        SakiI18n.t('用户协议：') + (terms.is_current ? SakiI18n.t('已确认当前版本') : SakiI18n.t('尚未确认当前版本')) + '（' + formatLegalConsentTime(terms.accepted_at) + '）',
+        SakiI18n.t('隐私政策：') + (privacy.is_current ? SakiI18n.t('已确认当前版本') : SakiI18n.t('尚未确认当前版本')) + '（' + formatLegalConsentTime(privacy.accepted_at) + '）'
       ].join('<br>');
       button.style.display = payload.current ? 'none' : 'block';
     }
@@ -1048,8 +820,8 @@
         if (!response.ok) throw new Error(payload.message || '读取失败');
         renderLegalConsentStatus(payload);
       } catch (error) {
-        statusEl.textContent = '暂时无法读取协议确认记录。';
-        errorEl.textContent = error.message || '读取失败';
+        statusEl.textContent = SakiI18n.t('暂时无法读取协议确认记录。');
+        errorEl.textContent = error.message || SakiI18n.t('读取失败');
         errorEl.style.display = 'block';
       }
     }
@@ -1058,7 +830,7 @@
       const button = document.getElementById('legal-consent-button');
       const errorEl = document.getElementById('legal-consent-error');
       button.disabled = true;
-      button.textContent = '正在确认…';
+      button.textContent = SakiI18n.t('正在确认…');
       errorEl.style.display = 'none';
       try {
         const response = await fetch('/api/legal/consent', {
@@ -1075,11 +847,11 @@
         if (!response.ok) throw new Error(payload.message || '确认失败');
         renderLegalConsentStatus(payload);
       } catch (error) {
-        errorEl.textContent = error.message || '确认失败，请稍后重试';
+        errorEl.textContent = error.message || SakiI18n.t('确认失败，请稍后重试');
         errorEl.style.display = 'block';
       } finally {
         button.disabled = false;
-        button.textContent = '确认同意当前版本';
+        button.textContent = SakiI18n.t('确认已阅读当前审阅稿');
       }
     }
 
@@ -1092,7 +864,7 @@
     <div id="delete-account-warning-step">
       <h3 style="margin:0 0 8px 0; font-size:18px; color:#c62828;">注销账户</h3>
       <div class="delete-warning-box">
-        注销后会删除你的账号、个人配置、角色、聊天数据、论坛内容、点赞收藏和推送订阅，且不做备份。广场投稿角色不会自动删除，只会匿名；如果你想删除投稿，请先去广场手动删除。
+        注销会清理账号、个人配置、私有聊天与媒体、试聊、可关联到你的评论和使用记录。公开角色与表情包会保留，但移除作者账号、邮箱及源角色关联。投稿正文、无法归属的历史评论、他人已保存的副本和第三方记录不会自动清除；请先检查公开内容。云端清理失败时可重试，已删除的数据无法恢复。
       </div>
       <div style="display:flex; gap:10px;">
         <button onclick="closeDeleteAccountModal()" class="btn btn-cancel" style="flex:1;">取消</button>
@@ -1103,10 +875,10 @@
     <div id="delete-account-confirm-step" style="display:none;">
       <h3 style="margin:0 0 8px 0; font-size:18px; color:#c62828;">确认注销</h3>
       <p style="margin:0 0 12px 0; font-size:13px; line-height:1.7; color:var(--text-muted);">
-        请输入当前密码，并手动输入“注销账户”。确认后账号将立即注销。
+        {{ ui_t('请输入当前密码，并输入“{phrase}”。', phrase=ui_t('注销确认短语')) }}
       </p>
       <input id="delete-account-password" class="delete-input" type="password" autocomplete="current-password" placeholder="请输入当前密码">
-      <input id="delete-account-confirm" class="delete-input" type="text" autocomplete="off" placeholder="请输入：注销账户">
+      <input id="delete-account-confirm" class="delete-input" type="text" autocomplete="off" placeholder="{{ ui_t('注销确认短语') }}">
       <div id="delete-account-error" class="delete-error"></div>
       <div style="display:flex; gap:10px;">
         <button onclick="showDeleteAccountWarningStep()" class="btn btn-cancel" style="flex:1;">返回</button>
@@ -1277,10 +1049,10 @@
           localStorage.setItem('theme_updated', Date.now().toString());
         } catch(err) { console.error("Auto save failed", err); }
       } else {
-        alert('上传失败: ' + result.error);
+        alert(SakiI18n.t('上传失败: ') + result.error);
       }
     } catch(e) {
-      alert('网络或异常错误: ' + e.message); console.error(e);
+      alert(SakiI18n.t('网络或异常错误: ') + e.message); console.error(e);
     } finally {
       previewEl.style.opacity = '1';
       input.value = '';
@@ -1289,7 +1061,7 @@
 
   // 删除默认背景
   function clearDefaultBg() {
-    if (confirm('确定要删除默认聊天背景吗？')) {
+    if (confirm(SakiI18n.t('确定要删除默认聊天背景吗？'))) {
       currentTheme.default_chat_bg = null;
       const bgElem = document.getElementById('default-bg-preview');
       const textElem = document.getElementById('bg-preview-text');
@@ -1312,14 +1084,14 @@
       const result = await res.json();
 
       if (result.status === 'success') {
-        alert('主题设置已保存！');
+        alert(SakiI18n.t('主题设置已保存！'));
         // 通知其他页面更新主题
         localStorage.setItem('theme_updated', Date.now().toString());
       } else {
-        alert('保存失败');
+        alert(SakiI18n.t('保存失败'));
       }
     } catch(e) {
-      alert('网络或异常错误: ' + e.message); console.error(e);
+      alert(SakiI18n.t('网络或异常错误: ') + e.message); console.error(e);
     }
   }
 
@@ -1354,7 +1126,8 @@
 
       // 【新增】设置语言下拉框的值
       const langSelect = document.getElementById('ai-lang-select');
-      if (langSelect) langSelect.value = dataUser.ai_language || 'ja';
+      if (langSelect) langSelect.value = dataUser.default_chat_language || '';
+      document.getElementById('furigana-enabled').checked = dataUser.furigana_enabled !== false;
       const timezoneInput = document.getElementById('user-timezone-input');
       if (timezoneInput) timezoneInput.value = dataUser.timezone || 'Asia/Shanghai';
 
@@ -1366,8 +1139,6 @@
       if (tickleInput) tickleInput.value = dataUser.tickle_suffix || '';
       const emailInput = document.getElementById('user-email-input');
       if (emailInput) emailInput.value = dataUser.email || '';
-      updateCredentialStatus('gemini', dataUser.credentials?.gemini);
-      updateCredentialStatus('openrouter', dataUser.credentials?.openrouter);
       updateCredentialStatus('elevenlabs', dataUser.credentials?.elevenlabs);
       return true;
 
@@ -1378,6 +1149,13 @@
     }
   }
 
+  async function saveFurigana(input) {
+    try {
+      const response = await fetch('/api/user/profile_settings', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({furigana_enabled:input.checked})});
+      if (!response.ok) throw new Error();
+      location.reload();
+    } catch (_) { input.checked = !input.checked; alert(SakiI18n.t('保存失败，请重试')); }
+  }
   async function saveUserTickle(input) {
     const val = input.value.trim(); // 留空就存空字符串
     try {
@@ -1467,19 +1245,19 @@
     const statusEl = document.getElementById(`${provider}-key-status`);
     if (!statusEl) return;
     if (!status?.configured) {
-      statusEl.textContent = '未配置';
+      statusEl.textContent = SakiI18n.t('未配置');
       return;
     }
     const suffix = status.last_four ? `，末四位 ${status.last_four}` : '';
     const migrationNote = status.storage === 'legacy' ? '（等待管理员完成安全迁移）' : '';
-    statusEl.textContent = `已配置${suffix}${migrationNote}`;
+    statusEl.textContent = SakiI18n.ui`已配置${suffix}${migrationNote}`;
   }
 
   async function saveApiCredential(provider, inputId) {
     const input = document.getElementById(inputId);
     const apiKey = input?.value.trim() || '';
     if (!apiKey) {
-      alert('请先填写新的 API Key');
+      alert(SakiI18n.t('请先填写新的 API Key'));
       return;
     }
     try {
@@ -1498,7 +1276,7 @@
       input.style.border = '1px solid #4cd964';
       setTimeout(() => { input.style.border = '1px solid #eee'; }, 1000);
     } catch (e) {
-      alert(e.message || '网络错误，无法保存 API Key');
+      alert(e.message || SakiI18n.t('网络错误，无法保存 API Key'));
     }
   }
 
@@ -1518,7 +1296,7 @@
       if (input) input.value = '';
       updateCredentialStatus(provider, result.credential);
     } catch (e) {
-      alert(e.message || '网络错误，无法删除 API Key');
+      alert(e.message || SakiI18n.t('网络错误，无法删除 API Key'));
     }
   }
 
@@ -1542,10 +1320,10 @@
           input.style.borderBottom = '1px dashed #ccc'; // 恢复原样
         }, 1000);
       } else {
-        alert("修改失败: " + result.error);
+        alert(SakiI18n.t("修改失败: ") + result.error);
       }
     } catch(e) {
-      alert("网络错误，无法保存用户名");
+      alert(SakiI18n.t("网络错误，无法保存用户名"));
     }
   }
 
@@ -1581,10 +1359,10 @@
         imgEl.src = result.url;
         // alert('头像更新成功！'); // 可选：不喜欢弹窗可以去掉
       } else {
-        alert('上传失败: ' + result.error);
+        alert(SakiI18n.t('上传失败: ') + result.error);
       }
     } catch (e) {
-      alert('网络或异常错误: ' + e.message); console.error(e);
+      alert(SakiI18n.t('网络或异常错误: ') + e.message); console.error(e);
     } finally {
       imgEl.style.opacity = '1';
       // 清空 input，防止选同一张图不触发 onchange
@@ -1597,7 +1375,7 @@
     const content = cacheData[type];
     // 更新查看框
     const viewEl = document.getElementById(`view-${type}`);
-    viewEl.textContent = content || '(暂无内容)';
+    viewEl.textContent = content || SakiI18n.t('(暂无内容)');
     if(!content) viewEl.classList.add('empty-tip');
     else viewEl.classList.remove('empty-tip');
 
@@ -1629,7 +1407,7 @@
     const apiKey = 'user_persona';
 
     const originalText = btn.textContent;
-    btn.textContent = '保存中...';
+    btn.textContent = SakiI18n.t('保存中...');
     btn.disabled = true;
 
     try {
@@ -1648,10 +1426,10 @@
         // 退出编辑模式
         document.getElementById(`container-${type}`).classList.remove('editing');
       } else {
-        alert('保存失败: ' + result.error);
+        alert(SakiI18n.t('保存失败: ') + result.error);
       }
     } catch(e) {
-      alert('网络或异常错误: ' + e.message); console.error(e);
+      alert(SakiI18n.t('网络或异常错误: ') + e.message); console.error(e);
     } finally {
       btn.textContent = originalText;
       btn.disabled = false;
@@ -1665,14 +1443,14 @@
       const res = await fetchWithAuthGuard('/api/user/profile_settings', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ ai_language: lang })
+        body: JSON.stringify({ default_chat_language: lang })
       });
       if(res.ok) {
         // 给个微小的视觉反馈
         select.style.borderColor = '#4cd964';
         setTimeout(() => select.style.borderColor = '#ddd', 1000);
       }
-    } catch(e) { alert('设置保存失败'); }
+    } catch(e) { alert(SakiI18n.t('设置保存失败')); }
   }
 
   // 初始化
@@ -1690,7 +1468,7 @@
 
       const tbody = document.getElementById('usage-log-body');
       if (logs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:#ccc;">暂无调用记录</td></tr>';
+        tbody.innerHTML = SakiI18n.fragment('<tr><td colspan="5" style="text-align:center; padding:20px; color:#ccc;">暂无调用记录</td></tr>');
         return;
       }
 
@@ -1701,7 +1479,7 @@
         if(log.total > 2000) color = '#e65100'; // 橙色
         if(log.total > 5000) color = '#c62828'; // 红色
 
-        html += `
+        html += SakiI18n.ui`
               <tr style="border-bottom: 1px solid #eee;">
                   <td style="padding: 8px 10px; color: #888;">${log.time.split(' ')[1]}</td> <!-- 只显示时分秒 -->
                   <td style="padding: 8px 10px; font-weight:bold;">${log.char_id}</td>
@@ -1717,306 +1495,6 @@
   // 初始化时调用
   loadUsageLogs();
 
-  // --- 全局配置缓存 ---
-  let apiConfig = {};
-  let apiEditConfig = null;
-  let apiEditRoute = null;
-  let apiSaving = false;
-
-  // 1. 加载配置并初始化
-  async function loadApiConfig() {
-    try {
-      const res = await fetchWithAuthGuard('/api/system_config', { cache: 'no-store' });
-      if (handleApiUnauthorized(res)) return false;
-      if (!res.ok) throw new Error(`线路配置请求失败：HTTP ${res.status}`);
-      apiConfig = await res.json();
-      if (!apiConfig || typeof apiConfig !== 'object' || !apiConfig.routes) {
-        throw new Error('线路配置数据格式错误');
-      }
-
-      // 容错初始化
-      if (!apiConfig.model_options) {
-        apiConfig.model_options = { 'gemini': [], 'relay': [] };
-      }
-
-      // 渲染查看模式
-      renderApiView();
-
-      // 预渲染编辑模式 (但不显示)
-      apiEditConfig = JSON.parse(JSON.stringify(apiConfig));
-      const active = apiConfig.active_route;
-      document.getElementById(`radio-${active}`).checked = true;
-      refreshEditUI(active);
-      return true;
-
-    } catch(e) {
-      console.error("API配置加载失败", e);
-      return false;
-    }
-  }
-
-  // 2. 渲染查看模式 (View Mode)
-  function renderApiView() {
-    const route = apiConfig.active_route;
-    const routeName = (route === 'gemini') ? 'Gemini 直连' : '国内中转';
-    const models = apiConfig.routes[route].models;
-
-    document.getElementById('view-route-name').textContent = routeName;
-    document.getElementById('view-chat-model').textContent = models.chat;
-    document.getElementById('view-call-model').textContent = models.call != null ? models.call : 'gemini-3.6-flash';
-    document.getElementById('view-translation-model').textContent = models.translation != null ? models.translation : models.chat;
-    document.getElementById('view-moments-model').textContent = models.moments != null ? models.moments : models.chat;
-    document.getElementById('view-vision-model').textContent = models.vision != null ? models.vision : (route === 'gemini' ? 'gemini-2.5-pro' : 'gpt-4o');
-    document.getElementById('view-summary-model').textContent = models.summary;
-    document.getElementById('view-gen-model').textContent = models.gen_persona;
-    document.getElementById('view-image-model').textContent = models.image != null ? models.image : (route === 'gemini' ? 'gemini-2.5-flash-image' : 'Kwai-Kolors/Kolors');
-    document.getElementById('view-forum-model').textContent = models.forum != null ? models.forum : (route === 'gemini' ? 'gemini-3.5-flash' : 'gpt-5-mini');
-  }
-
-  // 3. 切换编辑状态
-  function toggleApiEdit(isEditing) {
-    const viewMode = document.getElementById('api-view-mode');
-    const editMode = document.getElementById('api-edit-mode');
-
-    if (isEditing) {
-      viewMode.style.display = 'none';
-      editMode.style.display = 'block';
-      // 进入编辑时，重置为当前生效的配置
-      apiEditConfig = JSON.parse(JSON.stringify(apiConfig));
-      const active = apiConfig.active_route;
-      document.getElementById(`radio-${active}`).checked = true;
-      refreshEditUI(active);
-    } else {
-      viewMode.style.display = 'block';
-      editMode.style.display = 'none';
-    }
-  }
-
-  // 在重建下拉框或切换线路前，将当前表单收集到同一份编辑草稿。
-  function captureApiEdits() {
-    if (!apiEditConfig || !apiEditRoute) return;
-    const route = apiEditConfig.routes[apiEditRoute];
-    const fields = {chat: 'chat', call: 'call', translation: 'translation',
-      moments: 'moments', vision: 'vision', summary: 'summary',
-      gen_persona: 'gen', image: 'image', forum: 'forum'};
-    Object.entries(fields).forEach(([key, id]) => {
-      route.models[key] = document.getElementById(`model-${id}`).value;
-    });
-    if (apiEditRoute === 'relay') {
-      route.relay_provider = document.querySelector('input[name="relay_provider"]:checked').value;
-      route.relay_custom_url = document.getElementById('relay_custom_url').value.trim();
-    }
-  }
-
-  // 4. 编辑模式：切换线路触发
-  function selectRoute(route) {
-    captureApiEdits();
-    refreshEditUI(route);
-  }
-
-  // 【新增】中转商选择处理
-  function selectRelayProvider(provider) {
-    captureApiEdits();
-    // 更新内存中的配置
-    if (!apiEditConfig.routes.relay) {
-      apiEditConfig.routes.relay = {};
-    }
-    apiEditConfig.routes.relay.relay_provider = provider;
-    // 选中对应的 radio
-    document.getElementById(`relay_${provider}`).checked = true;
-    
-    // 显示/隐藏自定义网址输入框
-    const customUrlContainer = document.getElementById('custom-url-input-container');
-    const customUrlInput = document.getElementById('relay_custom_url');
-    if (provider === 'custom') {
-      customUrlContainer.style.display = 'block';
-      // 加载保存的自定义网址
-      customUrlInput.value = apiEditConfig.routes.relay?.relay_custom_url || '';
-      customUrlInput.focus();
-    } else {
-      customUrlContainer.style.display = 'none';
-    }
-  }
-
-  // 5. 刷新编辑界面 UI (下拉框 + 标签列表)
-  function refreshEditUI(route) {
-    apiEditRoute = route;
-    // 更新标题
-    document.getElementById('manage-route-name').textContent = (route === 'gemini') ? '[Gemini]' : '[中转]';
-
-    // 【新增】显示/隐藏中转商选择
-    const relayProviderSettings = document.getElementById('relay-provider-settings');
-    if (route === 'relay') {
-      relayProviderSettings.style.display = 'block';
-      // 加载保存的中转商选择
-      const savedProvider = apiEditConfig.routes.relay?.relay_provider || 'old';
-      document.getElementById(`relay_${savedProvider}`).checked = true;
-      
-      // 如果之前选择的是自定义网址，显示输入框并加载值
-      const customUrlContainer = document.getElementById('custom-url-input-container');
-      const customUrlInput = document.getElementById('relay_custom_url');
-      if (savedProvider === 'custom') {
-        customUrlContainer.style.display = 'block';
-        customUrlInput.value = apiEditConfig.routes.relay?.relay_custom_url || '';
-      } else {
-        customUrlContainer.style.display = 'none';
-        customUrlInput.value = apiEditConfig.routes.relay?.relay_custom_url || '';
-      }
-    } else {
-      relayProviderSettings.style.display = 'none';
-    }
-
-    // A. 渲染下拉框选项
-    const options = apiEditConfig.model_options[route] || [];
-    // 如果列表为空，给个提示
-    const optionsHtml = options.length > 0
-            ? options.map(m => `<option value="${m}">${m}</option>`).join('')
-            : '<option value="">(暂无模型，请在下方添加)</option>';
-
-    document.getElementById('model-chat').innerHTML = optionsHtml;
-    document.getElementById('model-call').innerHTML = optionsHtml;
-    document.getElementById('model-translation').innerHTML = optionsHtml;
-    document.getElementById('model-moments').innerHTML = optionsHtml;
-    document.getElementById('model-vision').innerHTML = optionsHtml;
-    document.getElementById('model-summary').innerHTML = optionsHtml;
-    document.getElementById('model-gen').innerHTML = optionsHtml;
-    document.getElementById('model-image').innerHTML = optionsHtml;
-    document.getElementById('model-forum').innerHTML = optionsHtml;
-
-    // B. 选中当前(或默认)值
-    // 使用编辑草稿中的选择；不在选项列表里的已选模型由 setSelectValue 补齐。
-    const savedModels = apiEditConfig.routes[route].models;
-
-    setSelectValue('model-chat', savedModels.chat);
-    setSelectValue('model-call', savedModels.call != null ? savedModels.call : 'gemini-3.6-flash');
-    setSelectValue('model-translation', savedModels.translation != null ? savedModels.translation : savedModels.chat);
-    setSelectValue('model-moments', savedModels.moments != null ? savedModels.moments : savedModels.chat);
-    setSelectValue('model-vision', savedModels.vision != null ? savedModels.vision : (route === 'gemini' ? 'gemini-2.5-pro' : 'gpt-4o'));
-    setSelectValue('model-summary', savedModels.summary);
-    setSelectValue('model-gen', savedModels.gen_persona);
-    setSelectValue('model-image', savedModels.image != null ? savedModels.image : (route === 'gemini' ? 'gemini-2.5-flash-image' : 'Kwai-Kolors/Kolors'));
-    setSelectValue('model-forum', savedModels.forum != null ? savedModels.forum : (route === 'gemini' ? 'gemini-3.5-flash' : 'gpt-5-mini'));
-
-    // C. 渲染管理标签列表
-    const listEl = document.getElementById('model-tags-list');
-    let tagsHtml = '';
-    options.forEach(m => {
-      tagsHtml += `
-          <div style="background:#fff; border:1px solid #ddd; border-radius:4px; padding:4px 8px; font-size:12px; display:flex; align-items:center; gap:6px;">
-              <span>${m}</span>
-              <span onclick="deleteModel('${m}')" style="cursor:pointer; color:#c62828; font-weight:bold;">×</span>
-          </div>`;
-    });
-    listEl.innerHTML = tagsHtml;
-  }
-
-  // 辅助：设置下拉框的值；若值不在列表中，自动补进列表并选中，避免静默回退
-  function setSelectValue(id, value) {
-    const select = document.getElementById(id);
-    const val = (value == null) ? '' : String(value).trim();
-    if (!val) {
-      if (select.selectedIndex === -1 && select.options.length > 0) {
-        select.selectedIndex = 0;
-      }
-      return;
-    }
-
-    const exists = Array.from(select.options).some(opt => opt.value === val);
-    if (!exists) {
-      const opt = document.createElement('option');
-      opt.value = val;
-      opt.textContent = val;
-      select.appendChild(opt);
-    }
-    select.value = val;
-  }
-
-  // 6. 添加新模型
-  function addNewModel() {
-    const input = document.getElementById('new-model-input');
-    const newVal = input.value.trim();
-    if (!newVal) return;
-
-    captureApiEdits();
-    const currentRoute = apiEditRoute;
-
-    if (!apiEditConfig.model_options[currentRoute]) apiEditConfig.model_options[currentRoute] = [];
-
-    if (!apiEditConfig.model_options[currentRoute].includes(newVal)) {
-      apiEditConfig.model_options[currentRoute].push(newVal);
-
-      // 刷新 UI
-      refreshEditUI(currentRoute);
-
-      input.value = '';
-    } else {
-      alert('该模型已存在');
-    }
-  }
-
-  // 7. 删除模型
-  function deleteModel(val) {
-    captureApiEdits();
-    const currentRoute = apiEditRoute;
-    if (confirm(`确定删除模型 "${val}" 吗？`)) {
-      const list = apiEditConfig.model_options[currentRoute];
-      const index = list.indexOf(val);
-      if (index > -1) {
-        list.splice(index, 1);
-        refreshEditUI(currentRoute);
-      }
-    }
-  }
-
-  // 8. 保存最终配置
-  async function saveApiConfig() {
-    const activeRoute = document.querySelector('input[name="route"]:checked').value;
-
-    if (apiSaving) return;
-    captureApiEdits();
-    apiEditConfig.active_route = activeRoute;
-    if (activeRoute === 'relay' && apiEditConfig.routes.relay.relay_provider === 'custom'
-        && !apiEditConfig.routes.relay.relay_custom_url) {
-      alert('请输入自定义API网址');
-      return;
-    }
-    const submittedConfig = JSON.parse(JSON.stringify(apiEditConfig));
-    apiSaving = true;
-
-    const btn = document.querySelector('#module-api .btn-save');
-    const originalText = btn.textContent;
-    btn.textContent = '保存中...';
-    btn.disabled = true;
-
-    try {
-      const res = await fetchWithAuthGuard('/api/system_config', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(submittedConfig)
-      });
-      if (handleApiUnauthorized(res)) return;
-      if(res.ok) {
-        apiConfig = submittedConfig;
-        // 重新渲染查看模式
-        renderApiView();
-        toggleApiEdit(false);
-        alert('API 配置已更新！');
-      } else {
-        alert('保存失败');
-      }
-    } catch(e) {
-      alert('网络或异常错误: ' + e.message); console.error(e);
-    } finally {
-      apiSaving = false;
-      btn.textContent = originalText;
-      btn.disabled = false;
-    }
-  }
-
-  // 启动加载
-  loadApiConfig();
-  // loadConfigs(); // 别忘了保留原来加载 User/Format 的函数调用
-
   // 【新增】保存密码
   async function savePassword() {
     const currentInput = document.getElementById('current-password-input');
@@ -2024,11 +1502,11 @@
     const currentPass = currentInput?.value || '';
     const newPass = newInput?.value || '';
     if (!currentPass || !newPass) {
-      alert('请输入当前密码和新密码');
+      alert(SakiI18n.t('请输入当前密码和新密码'));
       return;
     }
 
-    if (!confirm("确定要修改登录密码吗？")) {
+    if (!confirm(SakiI18n.t("确定要修改登录密码吗？"))) {
       return;
     }
 
@@ -2046,10 +1524,10 @@
       if (!res.ok) throw new Error(result.message || '密码修改失败');
       currentInput.value = '';
       newInput.value = '';
-      alert(result.message || '密码修改成功，请重新登录。');
+      alert(result.message || SakiI18n.t('密码修改成功，请重新登录。'));
       window.location.href = '/login';
     } catch(e) {
-      alert(e.message || "网络错误");
+      alert(e.message || SakiI18n.t("网络错误"));
     }
   }
 
@@ -2063,17 +1541,17 @@
     if (!modal || !listEl) return;
 
     modal.style.display = 'flex';
-    listEl.innerHTML = '<div style="padding:8px; color:#999;">加载中...</div>';
+    listEl.innerHTML = SakiI18n.fragment('<div style="padding:8px; color:#999;">加载中...</div>');
 
     try {
-      const res = await fetchWithAuthGuard('/api/accounts/recent');
+      const res = await fetchWithAuthGuard('/api/accounts/recent', {cache: 'no-store'});
       if (!res.ok) {
-        listEl.innerHTML = '<div style="padding:8px; color:#f44336;">无法获取账号列表，请稍后重试</div>';
+        listEl.innerHTML = SakiI18n.fragment('<div style="padding:8px; color:#f44336;">无法获取账号列表，请稍后重试</div>');
         return;
       }
       const data = await res.json();
       if (!Array.isArray(data) || data.length === 0) {
-        listEl.innerHTML = '<div style="padding:8px; color:#999;">暂无可切换账号，请先使用其它账号登录一次。</div>';
+        listEl.innerHTML = SakiI18n.fragment('<div style="padding:8px; color:#999;">暂无可切换账号，请先使用其它账号登录一次。</div>');
         return;
       }
 
@@ -2082,10 +1560,10 @@
         const isCurrent = acc.is_current;
         const displayName = acc.display_name || acc.email || (`用户 ${acc.user_id}`);
         const email = acc.email || '';
-        const badge = isCurrent ? '<span style="margin-left:6px; font-size:11px; color:#4cd964;">当前</span>' : '';
+        const badge = isCurrent ? SakiI18n.fragment('<span style="margin-left:6px; font-size:11px; color:#4cd964;">当前</span>') : '';
         const btnHtml = isCurrent
                 ? ''
-                : `<button onclick="switchAccount(${acc.user_id})" style="padding:4px 10px; border:none; background:var(--primary-color); color:#fff; border-radius:12px; cursor:pointer; font-size:12px;">切换</button>`;
+                : SakiI18n.ui`<button onclick="switchAccount(${acc.user_id})" style="padding:4px 10px; border:none; background:var(--primary-color); color:#fff; border-radius:12px; cursor:pointer; font-size:12px;">切换</button>`;
 
         html += `
           <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 4px; border-bottom:1px solid #f2f2f2;">
@@ -2099,7 +1577,7 @@
       listEl.innerHTML = html;
     } catch (e) {
       console.error(e);
-      listEl.innerHTML = '<div style="padding:8px; color:#f44336;">加载失败，请检查网络</div>';
+      listEl.innerHTML = SakiI18n.fragment('<div style="padding:8px; color:#f44336;">加载失败，请检查网络</div>');
     }
   }
 
@@ -2108,23 +1586,36 @@
     if (modal) modal.style.display = 'none';
   }
 
+  let accountSwitchPending = false;
   async function switchAccount(userId) {
-    if (!confirm('确定切换到该账号吗？')) return;
+    if (accountSwitchPending) return;
+    if (!confirm(SakiI18n.t('确定切换到该账号吗？'))) return;
+    accountSwitchPending = true;
+    const buttons = document.querySelectorAll('#account-switch-list button');
+    buttons.forEach(button => { button.disabled = true; });
+    let switched = false;
     try {
       const res = await fetchWithAuthGuard('/api/accounts/switch', {
         method: 'POST',
+        cache: 'no-store',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ user_id: userId })
       });
+      if (res.status === 401) return;
       const data = await res.json();
-      if (data.status === 'success') {
-        // 切换成功后回到首页或刷新页面
-        window.location.href = '/';
+      if (res.ok && data.status === 'success' && Number(data.user_id) === Number(userId)) {
+        switched = true;
+        window.location.replace('/');
       } else {
-        alert(data.message || '切换失败，请稍后重试');
+        alert(data.message || SakiI18n.t('切换失败，请稍后重试'));
       }
     } catch (e) {
-      alert('网络错误，切换失败');
+      alert(SakiI18n.t('网络错误，切换失败'));
+    } finally {
+      if (!switched) {
+        accountSwitchPending = false;
+        buttons.forEach(button => { button.disabled = false; });
+      }
     }
   }
 
@@ -2175,18 +1666,18 @@
 
     if (errorEl) errorEl.textContent = '';
     if (password === '') {
-      if (errorEl) errorEl.textContent = '请输入当前密码';
+      if (errorEl) errorEl.textContent = SakiI18n.t('请输入当前密码');
       return;
     }
-    const confirmedDeleteText = confirmText === '注销账户';
+    const confirmedDeleteText = confirmText === SakiI18n.t('注销确认短语');
     if (confirmedDeleteText === false) {
-      if (errorEl) errorEl.textContent = '请手动输入“注销账户”确认操作';
+      if (errorEl) errorEl.textContent = SakiI18n.t('请手动输入“{phrase}”确认注销。', {phrase:SakiI18n.t('注销确认短语')});
       return;
     }
 
     if (submitBtn) {
       submitBtn.disabled = true;
-      submitBtn.textContent = '注销中...';
+      submitBtn.textContent = SakiI18n.t('注销中...');
     }
 
     try {
@@ -2197,31 +1688,19 @@
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.status === 'success') {
-        alert('账号已注销');
+        await window.SakiPrivacy?.clear();
+        alert(SakiI18n.t('账号已注销'));
         window.location.href = '/login';
         return;
       }
-      if (errorEl) errorEl.textContent = data.message || '注销失败，请稍后重试';
+      if (errorEl) errorEl.textContent = data.message || SakiI18n.t('注销失败，请稍后重试');
     } catch (e) {
-      if (errorEl) errorEl.textContent = '网络错误，请稍后重试';
+      if (errorEl) errorEl.textContent = SakiI18n.t('网络错误，请稍后重试');
     } finally {
       if (submitBtn) {
         submitBtn.disabled = false;
-        submitBtn.textContent = '确认注销';
+        submitBtn.textContent = SakiI18n.t('确认注销');
       }
-    }
-  }
-
-  // --- 打赏模块逻辑 ---
-  function toggleDonateQR() {
-    const codes = document.getElementById('donate-codes');
-    const btn = event.target;
-    if (codes.style.display === 'none') {
-      codes.style.display = 'flex';
-      btn.textContent = '隐藏收款码';
-    } else {
-      codes.style.display = 'none';
-      btn.textContent = '显示收款码';
     }
   }
 
@@ -2229,7 +1708,7 @@
   function copyToClipboard(text, btn) {
     const originalText = btn.textContent;
     navigator.clipboard.writeText(text).then(() => {
-      btn.textContent = '已复制';
+      btn.textContent = SakiI18n.t('已复制');
       btn.style.background = '#4cd964';
       btn.style.color = '#fff';
       setTimeout(() => {
@@ -2246,7 +1725,7 @@
       textArea.select();
       try {
         document.execCommand('copy');
-        btn.textContent = '已复制';
+        btn.textContent = SakiI18n.t('已复制');
         setTimeout(() => btn.textContent = originalText, 2000);
       } catch (e) {}
       document.body.removeChild(textArea);
@@ -2305,7 +1784,7 @@
 
   async function enableNotifications() {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-      alert('您的设备不支持 Web 推送');
+      alert(SakiI18n.t('您的设备不支持 Web 推送'));
       return;
     }
 
@@ -2322,14 +1801,14 @@
       const dataKey = await resKey.json();
       const publicVapidKey = dataKey.publicKey;
       if (!publicVapidKey) {
-        alert('VAPID 公钥未配置，请联系管理员');
+        alert(SakiI18n.t('VAPID 公钥未配置，请联系管理员'));
         return;
       }
 
       // 3. 请求通知权限
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') {
-        alert('您拒绝了通知权限');
+        alert(SakiI18n.t('您拒绝了通知权限'));
         return;
       }
 
@@ -2346,14 +1825,14 @@
         body: JSON.stringify(subscription)
       });
 
-      alert('通知开启成功！您可以锁屏等待消息了。');
+      alert(SakiI18n.t('通知开启成功！您可以锁屏等待消息了。'));
 
     } catch (e) {
       console.error(e);
       if (e.message && e.message.includes('push service')) {
-        alert('开启失败: 推送服务不可达（国内网络可能无法连接 Google FCM），请使用代理/VPN 后重试');
+        alert(SakiI18n.t('开启失败: 推送服务不可达（国内网络可能无法连接 Google FCM），请使用代理/VPN 后重试'));
       } else {
-        alert('开启失败: ' + e.message);
+        alert(SakiI18n.t('开启失败: ') + e.message);
       }
     }
   }

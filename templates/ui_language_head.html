@@ -1,0 +1,10 @@
+<meta name="apple-mobile-web-app-title" content="{{ saki_brand }}">
+<script>window.SakiUICatalog = {{ ui_catalog | tojson }};</script>
+<script src="/static/ui-language.js"></script>
+<script>window.SakiPrivacyUser = {{ session.get("user_id") | tojson }};</script>
+<script src="/static/privacy-session.js"></script>
+<style>.privacy-note{font-size:12px;line-height:1.65;color:var(--text-muted,#666);background:var(--bg-secondary,#fff7fa);padding:10px 12px;border-radius:10px;overflow-wrap:anywhere}</style>
+<script>window.SakiFuriganaEnabled = {{ ui_furigana_enabled | tojson }};</script>
+<script defer src="/static/model-furigana.js"></script>
+
+<script src="/static/message-tags.js?v=20260924"></script>

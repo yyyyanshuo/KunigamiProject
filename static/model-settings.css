@@ -1,0 +1,35 @@
+#module-api:not(.collapsed) > .section-body { max-height:none; }
+#module-api [hidden] { display: none !important; }
+.model-heading,.model-key-controls { display:flex; align-items:center; gap:10px; justify-content:space-between; }
+.model-heading { margin-bottom:16px; }
+.model-fieldset { border:0; padding:0; margin:0 0 18px; min-width:0; }
+.model-fieldset legend { font-size:13px; font-weight:600; margin-bottom:9px; }
+.model-routes { display:flex; flex-wrap:wrap; gap:8px; }
+.model-route { cursor:pointer; position:relative; }
+.model-route input { position:absolute; opacity:0; width:1px; height:1px; }
+.model-route span { display:flex; align-items:center; gap:5px; padding:9px 12px; border:1px solid var(--border-color,#eee); border-radius:12px; background:var(--bg-card,#fff); font-size:13px; }
+.model-route input:checked + span { border-color:var(--primary-color,#dd91ae); background:var(--primary-light,#fff2f7); }
+.model-route input:focus-visible + span { outline:2px solid var(--primary-color,#dd91ae); outline-offset:2px; }
+.model-route small,.model-recommendation { font-size:10px; padding:2px 6px; border-radius:7px; background:#fce8f0; color:#9c5574; }
+.model-custom-fields { display:grid; gap:12px; margin-bottom:16px; }
+.model-custom-fields label { display:grid; gap:6px; font-size:12px; }
+.model-key-card { padding:14px; border:1px solid var(--border-color,#eee); border-radius:14px; margin-bottom:16px; }
+.model-key-card label { font-size:13px; font-weight:600; }
+.model-key-controls { margin:8px 0; }
+.model-key-controls input { min-width:0; flex:1; padding:10px; border:1px solid var(--border-color,#eee); border-radius:9px; background:var(--bg-card,#fff); color:var(--text-main,#333); }
+.model-key-card small { display:block; font-size:11px; color:var(--text-secondary,#888); line-height:1.7; }
+.model-advice { padding:12px; background:var(--primary-light,#fff5f8); border-radius:12px; margin:0 0 16px; font-size:12px; }
+.model-advice p { line-height:1.7; margin-bottom:0; }
+.model-task-fields { display:grid; gap:12px; }
+.model-task-card { border:1px solid var(--border-color,#eee); border-radius:12px; padding:12px; min-width:0; }
+.model-task-title { display:flex; align-items:center; gap:7px; font-size:13px; margin-bottom:8px; }
+.model-task-card .model-select { width:100%; min-width:0; box-sizing:border-box; }
+.model-task-card input { margin-top:8px; }
+.model-task-card p { font-size:11px; line-height:1.6; color:var(--text-secondary,#888); margin:8px 0 0; }
+.model-reset { border:0; background:none; color:var(--primary-color,#b97b96); font-size:11px; cursor:pointer; padding:6px 0 0; }
+#model-settings-message { font-size:12px; color:var(--text-secondary,#888); white-space:pre-wrap; margin-bottom:10px; }
+#module-api .api-badge { overflow-wrap:anywhere; }
+.model-advice a { display:inline-block; margin-top:8px; color:var(--primary-color,#b97b96); }
+
+.model-quota-label { display:block; margin-top:12px; font-size:12px; }
+.model-limit-overview { font-size:12px; color:var(--text-secondary,#888); margin:12px 0 0; }

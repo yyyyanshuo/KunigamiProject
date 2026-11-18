@@ -1,6 +1,7 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="{{ ui_language }}" data-ai-brand-line="{{ ui_t('ai_brand_line', brand=saki_brand) }}">
 <head>
+  {% include "ui_language_head.html" %}
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>角色广场</title>
@@ -171,7 +172,7 @@
 
         async function loadCharacters() {
             const grid = document.getElementById('char-grid');
-            grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 20px;">加载中...</div>';
+            grid.innerHTML = SakiI18n.fragment('<div style="grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 20px;">加载中...</div>');
             
             let url;
             if (showingFavs) {
@@ -184,12 +185,16 @@
 
             const res = await fetch(url);
             const chars = await res.json();
+            if (!res.ok || !Array.isArray(chars)) {
+                grid.textContent = SakiI18n.t('角色列表加载失败，请稍后重试');
+                return;
+            }
             
             grid.innerHTML = "";
             if (chars.length === 0) {
-                let msg = '暂无匹配角色';
-                if (showingFavs) msg = '收藏夹空空如也';
-                if (showingMyPosts) msg = '你还没有发布过角色';
+                let msg = SakiI18n.t('暂无匹配角色');
+                if (showingFavs) msg = SakiI18n.t('收藏夹空空如也');
+                if (showingMyPosts) msg = SakiI18n.t('你还没有发布过角色');
                 grid.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 20px;">${msg}</div>`;
                 return;
             }

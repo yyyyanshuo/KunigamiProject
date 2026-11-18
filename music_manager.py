@@ -1,3 +1,4 @@
+from core.runtime import DATA_ROOT
 """
 音乐状态管理 + 本地歌单 CRUD
 存储路径: users/<user_id>/music/
@@ -17,7 +18,7 @@ PLAYLISTS_FILE = "playlists.json"
 def _get_music_dir(user_id) -> str:
     """获取用户音乐数据目录"""
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    music_dir = os.path.join(base_dir, "users", str(user_id), MUSIC_DIR_NAME)
+    music_dir = os.path.join(DATA_ROOT, "users", str(user_id), MUSIC_DIR_NAME)
     os.makedirs(music_dir, exist_ok=True)
     return music_dir
 

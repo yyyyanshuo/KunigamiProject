@@ -1,7 +1,9 @@
 import sqlite3
-import uuid
+import re
+import html
+import pytest
 
-from core.legal import init_legal_consents_table
+from core.legal import init_legal_consents_table, get_current_legal_versions, get_user_legal_status, record_current_legal_consents
 
 
 def _clear_session(client):
@@ -9,124 +11,77 @@ def _clear_session(client):
         flask_session.clear()
 
 
-def test_legal_document_pages_are_public(app_client):
+@pytest.mark.parametrize("language,title", [("ja","プライバシーポリシー"),("en","Privacy Policy"),("zh-CN","隐私政策")])
+def test_legal_document_pages_are_public(app_client, language, title):
     _clear_session(app_client)
-
-    terms = app_client.get("/terms")
-    privacy = app_client.get("/privacy")
-
-    assert terms.status_code == 200
-    assert "用户协议" in terms.get_data(as_text=True)
-    assert "版本 1.0" in terms.get_data(as_text=True)
-    assert privacy.status_code == 200
-    assert "隐私政策" in privacy.get_data(as_text=True)
-    assert "第三方处理与数据传输" in privacy.get_data(as_text=True)
-
-
-def test_register_page_has_explicit_legal_checkbox_and_links(app_client):
-    _clear_session(app_client)
-    response = app_client.get("/register")
-    html = response.get_data(as_text=True)
-
-    assert response.status_code == 200
-    assert 'id="legal_accepted"' in html
-    assert 'href="/terms"' in html
-    assert 'href="/privacy"' in html
-
-
-def test_register_rejects_missing_or_stale_legal_acceptance(app_client):
-    missing = app_client.post(
-        "/api/register",
-        json={
-            "email": "missing-legal@example.com",
-            "password": "secret",
-            "adult_confirmed": True,
-        },
-    )
-    assert missing.status_code == 400
-    assert "用户协议" in missing.get_json()["message"]
-
-    stale = app_client.post(
-        "/api/register",
-        json={
-            "email": "stale-legal@example.com",
-            "password": "secret",
-            "adult_confirmed": True,
-            "legal_accepted": True,
-            "terms_version": "0.9",
-            "privacy_version": "1.0",
-        },
-    )
-    assert stale.status_code == 400
-    assert "版本已更新" in stale.get_json()["message"]
+    app_client.post("/api/ui/language", json={"user_language":language})
+    for path in ("/terms", "/privacy"):
+        response=app_client.get(path)
+        assert response.status_code==200
+        source=response.get_data(as_text=True)
+        article=html.unescape(re.sub(r"<[^>]*>", " ", re.search(r"<article>(.*?)</article>", source,re.S)[1]))
+        assert '2.0-review.1' in article
+        assert '2026-09-23' in article
+        assert 'legal-review-notice' in source
+        assert '2026年8月11日' not in article
+        assert '中华人民共和国法律' not in article
+        assert '新加坡' not in article and 'Singapore' not in article and 'シンガポール' not in article
+        if language=='en':
+            assert 'Not yet in effect' in article
+            assert not re.search(r'[\u4e00-\u9fff]',article)
+        elif language=='ja':
+            assert '未施行' in article
+            assert '運営者' in article
+        else:
+            assert '尚未正式生效' in article
+        if path=='/privacy':
+            assert title.casefold() in article.casefold()
+            for provider in ('OpenAI','Anthropic','xAI','ElevenLabs','Serper','Nominatim'):
+                assert provider in article
 
 
-def test_successful_registration_records_both_current_documents(
-    app_client, tmp_path, monkeypatch
-):
-    from blueprints import auth
+def test_user_must_acknowledge_documents_after_admin_creation(accounts_client):
     import core.config
-
-    database_path = tmp_path / "users.db"
-    conn = sqlite3.connect(database_path)
-    conn.execute(
-        """
-        CREATE TABLE users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            display_name TEXT,
-            created_at TEXT
-        )
-        """
-    )
-    init_legal_consents_table(conn)
-    conn.commit()
-    conn.close()
-
-    monkeypatch.setattr(auth, "USERS_DB", str(database_path))
-    monkeypatch.setattr(core.config, "USERS_DB", str(database_path))
-    monkeypatch.setattr(auth, "init_user_workspace", lambda user_id: None)
-    monkeypatch.setattr(
-        auth,
-        "_track_device_login",
-        lambda user_id, email, display_name: "test-device",
-    )
-
-    _clear_session(app_client)
-    email = f"legal-{uuid.uuid4().hex}@example.com"
-    response = app_client.post(
-        "/api/register",
-        json={
-            "email": email,
-            "password": "secret-pass",
-            "adult_confirmed": True,
-            "legal_accepted": True,
-            "terms_version": "1.0",
-            "privacy_version": "1.0",
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.get_json()["status"] == "success"
-
-    status_response = app_client.get("/api/legal/status")
-    assert status_response.status_code == 200
-    assert status_response.get_json()["current"] is True
-
-    conn = sqlite3.connect(database_path)
-    rows = conn.execute(
-        """
-        SELECT document_type, document_version, accepted_at
-        FROM legal_consents
-        ORDER BY document_type
-        """
-    ).fetchall()
-    conn.close()
-
-    assert [(row[0], row[1]) for row in rows] == [
-        ("privacy", "1.0"),
-        ("terms", "1.0"),
-    ]
+    created = accounts_client.post(
+        "/api/admin/users", json={"email": "legal@example.com"},
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    ).get_json()
+    assert get_user_legal_status(created["user_id"], db_path=core.config.USERS_DB)["current"] is False
+    _clear_session(accounts_client)
+    assert accounts_client.post("/api/login", json={
+        "username": created["email"], "password": created["initial_password"],
+    }).status_code == 200
+    assert accounts_client.get("/api/legal/status").get_json()["current"] is False
+    assert accounts_client.post("/api/legal/consent", json={}).status_code == 400
+    assert accounts_client.post("/api/legal/consent", json={
+        "legal_accepted": True, "terms_version": "0.9", "privacy_version": "1.0",
+    }).status_code == 400
+    versions = get_current_legal_versions()
+    assert accounts_client.post("/api/legal/consent", json={
+        "legal_accepted": True, "terms_version": versions["terms"], "privacy_version": versions["privacy"],
+    }).status_code == 200
+    assert accounts_client.get("/api/legal/status").get_json()["current"] is True
+    with sqlite3.connect(core.config.USERS_DB) as conn:
+        rows = conn.execute(
+            "SELECT document_type, document_version, accepted_at FROM legal_consents WHERE user_id=? ORDER BY document_type",
+            (created["user_id"],),
+        ).fetchall()
+    assert [(row[0], row[1]) for row in rows] == [("privacy", versions["privacy"]), ("terms", versions["terms"])]
     assert all(row[2] for row in rows)
-    _clear_session(app_client)
+
+
+def test_old_acceptance_is_not_current_and_is_preserved(tmp_path):
+    database=tmp_path/'legal.db'
+    with sqlite3.connect(database) as conn:
+        init_legal_consents_table(conn)
+        for kind in ('terms','privacy'):
+            conn.execute('INSERT INTO legal_consents(user_id,document_type,document_version,accepted_at) VALUES (?,?,?,?)',(17,kind,'1.0','2026-08-11T00:00:00+00:00'))
+    assert get_user_legal_status(17,db_path=str(database))['current'] is False
+    with sqlite3.connect(database) as conn:
+        record_current_legal_consents(conn,17)
+    current=get_user_legal_status(17,db_path=str(database))
+    assert current['current'] is True
+    assert all(d['status']=='review' and d['effective_date'] is None for d in current['documents'].values())
+    with sqlite3.connect(database) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM legal_consents WHERE document_version='1.0'").fetchone()[0]==2
+        assert conn.execute('SELECT COUNT(*) FROM legal_consents WHERE document_hash IS NOT NULL').fetchone()[0]==2

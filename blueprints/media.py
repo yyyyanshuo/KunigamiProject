@@ -1,3 +1,4 @@
+from core.runtime import DATA_ROOT
 import os
 import time
 import re
@@ -6,6 +7,7 @@ import random
 import threading
 import uuid
 import io
+import base64
 import shutil
 import sqlite3
 import requests
@@ -44,16 +46,16 @@ from services.voice_messages import (
     new_voice_filename,
     save_voice_message,
 )
-from services.image_tags import normalize_image_description
+from services.image_tags import normalize_image_description, normalize_vision_prompt
 import music_api
 import music_manager
 
 media_bp = Blueprint('media', __name__)
 
 # ==================== 表情库路径常量 ====================
-STICKERS_ROOT = os.path.join(core.config.BASE_DIR, "stickers")
+STICKERS_ROOT = os.path.join(DATA_ROOT, "stickers")
 STICKER_IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp")
-STICKER_DESCRIPTIONS_FILE = os.path.join(core.config.BASE_DIR, "configs", "sticker_descriptions_sorted.txt")
+STICKER_DESCRIPTIONS_FILE = os.path.join(DATA_ROOT, "configs", "sticker_descriptions_sorted.txt")
 
 
 # ==================== Sticker 辅助函数 ====================
@@ -570,7 +572,10 @@ def api_stickers_packs_upload():
     uid = get_current_user_id()
     if not uid:
         return jsonify({"status": "error", "message": "login required"}), 401
-    username = get_current_username() or str(uid)
+    username = get_current_username() or "User"
+    # Never turn the account's email fallback into a public author label.
+    if "@" in username:
+        username = "User"
     pack_name = (request.form.get("name") or request.form.get("pack_name") or "").strip()
     if not pack_name:
         return jsonify({"status": "error", "message": "name required"}), 400
@@ -650,7 +655,8 @@ def sticker_pack_detail_page(pack_id):
         return "Pack not found", 404
     meta = _get_pack_meta(pack_id)
     name = (meta.get("name") if meta else None) or pack_id
-    author = (meta.get("uploaded_by_name") if meta else None) or "官方"
+    from core.localization import tr
+    author = tr("已注销用户") if meta and meta.get("author_deleted") else ((meta.get("uploaded_by_name") if meta else None) or tr("官方"))
     stickers = _list_pack_stickers(pack_id)
     from_char = request.args.get("from", "")
     from_group = request.args.get("group", "0")
@@ -1647,54 +1653,62 @@ def _public_base_url() -> str:
     return request.host_url.rstrip("/")
 
 
-def _generate_image_description(public_image_url: str) -> str:
-    """Describe one public image with the configured vision model."""
-    from app import get_model_config, call_openrouter
+@media_bp.route("/api/vision/prompts", methods=["GET", "POST"])
+def vision_saved_prompts():
+    """Add/remove individual prompts under an account lock; never replace the list."""
+    from pathlib import Path
+    from core.json_storage import atomic_write_json
+    from services.character_state import character_state_lock
 
-    route, current_model = get_model_config("vision")
-    print(f"--- [Vision] Route: {route}, Model: {current_model} ---")
-    if route == "relay":
-        messages = [{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": VISION_DESCRIPTION_PROMPT},
-                {"type": "image_url", "image_url": {"url": public_image_url}},
-            ],
-        }]
-        description = call_openrouter(messages, char_id=None, model_name=current_model)
-    else:
-        base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
-        gemini_key = get_effective_gemini_key()
-        url = f"{base_url}/v1beta/models/{current_model}:generateContent"
-        payload = {
-            "contents": [{
-                "role": "user",
-                "parts": [
-                    {"text": VISION_DESCRIPTION_PROMPT},
-                    {"file_data": {"mime_type": "image/jpeg", "file_uri": public_image_url}},
-                ],
-            }],
-            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 4096},
-            "safetySettings": [
-                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-            ],
-        }
-        response = requests.post(url, json=payload, headers={"x-goog-api-key": gemini_key}, timeout=100)
-        if response.status_code != 200:
-            raise RuntimeError(f"[Gemini Vision Error {response.status_code}] {response.text}")
-        result = response.json()
-        finish_reason = (result.get("candidates") or [{}])[0].get("finishReason")
-        if finish_reason and finish_reason != "STOP":
-            print(f"   [Vision] Gemini finishReason={finish_reason} (可能被截断)")
-        parts = (((result.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
-        description = "".join(part.get("text", "") for part in parts).strip()
+    uid = get_current_user_id()
+    if not uid:
+        return jsonify(error="请先登录"), 401
+    path = Path(core.config.USERS_ROOT) / str(uid) / "configs" / "vision_prompts.json"
+    payload = request.get_json(silent=True) if request.method == "POST" else None
+    if request.method == "POST":
+        if not isinstance(payload, dict) or payload.get("action") not in ("add", "delete"):
+            return jsonify(error="提示词操作无效"), 400
+        try:
+            prompt = normalize_vision_prompt(payload.get("prompt"))
+            if not prompt:
+                raise ValueError("请填写识图提示词")
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+    try:
+        with character_state_lock(path):
+            try:
+                prompts = json.loads(path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                prompts = []
+            if not isinstance(prompts, list) or any(not isinstance(item, str) for item in prompts):
+                raise ValueError("已保存的提示词格式无效")
+            if request.method == "POST":
+                if payload["action"] == "add" and prompt not in prompts:
+                    if len(prompts) >= 30:
+                        return jsonify(error="最多保存30条识图提示词"), 400
+                    prompts.append(prompt)
+                if payload["action"] == "delete":
+                    prompts = [item for item in prompts if item != prompt]
+                atomic_write_json(path, prompts)
+        return jsonify(prompts=prompts)
+    except (OSError, ValueError):
+        return jsonify(error="识图提示词保存或读取失败，请重试"), 500
 
-    if not str(description or "").strip():
-        raise RuntimeError("视觉模型没有返回图片描述")
-    return normalize_image_description(description)
+
+def _generate_image_description(image_source: str, vision_prompt: str = "") -> str:
+    from services.ai_client import get_model_config, is_ai_error_response
+    from services.model_provider import call_provider
+    _, model = get_model_config('vision')
+    prompt = normalize_vision_prompt(vision_prompt) or VISION_DESCRIPTION_PROMPT
+    prompt += "\n请仅输出图片描述正文，最多500字，不要输出图片标签；看不清的内容请说明，不要编造。"
+    messages = [{'role': 'user', 'content': [
+        {'type': 'text', 'text': prompt},
+        {'type': 'image_url', 'image_url': {'url': image_source}},
+    ]}]
+    description = call_provider(messages, char_id=None, model_name=model, temperature=0.4)
+    if is_ai_error_response(description) or not str(description or '').strip():
+        raise RuntimeError('视觉模型没有返回图片描述')
+    return normalize_image_description(description, max_length=500)
 
 
 def _get_description_request(form):
@@ -1704,6 +1718,7 @@ def _get_description_request(form):
     if mode == "manual":
         return mode, normalize_image_description(form.get("description"))
     return mode, ""
+
 
 def _compress_chat_image_to_jpg(src_path: str, dst_path: str, max_edge: int = 1024, max_bytes: int = 500 * 1024):
     with Image.open(src_path) as img:
@@ -1756,6 +1771,7 @@ def vision_upload():
 
     try:
         description_mode, description = _get_description_request(request.form)
+        vision_prompt = normalize_vision_prompt(request.form.get("vision_prompt")) if description_mode == "ai" else ""
     except ValueError as exc:
         return jsonify({"error": str(exc), "code": "invalid_image_description"}), 400
 
@@ -1789,42 +1805,26 @@ def vision_upload():
     except Exception:
         pass
 
-    public_file_path = None
     if description_mode == "ai":
-        static_upload_dir = os.path.join(core.config.BASE_DIR, "static", "uploads")
-        os.makedirs(static_upload_dir, exist_ok=True)
-        public_filename = filename
-        public_file_path = os.path.join(static_upload_dir, public_filename)
-        m = 0
-        while os.path.exists(public_file_path):
-            m += 1
-            public_filename = f"{base_name}_{m}.jpg"
-            public_file_path = os.path.join(static_upload_dir, public_filename)
-        shutil.copy2(filepath, public_file_path)
-        public_image_url = f"{_public_base_url()}/static/uploads/{public_filename}"
+        with open(filepath, "rb") as image_file:
+            image_data = "data:image/jpeg;base64," + base64.b64encode(image_file.read()).decode("ascii")
         try:
-            description = _generate_image_description(public_image_url)
-        except Exception as exc:
-            print(f"   [Vision] Error: {exc}")
-            if os.path.exists(filepath):
-                os.remove(filepath)
-            if public_file_path and os.path.exists(public_file_path):
-                os.remove(public_file_path)
+            description = (_generate_image_description(image_data, vision_prompt=vision_prompt)
+                           if vision_prompt else _generate_image_description(image_data))
+        except Exception:
+            os.remove(filepath)
             return jsonify({
                 "error": "AI识图失败，请改用手动描述",
                 "code": "vision_failed",
             }), 502
 
-    try:
-        cos_path = f"users/{user_id}/chat_images/{filename}"
-        upload_to_cos(filepath, cos_path)
-        if os.path.exists(filepath):
-            os.remove(filepath)
-    except Exception as e:
-        print(f"   [COS Upload Error] {e}")
-    finally:
-        if public_file_path and os.path.exists(public_file_path):
-            os.remove(public_file_path)
+    # Keep the private local copy if cloud storage is unavailable. In local mode
+    # the COS adapter returns a different upload URL, so retain this route's file.
+    from core.runtime import LOCAL_TEST
+    cos_path = f"users/{user_id}/chat_images/{filename}"
+    uploaded_url = upload_to_cos(filepath, cos_path)
+    if uploaded_url and not LOCAL_TEST and os.path.exists(filepath):
+        os.remove(filepath)
 
     url = f"/api/user/image/{filename}"
     return jsonify({

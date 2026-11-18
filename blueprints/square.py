@@ -1,3 +1,4 @@
+from core.square_aliases import parse_aliases, stored_aliases, search_fold
 import os
 import io
 import time
@@ -11,9 +12,12 @@ from flask import Blueprint, request, jsonify, session, render_template
 from PIL import Image
 from cos_utils import download_from_cos, upload_to_cos
 from core.config import COS_BASE_URL, SQUARE_DB, SQUARE_AVATARS_DIR, USERS_DB, USERS_ROOT
+from core.json_storage import StorageWriteError
+from services.character_state import character_state_lock
 from core.context import get_current_user_id
-from core.credentials import CredentialError, get_user_credential
+from core.runtime import LOCAL_TEST
 from core.utils import (
+    CHARACTER_NAME_HINT, CHARACTER_NAME_LIMIT, name_fits,
     safe_save_json,
     _get_characters_config_file,
     get_current_username,
@@ -24,7 +28,6 @@ from services.persona_locks import PersonaLockError, validate_persona_locks
 
 square_bp = Blueprint('square', __name__)
 
-TRIAL_ADMIN_USER_ID = 1
 TRIAL_MAX_TURNS = 10
 TRIAL_MAX_MESSAGE_CHARS = 2000
 TRIAL_RATE_LIMIT_PER_MINUTE = max(
@@ -210,6 +213,7 @@ def _ensure_square_character_columns(conn):
         "author_user_id": "INTEGER",
         "source_character_id": "TEXT",
         "updated_at": "TEXT",
+        "aliases": "TEXT NOT NULL DEFAULT '[]'",
     }
     for name, sql_type in additions.items():
         if name not in columns:
@@ -296,14 +300,15 @@ def _save_local_square_link(user_id, local_character_id, square_id):
     if not os.path.isfile(config_path):
         return
     try:
-        with open(config_path, "r", encoding="utf-8-sig") as f:
-            characters = json.load(f) or {}
-        info = characters.get(local_character_id)
-        if not isinstance(info, dict):
-            return
-        info["square_published_id"] = square_id
-        info["square_last_synced_at"] = datetime.now().isoformat()
-        safe_save_json(config_path, characters)
+        with character_state_lock(config_path):
+            with open(config_path, "r", encoding="utf-8-sig") as f:
+                characters = json.load(f) or {}
+            info = characters.get(local_character_id)
+            if not isinstance(info, dict):
+                return
+            info["square_published_id"] = square_id
+            info["square_last_synced_at"] = datetime.now().isoformat()
+            safe_save_json(config_path, characters)
     except Exception as e:
         print(f"Square local link save error: {e}")
 
@@ -324,12 +329,22 @@ def _private_avatar_cos_keys(user_id, avatar_url):
         parts = path[len(prefix):].split("/", 1)
     else:
         cos_host = urlparse(COS_BASE_URL).netloc
-        if not cos_host or parsed.netloc != cos_host:
+        from core.private_media import MEDIA_PREFIX, permitted_key
+        if not parsed.netloc and path.startswith(MEDIA_PREFIX):
+            object_key = path[len(MEDIA_PREFIX):]
+        elif cos_host and parsed.netloc == cos_host:
+            object_key = path.lstrip("/")
+        else:
             return []
-        object_key = path.lstrip("/")
-        private_prefix = f"users/{user_id}/characters/"
+        if not permitted_key(object_key, user_id):
+            return []
+        account_prefix = f"users/{user_id}/"
+        if not object_key.startswith(account_prefix):
+            return []
+        private_prefix = account_prefix + "characters/"
         if not object_key.startswith(private_prefix):
-            return []
+            # Profile/chat uploads also need an independent public copy.
+            return [object_key]
         parts = object_key[len(private_prefix):].split("/", 1)
 
     if len(parts) != 2:
@@ -415,10 +430,24 @@ def _materialize_square_avatar(square_id, user_id, uploaded_file=None, avatar_ur
                 raise SquareAvatarError("COS 头像处理失败，请稍后重试") from e
         raise SquareAvatarError("无法从 COS 读取角色头像，请先重新上传角色头像")
 
+    from core.private_media import MEDIA_PREFIX, SHARED_PREFIXES, permitted_key
+    if source_url.startswith(MEDIA_PREFIX):
+        shared_key = unquote(urlparse(source_url).path[len(MEDIA_PREFIX):])
+        if permitted_key(shared_key, user_id) and shared_key.startswith(SHARED_PREFIXES):
+            return source_url
+        raise SquareAvatarError("无法使用此头像，请选择自己的图片")
+
     if source_url.startswith("http://") or source_url.startswith("https://") or source_url.startswith("/static/"):
         return source_url
 
     return current_avatar or "/static/default_avatar.png"
+
+
+def _ensure_comment_author_column(conn):
+    # Legacy comments remain unassigned; never guess their authors from content.
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(comments)")}
+    if "author_user_id" not in columns:
+        conn.execute("ALTER TABLE comments ADD COLUMN author_user_id INTEGER")
 
 
 def init_square_db():
@@ -467,6 +496,7 @@ def init_square_db():
             created_at TEXT
         )
     """)
+    _ensure_comment_author_column(conn)
     # 收藏夹表
     cur.execute("""
         CREATE TABLE IF NOT EXISTS favorites (
@@ -547,22 +577,26 @@ def api_square_list():
     ip_filter = request.args.get("ip", "").strip()
     try:
         conn = sqlite3.connect(SQUARE_DB)
+        _ensure_square_character_columns(conn)
+        conn.commit()
+        conn.create_function("saki_fold", 1, search_fold)
+        conn.create_function("saki_aliases", 1, lambda value: search_fold("\n".join(stored_aliases(value))))
         cur = conn.cursor()
-        query = "SELECT id, name, avatar, ip, likes_count, tags FROM characters WHERE 1=1"
+        query = "SELECT id, name, avatar, ip, likes_count, tags, aliases FROM characters WHERE 1=1"
         params = []
         if ip_filter:
             query += " AND ip = ?"
             params.append(ip_filter)
         if search:
-            query += " AND (name LIKE ? OR ip LIKE ? OR tags LIKE ?)"
-            params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
+            query += " AND (instr(saki_fold(name), ?) > 0 OR instr(saki_aliases(aliases), ?) > 0 OR instr(saki_fold(ip), ?) > 0 OR instr(saki_fold(tags), ?) > 0)"
+            params.extend([search_fold(search)] * 4)
         query += " ORDER BY likes_count DESC"
         cur.execute(query, params)
         rows = cur.fetchall()
         conn.close()
         return jsonify([{
             "id": r[0], "name": r[1], "avatar": r[2],
-            "ip": r[3], "likes": r[4], "tags": r[5]
+            "ip": r[3], "likes": r[4], "tags": r[5], "aliases": stored_aliases(r[6])
         } for r in rows])
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -650,6 +684,10 @@ def api_square_upload():
     data = request.form
     char_id_base = data.get("id", "").strip()
     name = data.get("name", "").strip()
+    if not name_fits(name, CHARACTER_NAME_LIMIT):
+        return jsonify(error=CHARACTER_NAME_HINT), 400
+    try: aliases = parse_aliases(data.get("aliases", ""))
+    except ValueError as error: return jsonify(error=str(error)), 400
     age = data.get("age", "").strip()
     no_age_increase = 1 if data.get("no_age_increase") == "true" else 0
     ip = data.get("ip", "").strip()
@@ -721,12 +759,12 @@ def api_square_upload():
             INSERT INTO characters (
                 id, name, avatar, age, no_age_increase, base_persona,
                 relationship_graph, tags, ip, author_email, author_user_id,
-                source_character_id, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                source_character_id, created_at, updated_at, aliases
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             final_id, name, avatar_url, age, no_age_increase, base_persona,
             relationship_graph, tags, ip, author_email, user_id,
-            source_character_id, datetime.now().isoformat(), datetime.now().isoformat(),
+            source_character_id, datetime.now().isoformat(), datetime.now().isoformat(), json.dumps(aliases, ensure_ascii=False),
         ))
 
         # 更新 IP 表
@@ -761,6 +799,7 @@ def api_square_character_detail(char_id):
 
         # 转换为字典，这样列顺序不再影响结果
         char_data = dict(row)
+        char_data["aliases"] = stored_aliases(char_data.get("aliases"))
 
         # 统一字段名以兼容前端
         char_data["likes"] = char_data.get("likes_count", 0)
@@ -817,7 +856,12 @@ def api_square_character_detail(char_id):
 
         conn.close()
         return jsonify({
-            "character": char_data,
+            "character": {key: char_data.get(key) for key in (
+                "id", "name", "avatar", "age", "no_age_increase", "base_persona",
+                "relationship_graph", "tags", "ip", "aliases", "likes", "favorites",
+                "comments", "likes_count", "favorites_count", "comment_count",
+                "created_at", "updated_at",
+            )},
             "comments": comments,
             "other_characters": other_chars,
             "is_favorited": is_favorited,
@@ -864,6 +908,7 @@ def api_square_trial_bootstrap(char_id):
             "avatar": character["avatar"] or "/static/default_avatar.png",
             "age": character["age"],
         },
+        "service_host": urlparse(os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")).hostname or "",
         "user": {"name": get_current_username()},
         "relationship": _trial_relationship_from_row(trial),
         "messages": [dict(row) for row in messages],
@@ -949,12 +994,8 @@ def api_square_trial_chat(char_id):
     if not re.fullmatch(r"[A-Za-z0-9_-]{8,100}", request_id):
         return jsonify({"error": "request_id 格式错误"}), 400
 
-    try:
-        admin_key = get_user_credential(TRIAL_ADMIN_USER_ID, "gemini", allow_legacy=True)
-    except CredentialError:
-        return jsonify({"error": "试聊服务暂时不可用，请联系管理员"}), 503
-    if not admin_key:
-        return jsonify({"error": "管理员尚未配置试聊 Gemini API Key"}), 503
+    if not LOCAL_TEST and not os.getenv("SAKI_SERVICE_GEMINI_API_KEY", "").strip():
+        return jsonify({"error": "试聊服务未配置：请在 .env 填写 SAKI_SERVICE_GEMINI_API_KEY"}), 503
 
     now = _utc_iso_now()
     cutoff = (
@@ -1077,7 +1118,8 @@ def api_square_trial_chat(char_id):
         messages,
         char_id=f"square_trial:{char_id}",
         model_name=model_name,
-        user_id=TRIAL_ADMIN_USER_ID,
+        user_id=user_id,
+        service_key=True,
         max_tokens=1200,
     )
     if _trial_ai_error(reply_raw):
@@ -1334,14 +1376,18 @@ def api_square_delete():
 
 @square_bp.route("/api/square/comment", methods=["POST"])
 def api_square_comment():
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"error": "请先登录"}), 401
     char_id = request.json.get("id")
     content = request.json.get("content", "").strip()
     if not content: return jsonify({"error": "内容不能为空"}), 400
     try:
         conn = sqlite3.connect(SQUARE_DB)
         cur = conn.cursor()
-        cur.execute("INSERT INTO comments (character_id, content, created_at) VALUES (?, ?, ?)",
-                    (char_id, content, datetime.now().isoformat()))
+        _ensure_comment_author_column(conn)
+        cur.execute("INSERT INTO comments (character_id, content, created_at, author_user_id) VALUES (?, ?, ?, ?)",
+                    (char_id, content, datetime.now().isoformat(), int(user_id)))
         cur.execute("UPDATE characters SET comment_count = comment_count + 1 WHERE id = ?", (char_id,))
         conn.commit()
         conn.close()
@@ -1372,7 +1418,7 @@ def api_square_update():
         _ensure_square_character_columns(conn)
         cur = conn.cursor()
         cur.execute("""
-            SELECT avatar, ip, author_email, author_user_id, source_character_id
+            SELECT name, avatar, ip, author_email, author_user_id, source_character_id, aliases
             FROM characters WHERE id = ?
         """, (char_id,))
         c_row = cur.fetchone()
@@ -1384,11 +1430,20 @@ def api_square_update():
             conn.close()
             return jsonify({"error": "无权修改他人作品"}), 403
 
+        try:
+            aliases = parse_aliases(data["aliases"]) if "aliases" in data else stored_aliases(c_row["aliases"])
+        except ValueError as error:
+            conn.close()
+            return jsonify(error=str(error)), 400
+
         old_avatar = c_row["avatar"]
         old_ip = c_row["ip"]
 
         # 准备更新的数据
-        name = data.get("name")
+        name = (data.get("name", c_row["name"]) or "").strip()
+        if name != (c_row["name"] or "").strip() and not name_fits(name, CHARACTER_NAME_LIMIT):
+            conn.close()
+            return jsonify(error=CHARACTER_NAME_HINT), 400
         age = data.get("age")
         no_age_increase = 1 if data.get("no_age_increase") == "true" else 0
         new_ip = data.get("ip", "").strip()
@@ -1453,12 +1508,12 @@ def api_square_update():
             UPDATE characters SET
             name=?, avatar=?, age=?, no_age_increase=?, base_persona=?,
             relationship_graph=?, tags=?, ip=?, author_user_id=?,
-            source_character_id=?, updated_at=?
+            source_character_id=?, updated_at=?, aliases=?
             WHERE id=?
         """, (
             name, avatar_url, age, no_age_increase, base_persona,
             relationship_graph, tags, new_ip, user_id,
-            source_character_id, datetime.now().isoformat(), char_id,
+            source_character_id, datetime.now().isoformat(), json.dumps(aliases, ensure_ascii=False), char_id,
         ))
 
         # 更新 IP 表（如果 IP 变了）
@@ -1521,95 +1576,96 @@ def api_square_add_to_local():
         conn.close()
 
         cfg_file = _get_characters_config_file()
-        all_config = {}
-        if os.path.exists(cfg_file):
-            with open(cfg_file, "r", encoding="utf-8") as f:
-                all_config = json.load(f)
+        with character_state_lock(cfg_file):
+            all_config = {}
+            if os.path.exists(cfg_file):
+                with open(cfg_file, "r", encoding="utf-8") as f:
+                    all_config = json.load(f)
 
-        existing_local_id = next(
-            (
-                local_char_id for local_char_id, info in all_config.items()
-                if isinstance(info, dict) and info.get("square_origin_id") == s["id"]
-            ),
-            None,
-        )
-        if existing_local_id:
-            return jsonify({
-                "status": "already_added",
-                "local_id": existing_local_id,
-                "trial_history_imported": bool(
-                    all_config[existing_local_id].get("square_trial_history_imported")
+            existing_local_id = next(
+                (
+                    local_char_id for local_char_id, info in all_config.items()
+                    if isinstance(info, dict) and info.get("square_origin_id") == s["id"]
                 ),
-            })
+                None,
+            )
+            if existing_local_id:
+                return jsonify({
+                    "status": "already_added",
+                    "local_id": existing_local_id,
+                    "trial_history_imported": bool(
+                        all_config[existing_local_id].get("square_trial_history_imported")
+                    ),
+                })
 
-        local_id = s["id"]
-        if local_id in all_config:
-            local_id = f"{s['id']}_sq"
-            counter = 1
-            while local_id in all_config:
-                local_id = f"{s['id']}_sq_{counter}"
-                counter += 1
+            local_id = s["id"]
+            if local_id in all_config:
+                local_id = f"{s['id']}_sq"
+                counter = 1
+                while local_id in all_config:
+                    local_id = f"{s['id']}_sq_{counter}"
+                    counter += 1
 
-        char_root = os.path.join(USERS_ROOT, str(user_id), "characters")
-        target_char_dir = os.path.join(char_root, local_id)
-        target_prompts_dir = os.path.join(target_char_dir, "prompts")
-        os.makedirs(target_prompts_dir, exist_ok=True)
-        init_char_db(local_id)
+            from core.user_resources import new_resource_directory
+            target_char_dir = str(new_resource_directory('characters', local_id, user_id))
+            target_prompts_dir = os.path.join(target_char_dir, "prompts")
+            os.makedirs(target_prompts_dir, exist_ok=True)
+            init_char_db(local_id, user_id=user_id, creating=True)
 
-        safe_save_json(
-            os.path.join(target_prompts_dir, "1_base_persona.json"),
-            {"system_prompt": s["base_persona"] or ""},
-        )
-        from blueprints.chat import normalize_relationship_graph
-        try:
-            relationship_graph = normalize_relationship_graph(s["relationship_graph"] or {})
-        except (ValueError, json.JSONDecodeError):
-            relationship_graph = {}
-        if trial_relationship:
-            relationship_graph[str(user_id)] = trial_relationship
-        safe_save_json(
-            os.path.join(target_prompts_dir, "2_relationship.json"),
-            relationship_graph,
-        )
+            safe_save_json(
+                os.path.join(target_prompts_dir, "1_base_persona.json"),
+                {"system_prompt": s["base_persona"] or ""},
+            )
+            from blueprints.chat import normalize_relationship_graph
+            try:
+                relationship_graph = normalize_relationship_graph(s["relationship_graph"] or {})
+            except (ValueError, json.JSONDecodeError):
+                relationship_graph = {}
+            if trial_relationship:
+                relationship_graph[str(user_id)] = trial_relationship
+            safe_save_json(
+                os.path.join(target_prompts_dir, "2_relationship.json"),
+                relationship_graph,
+            )
 
-        for fn in ["4_memory_long.json", "5_memory_medium.json", "6_memory_short.json", "7_schedule.json"]:
-            with open(os.path.join(target_prompts_dir, fn), "w", encoding="utf-8") as f:
-                if fn == "7_schedule.json":
-                    json.dump({"_undated": []}, f, ensure_ascii=False, indent=2)
-                else:
-                    f.write("{}" if fn.endswith(".json") else "")
+            for fn in ["4_memory_long.json", "5_memory_medium.json", "6_memory_short.json", "7_schedule.json"]:
+                with open(os.path.join(target_prompts_dir, fn), "w", encoding="utf-8") as f:
+                    if fn == "7_schedule.json":
+                        json.dump({"_undated": []}, f, ensure_ascii=False, indent=2)
+                    else:
+                        f.write("{}" if fn.endswith(".json") else "")
 
-        imported_message_count = 0
-        if import_trial_history and trial_messages:
-            db_path, _ = get_paths(local_id, user_id=user_id)
-            with sqlite3.connect(db_path) as chat_conn:
-                chat_conn.execute("BEGIN IMMEDIATE")
-                for message in trial_messages:
-                    chat_conn.execute(
-                        "INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
-                        (
-                            message["role"],
-                            message["content"],
-                            _trial_timestamp_for_chat(message["created_at"]),
-                        ),
-                    )
-                    imported_message_count += 1
-                chat_conn.commit()
+            imported_message_count = 0
+            if import_trial_history and trial_messages:
+                db_path = os.path.join(target_char_dir, 'chat.db')
+                with sqlite3.connect(db_path) as chat_conn:
+                    chat_conn.execute("BEGIN IMMEDIATE")
+                    for message in trial_messages:
+                        chat_conn.execute(
+                            "INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
+                            (
+                                message["role"],
+                                message["content"],
+                                _trial_timestamp_for_chat(message["created_at"]),
+                            ),
+                        )
+                        imported_message_count += 1
+                    chat_conn.commit()
 
-        all_config[local_id] = {
-            "name": s["name"], "remark": s["name"], "avatar": s["avatar"], "pinned": False,
-            "emotion": 1, "light_sleep": True, "deep_sleep": False,
-            "ds_start": "23:00", "ds_end": "07:00", "square_origin_id": s["id"],
-            "timezone": "Asia/Shanghai", "timezone_source": "system_default",
-            "ds_time_basis": "character", "ds_set_by": "default",
-            "ds_timezone_at_set": "Asia/Shanghai",
-            "deep_sleep_source": "schedule", "sleep_manual_override": False,
-            "age": s["age"], "no_age_increase": bool(s["no_age_increase"]),
-            "square_trial_history_imported": imported_message_count > 0,
-            "square_trial_history_imported_at": _utc_iso_now() if imported_message_count > 0 else None,
-            "square_trial_completed_turns": int(trial["completed_turns"] or 0) if trial else 0,
-        }
-        safe_save_json(cfg_file, all_config)
+            all_config[local_id] = {
+                "name": s["name"], "remark": s["name"], "avatar": s["avatar"], "pinned": False,
+                "emotion": 1, "light_sleep": True, "deep_sleep": False,
+                "ds_start": "23:00", "ds_end": "07:00", "square_origin_id": s["id"],
+                "timezone": "Asia/Shanghai", "timezone_source": "system_default",
+                "ds_time_basis": "character", "ds_set_by": "default",
+                "ds_timezone_at_set": "Asia/Shanghai",
+                "deep_sleep_source": "schedule", "sleep_manual_override": False,
+                "age": s["age"], "no_age_increase": bool(s["no_age_increase"]),
+                "square_trial_history_imported": imported_message_count > 0,
+                "square_trial_history_imported_at": _utc_iso_now() if imported_message_count > 0 else None,
+                "square_trial_completed_turns": int(trial["completed_turns"] or 0) if trial else 0,
+            }
+            safe_save_json(cfg_file, all_config)
         if imported_message_count > 0:
             with sqlite3.connect(SQUARE_DB) as conn:
                 _ensure_trial_tables(conn)
@@ -1628,6 +1684,8 @@ def api_square_add_to_local():
             "imported_message_count": imported_message_count,
             "relationship_imported": bool(trial_relationship),
         })
+    except StorageWriteError:
+        raise
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1652,7 +1710,8 @@ def api_square_ai_complete_graph():
     prompt += "4. 只返回JSON，不要有任何解释文字。"
 
     try:
-        return _call_llm_for_graph(prompt)
+        from core.languages import character_language, language_instruction
+        return _call_llm_for_graph(prompt + language_instruction(character_language(data.get("source_character_id"))))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

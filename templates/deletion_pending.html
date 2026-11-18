@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>继续注销 · Saki</title>
+<main><h1>账号正在注销</h1><p>已暂停新任务。上次已完成的清理步骤会保留。</p>
+<form id="resume"><p><label>当前密码 <input id="password" type="password" autocomplete="current-password" required></label></p>
+<p><label>输入「注销账户」确认 <input id="confirmation" required></label></p>
+<button>继续注销</button></form><p id="result" role="status"></p><a href="/logout">退出登录</a></main>
+<script>
+document.querySelector('#resume').addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = event.target.querySelector('button');
+  const result = document.querySelector('#result');
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/account/delete', {method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({password: document.querySelector('#password').value, confirm_text: document.querySelector('#confirmation').value})});
+    const data = await response.json();
+    result.textContent = data.message || '请稍后重试。';
+    if (response.ok) location.replace('/login');
+  } catch { result.textContent = '暂时无法连接，请稍后重试。'; }
+  finally { button.disabled = false; }
+});
+</script></html>

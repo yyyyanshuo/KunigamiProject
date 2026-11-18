@@ -4,7 +4,8 @@ import os
 import sqlite3
 import unicodedata
 from datetime import datetime
-from core.utils import auto_toggle_chat_mode_on_move
+from core.message_tags import ALIASES
+from core.utils import auto_toggle_chat_mode_on_move, map_state_transaction
 from services.content_actions import (
     PERSONA_ACTIONS,
     PLAN_ACTIONS,
@@ -15,6 +16,21 @@ from services.content_actions import (
     extract_content_actions,
 )
 from services.memory_store import atomic_write_json, load_json_object, memory_file_lock
+from services.character_state import character_state_lock
+
+# Message protocol tags are rendered or processed later, not Agent actions.
+# Use the shared protocol names so new canonical tags are not silently deleted.
+_PRESERVED_MESSAGE_TAGS = set(ALIASES.values()) | {
+    'SAFETY_ALERT', 'VOICE', 'SEARCH_IMG', 'GENERATE_IMAGE', 'CLICK_REF',
+    'CLICK', 'TYPE', 'GOTO', 'BACK', 'FINISH', 'ASK', 'WAIT', 'WEB_CRUISE',
+    'STOP', 'REPLY', 'THOUGHTS',
+}
+_UNKNOWN_AGENT_TAG_PATTERN = re.compile(
+    r'[\[【]\s*(?!(?:'
+    + '|'.join(re.escape(tag) for tag in sorted(_PRESERVED_MESSAGE_TAGS))
+    + r')\b)(?:[A-Z_][A-Z0-9_]*)(?::|：)?\s*.*?[\]】]',
+    re.IGNORECASE | re.DOTALL,
+)
 
 def process_agent_actions(char_id, raw_text, user_id=None, return_events=False):
     """
@@ -89,7 +105,8 @@ def process_agent_actions(char_id, raw_text, user_id=None, return_events=False):
     for match in re.finditer(affinity_pattern, raw_text):
         try:
             delta = float(match.group(1))
-            _update_user_affinity(char_id, delta, user_id)
+            if not _update_user_affinity(char_id, delta, user_id):
+                continue
             total_affinity_delta += delta
             has_affinity = True
             print(f"[Agent Action] {char_id} 亲密度变动 {delta}")
@@ -246,9 +263,8 @@ def process_agent_actions(char_id, raw_text, user_id=None, return_events=False):
     robust_agent_pattern = r'[\[【]\s*(?:UPDATE_AFFINITY|SET_EMOTION|SET_PERSONALITY|SET_SLEEP_TIME|SET_RELATION|ADD_SCHEDULE|ADD_PERSONA|DELETE_PERSONA|EDIT_PERSONA|REWRITE_PERSONA|ADD_RELATION|DELETE_RELATION|EDIT_RELATION|REWRITE_RELATION|ADD_PLAN|DELETE_PLAN|EDIT_PLAN|REWRITE_PLAN|MOOD|DIRECT_TO_GROUP|DIRECT_TO_USER|DIRECT_END|NONE|MOVE_TO|MOVE_TO_COORD|EXPLORE|SET_CHAT_MODE|MUSIC_[A-Z0-9_]+)(?::|：)?\s*.*?[\]】]'
     cleaned_text = re.sub(robust_agent_pattern, '', cleaned_text, flags=re.IGNORECASE | re.DOTALL)
 
-    # 额外兜底清理所有全大写加下划线的指令标签，避免未定义或畸形的指令流出（不清理 SEARCH_IMG 和 GENERATE_IMAGE 标签，交由媒体解析器专门处理；THOUGHTS 和 SAFETY_ALERT 为持久化展示标签，需保留）
-    general_pattern = r'[\[【]\s*(?!(?:SAFETY_ALERT|VOICE|SEARCH_IMG|GENERATE_IMAGE|CLICK_REF|CLICK|TYPE|GOTO|BACK|FINISH|ASK|WAIT|WEB_CRUISE|STOP|REPLY|THOUGHTS)\b)(?:[A-Z_][A-Z0-9_]*)(?::|：)?\s*.*?[\]】]'
-    cleaned_text = re.sub(general_pattern, '', cleaned_text, flags=re.IGNORECASE | re.DOTALL)
+    # 清理未知指令，保留转账、媒体等共享消息协议及后续处理所需的标签。
+    cleaned_text = _UNKNOWN_AGENT_TAG_PATTERN.sub('', cleaned_text)
 
     cleaned_text = re.sub(r'\n\s*\n', '\n', cleaned_text).strip()
     result = (cleaned_text, (round(total_affinity_delta, 2) if has_affinity else None), directive)
@@ -353,7 +369,7 @@ def _update_persona_param(char_id, param_name, value, user_id=None):
             print(f"[Agent Action] WARNING: config file not found: {cfg_file}")
             return False
         # Read the latest lock inside the same transaction as the value write.
-        with memory_file_lock(cfg_file):
+        with character_state_lock(cfg_file):
             data = load_json_object(cfg_file, missing_ok=False)
             info = data.get(char_id)
             if not isinstance(info, dict):
@@ -377,18 +393,19 @@ def _update_user_affinity(char_id, delta, current_user_id=None):
         if not os.path.exists(cfg_file):
             print(f"[Agent Action] WARNING: config file not found: {cfg_file}")
             return
-        with open(cfg_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        with character_state_lock(cfg_file):
+            data = load_json_object(cfg_file, missing_ok=False)
 
-        if char_id not in data:
-            print(f"[Agent Action] WARNING: char_id '{char_id}' not found in {cfg_file}")
-            return
+            if char_id not in data:
+                print(f"[Agent Action] WARNING: char_id '{char_id}' not found in {cfg_file}")
+                return
 
-        current_intimacy = float(data[char_id].get("intimacy", 60))
-        new_intimacy = max(0, min(100, current_intimacy + delta))
-        data[char_id]["intimacy"] = new_intimacy
-        safe_save_json(cfg_file, data)
+            current_intimacy = float(data[char_id].get("intimacy", 60))
+            new_intimacy = max(0, min(100, current_intimacy + delta))
+            data[char_id]["intimacy"] = new_intimacy
+            safe_save_json(cfg_file, data)
         print(f"[Agent Action] {char_id} intimacy {current_intimacy} -> {new_intimacy} written to {cfg_file}")
+        return True
     except Exception as e:
         print(f"[Agent Action Error] Update Affinity: {e}")
 
@@ -405,57 +422,58 @@ def _update_sleep_time(char_id, sleep_range, current_user_id=None):
         if not os.path.exists(cfg_file):
             print(f"[Agent Action] WARNING: config file not found: {cfg_file}")
             return
-        with open(cfg_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        with character_state_lock(cfg_file):
+            data = load_json_object(cfg_file, missing_ok=False)
 
-        if char_id not in data:
-            print(f"[Agent Action] WARNING: char_id '{char_id}' not found in {cfg_file}")
-            return
-
-        parts = sleep_range.split("-")
-        if len(parts) == 2:
-            start, end = parts[0].strip(), parts[1].strip()
-            if parse_hhmm(start) is None or parse_hhmm(end) is None or start == end:
-                print(f"[Agent Action] WARNING: invalid sleep_range: {sleep_range}")
+            if char_id not in data:
+                print(f"[Agent Action] WARNING: char_id '{char_id}' not found in {cfg_file}")
                 return
-            info = data[char_id]
-            ensure_character_time_defaults(info, existing_character=True)
-            info["ds_start"] = start
-            info["ds_end"] = end
-            info["ds_time_basis"] = "character"
-            info["ds_set_by"] = "character"
-            info["ds_timezone_at_set"] = get_character_timezone(info)
-            info["sleep_last_event_key"] = None
-            info["sleep_manual_override"] = False
-            safe_save_json(cfg_file, data)
-            print(
-                f"[Agent Action] {char_id} local sleep {start}-{end} "
-                f"({info['ds_timezone_at_set']}) written to {cfg_file}"
-            )
-        else:
-            print(f"[Agent Action] WARNING: invalid sleep_range format: {sleep_range}")
+
+            parts = sleep_range.split("-")
+            if len(parts) == 2:
+                start, end = parts[0].strip(), parts[1].strip()
+                if parse_hhmm(start) is None or parse_hhmm(end) is None or start == end:
+                    print(f"[Agent Action] WARNING: invalid sleep_range: {sleep_range}")
+                    return
+                info = data[char_id]
+                ensure_character_time_defaults(info, existing_character=True)
+                info["ds_start"] = start
+                info["ds_end"] = end
+                info["ds_time_basis"] = "character"
+                info["ds_set_by"] = "character"
+                info["ds_timezone_at_set"] = get_character_timezone(info)
+                info["sleep_last_event_key"] = None
+                info["sleep_manual_override"] = False
+                safe_save_json(cfg_file, data)
+                print(
+                    f"[Agent Action] {char_id} local sleep {start}-{end} "
+                    f"({info['ds_timezone_at_set']}) written to {cfg_file}"
+                )
+            else:
+                print(f"[Agent Action] WARNING: invalid sleep_range format: {sleep_range}")
     except Exception as e:
         print(f"[Agent Action Error] Update Sleep Time: {e}")
 
 def _update_relationship(char_id, target, value, user_id=None):
     """更新 2_relationship.json"""
-    from app import get_paths, safe_save_json
-    _, prompts_dir = get_paths(char_id, user_id=user_id)
-    rel_path = os.path.join(prompts_dir, "2_relationship.json")
-    if os.path.exists(rel_path):
-        try:
-            with open(rel_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+    from app import get_paths, safe_save_json, _get_characters_config_file
+    with character_state_lock(_get_characters_config_file(user_id=user_id)):
+        _, prompts_dir = get_paths(char_id, user_id=user_id)
+        rel_path = os.path.join(prompts_dir, "2_relationship.json")
+        if os.path.exists(rel_path):
+            try:
+                with open(rel_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
 
-            if target in data:
-                data[target]["score"] = value
-            else:
-                # 如果没有这个 target，就新建一个基本的记录
-                data[target] = {"role": "未知", "score": value, "description": ""}
+                if target in data:
+                    data[target]["score"] = value
+                else:
+                    # 如果没有这个 target，就新建一个基本的记录
+                    data[target] = {"role": "未知", "score": value, "description": ""}
 
-            safe_save_json(rel_path, data)
-        except Exception as e:
-            print(f"Update Relationship Error: {e}")
+                safe_save_json(rel_path, data)
+            except Exception as e:
+                print(f"Update Relationship Error: {e}")
 
 def _add_schedule(char_id, date_str, content, user_id=None):
     """追加有日期或无时间计划到 7_schedule.json。"""
@@ -473,12 +491,12 @@ def _update_chat_mode(char_id, mode, user_id=None):
         cfg_file = _get_characters_config_file(user_id=user_id)
         if not os.path.exists(cfg_file):
             return
-        with open(cfg_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if char_id not in data:
-            return
-        data[char_id]["chat_mode"] = mode
-        safe_save_json(cfg_file, data)
+        with character_state_lock(cfg_file):
+            data = load_json_object(cfg_file, missing_ok=False)
+            if char_id not in data:
+                return
+            data[char_id]["chat_mode"] = mode
+            safe_save_json(cfg_file, data)
         print(f"[Agent Action] {char_id} chat_mode -> {mode}")
     except Exception as e:
         print(f"[Agent Action Error] Update Chat Mode: {e}")
@@ -541,12 +559,12 @@ def _update_mood(char_id, mood, user_id=None):
         cfg_file = _get_characters_config_file(user_id=user_id)
         if not os.path.exists(cfg_file):
             return
-        with open(cfg_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if char_id not in data:
-            return
-        data[char_id]["voice_emotion"] = mood
-        safe_save_json(cfg_file, data)
+        with character_state_lock(cfg_file):
+            data = load_json_object(cfg_file, missing_ok=False)
+            if char_id not in data:
+                return
+            data[char_id]["voice_emotion"] = mood
+            safe_save_json(cfg_file, data)
         print(f"[Agent Action] {char_id} voice_emotion -> {mood}")
     except Exception as e:
         print(f"[Agent Action Error] Update Mood: {e}")
@@ -555,6 +573,11 @@ def _process_location_tags(char_id, raw_text, user_id=None):
     """处理位置移动标签: MOVE_TO, MOVE_TO_COORD, EXPLORE"""
     if not re.search(r"\[(?:MOVE_TO|MOVE_TO_COORD|EXPLORE)\s*:", raw_text or "", re.IGNORECASE):
         return None
+    return _apply_location_tags(char_id, raw_text, user_id)
+
+
+@map_state_transaction
+def _apply_location_tags(char_id, raw_text, user_id):
     import math
     from app import get_char_name, _get_characters_config_file
     from core.utils import (
@@ -621,6 +644,8 @@ def _process_location_tags(char_id, raw_text, user_id=None):
         except ValueError as e:
             errors.append(f"MOVE_TO '{match.group(1).strip()}': {e}")
             print(f"[Agent Action Error] MOVE_TO: {e}")
+        except OSError:
+            raise
         except Exception as e:
             errors.append(f"MOVE_TO: {e}")
             print(f"[Agent Action Error] MOVE_TO: {e}")
@@ -645,6 +670,8 @@ def _process_location_tags(char_id, raw_text, user_id=None):
         except ValueError as e:
             errors.append(f"MOVE_TO_COORD ({match.group(1)},{match.group(2)}): {e}")
             print(f"[Agent Action Error] MOVE_TO_COORD: {e}")
+        except OSError:
+            raise
         except Exception as e:
             errors.append(f"MOVE_TO_COORD: {e}")
             print(f"[Agent Action Error] MOVE_TO_COORD: {e}")
@@ -721,6 +748,8 @@ def _process_location_tags(char_id, raw_text, user_id=None):
         except ValueError as e:
             errors.append(f"EXPLORE: {e}")
             print(f"[Agent Action Error] EXPLORE: {e}")
+        except OSError:
+            raise
         except Exception as e:
             errors.append(f"EXPLORE: {e}")
             print(f"[Agent Action Error] EXPLORE: {e}")

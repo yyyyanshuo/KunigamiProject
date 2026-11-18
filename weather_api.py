@@ -1,3 +1,4 @@
+from core.runtime import DATA_ROOT
 import json
 import os
 import time as time_module
@@ -5,8 +6,8 @@ import requests
 from datetime import datetime
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-WEATHER_CACHE_FILE = os.path.join(BASE_DIR, "configs", "weather_cache.json")
-GEOCODE_CACHE_FILE = os.path.join(BASE_DIR, "configs", "geocode_cache.json")
+WEATHER_CACHE_FILE = os.path.join(DATA_ROOT, "configs", "weather_cache.json")
+GEOCODE_CACHE_FILE = os.path.join(DATA_ROOT, "configs", "geocode_cache.json")
 CACHE_TTL_SECONDS = 900  # 15 minutes
 GEOCODE_TTL_SECONDS = 86400 * 30  # 30 days for geocode cache
 

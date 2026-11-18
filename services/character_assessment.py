@@ -5,6 +5,8 @@ chat database writes and Agent Action processing.
 """
 
 from __future__ import annotations
+from core.runtime import DATA_ROOT
+
 
 import hashlib
 import json
@@ -13,7 +15,7 @@ import re
 from typing import Any
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-USERS_ROOT = os.path.join(BASE_DIR, "users")
+USERS_ROOT = os.path.join(DATA_ROOT, "users")
 DIMENSIONS = ("灵活", "锻造", "突破", "预判", "掌控", "愉悦", "定力", "坚韧")
 DEFAULT_OPENING = (
     "（系统提示：现在将进行一项共36题的角色倾向测试。请完全按照你平时的性格作答。"

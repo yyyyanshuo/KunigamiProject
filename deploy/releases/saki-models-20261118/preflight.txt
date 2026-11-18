@@ -1,0 +1,12 @@
+........................................................................ [ 45%]
+........................................................................ [ 90%]
+................                         [100%]
+160 passed, 32 subtests passed in 31.11s
+test_forum_task_owner_lifecycle_and_error_branches (test_security_boundaries.SecurityBoundaryTests.test_forum_task_owner_lifecycle_and_error_branches) ... ok
+test_user_resource_isolation_and_creation (test_security_boundaries.SecurityBoundaryTests.test_user_resource_isolation_and_creation) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 19.947s
+
+OK
+PASS: offline core regression, payload and production hashes (9 files)

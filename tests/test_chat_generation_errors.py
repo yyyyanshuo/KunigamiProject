@@ -3,6 +3,7 @@ from pathlib import Path
 from flask import Flask
 
 from blueprints import chat as chat_blueprint
+from core.localization import public_error
 from services.ai_client import ai_error_text
 
 
@@ -28,7 +29,7 @@ def test_provider_error_is_converted_to_json_before_chat_storage():
     assert status == 504
     assert payload == {
         "error": "ai_timeout",
-        "message": "AI 生成回复超时，请重试。",
+        "message": public_error(504, "ai_timeout"),
         "model": "gemini-test",
         "provider": "gemini",
         "replies": [],

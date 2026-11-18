@@ -1,0 +1,15 @@
+<style>
+  .auth-guide-link { position: absolute; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); z-index: 50; display: inline-flex; align-items: center; justify-content: center; gap: 7px; box-sizing: border-box; min-height: 34px; padding: 7px 12px; border: 1px solid #eccbd9; border-radius: 11px; color: #a63362; background: #fff8fb; font-size: 13px; line-height: 18px; font-weight: 600; text-decoration: none; }
+  .auth-guide-link:hover { background: #ffedf5; }
+  .auth-guide-link:focus-visible { outline: 2px solid #a63362; outline-offset: 3px; }
+  .auth-guide-link svg { width: 17px; height: 17px; flex-shrink: 0; }
+  .auth-account-links { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-top: 15px; font-size: 13px; }
+  .auth-account-links a { color: #a63362; text-decoration: none; }
+  .auth-account-links a:last-child { text-align: right; }
+  .auth-account-links a:hover { text-decoration: underline; }
+  .auth-account-links a:focus-visible { outline: 2px solid #a63362; outline-offset: 3px; }
+</style>
+<a class="auth-guide-link" href="/guide" target="_blank" rel="noopener noreferrer">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 5v15M12 5C8 2 4 3 2 4v15c3-1 6-1 10 1 4-2 7-2 10-1V4c-2-1-6-2-10 1Z"/></svg>
+  <span>{{ ui_t('使用文档') }}</span>
+</a>

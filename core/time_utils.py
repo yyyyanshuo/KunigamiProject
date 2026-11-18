@@ -50,8 +50,8 @@ def beijing_now(now: Optional[datetime] = None) -> datetime:
 
 
 def default_character_timezone(language: Any) -> str:
-    lang = str(language or "").strip().lower()
-    return TOKYO_TZ_NAME if lang in {"ja", "jp", "japanese", "日本語"} else BEIJING_TZ_NAME
+    # Language never determines location or timezone. Preserve existing explicit zones.
+    return BEIJING_TZ_NAME
 
 
 def get_user_timezone(settings: Optional[Dict[str, Any]]) -> str:
@@ -170,6 +170,15 @@ def convert_beijing_to_timezone(value: Any, timezone_name: str) -> Optional[date
     if parsed is None:
         return None
     return parsed.astimezone(get_zone(timezone_name))
+
+
+def format_prompt_time(value: datetime, fmt: str = "%Y-%m-%d %H:%M") -> str:
+    """Label character-local instants; distinguish both occurrences of a DST hour."""
+    label = value.strftime(fmt)
+    if value.tzinfo is not None and value.replace(fold=0).utcoffset() != value.replace(fold=1).utcoffset():
+        offset = value.strftime("%z")
+        label += f" UTC{offset[:3]}:{offset[3:]}"
+    return label
 
 
 def _roundtrip_matches(candidate: datetime, naive_local: datetime) -> bool:

@@ -1,48 +1,47 @@
+from core.runtime import DATA_ROOT, LOCAL_TEST, load_environment
 import os
-from dotenv import load_dotenv
 
-load_dotenv()
+load_environment()
 
 # ==================== API 密钥与配置 ====================
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "")
-USE_OPENROUTER = os.getenv("USE_OPENROUTER", "false").lower() == "true"
 OPENROUTER_KEY = os.getenv("OPENROUTER_KEY", "")
-OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://oa.api2d.net/v1")
-OPENROUTER_BASE_URL_OLD = os.getenv("OPENROUTER_BASE_URL_OLD", "https://vg.v1api.cc/v1")
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "")
+OPENROUTER_BASE_URL_OLD = os.getenv("OPENROUTER_BASE_URL_OLD", "")
 
 SILICONFLOW_KEY = os.getenv("SILICONFLOW_API_KEY", "")
 SERPER_KEY = os.getenv("SERPER_API_KEY", "")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 
-COS_BUCKET = os.getenv("COS_BUCKET")
-COS_REGION = os.getenv("COS_REGION")
+COS_BUCKET = None if LOCAL_TEST else os.getenv("COS_BUCKET")
+COS_REGION = None if LOCAL_TEST else os.getenv("COS_REGION")
 COS_BASE_URL = f"https://{COS_BUCKET}.cos.{COS_REGION}.myqcloud.com" if COS_BUCKET and COS_REGION else ""
 
 CACHED_OFFICIAL_PACKS = None
 
 # ==================== 应用配置 ====================
 MAX_CONTEXT_LINES = 10
-DATABASE_FILE = "chat_history.db"
+DATABASE_FILE = os.path.join(DATA_ROOT, "chat_history.db") if os.getenv("SAKI_DATA_ROOT") else "chat_history.db"
 
 # ==================== 目录路径 ====================
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CHARACTERS_DIR = os.path.join(BASE_DIR, "characters")
-CONFIG_FILE = os.path.join(BASE_DIR, "configs", "characters.json")
-GROUPS_CONFIG_FILE = os.path.join(BASE_DIR, "configs", "groups.json")
-GROUPS_DIR = os.path.join(BASE_DIR, "groups")
+CHARACTERS_DIR = os.path.join(DATA_ROOT, "characters")
+CONFIG_FILE = os.path.join(DATA_ROOT, "configs", "characters.json")
+GROUPS_CONFIG_FILE = os.path.join(DATA_ROOT, "configs", "groups.json")
+GROUPS_DIR = os.path.join(DATA_ROOT, "groups")
 
-USER_SETTINGS_FILE = os.path.join(BASE_DIR, "configs", "user_settings.json")
-USERS_DB = os.path.join(BASE_DIR, "configs", "users.db")
-SQUARE_DB = os.path.join(BASE_DIR, "configs", "square.db")
-SQUARE_AVATARS_DIR = os.path.join(BASE_DIR, "static", "square_avatars")
-USERS_ROOT = os.path.join(BASE_DIR, "users")
-DEVICE_ACCOUNTS_FILE = os.path.join(BASE_DIR, "configs", "device_accounts.json")
-READ_STATUS_FILE = os.path.join(BASE_DIR, "configs", "read_status.json")
-QUICK_PHRASES_FILE = os.path.join(BASE_DIR, "configs", "quick_phrases.json")
+USER_SETTINGS_FILE = os.path.join(DATA_ROOT, "configs", "user_settings.json")
+USERS_DB = os.path.join(DATA_ROOT, "configs", "users.db")
+SQUARE_DB = os.path.join(DATA_ROOT, "configs", "square.db")
+SQUARE_AVATARS_DIR = os.path.join(DATA_ROOT, "static", "square_avatars")
+USERS_ROOT = os.path.join(DATA_ROOT, "users")
+DEVICE_ACCOUNTS_FILE = os.path.join(DATA_ROOT, "configs", "device_accounts.json")
+READ_STATUS_FILE = os.path.join(DATA_ROOT, "configs", "read_status.json")
+QUICK_PHRASES_FILE = os.path.join(DATA_ROOT, "configs", "quick_phrases.json")
 
-STICKERS_ROOT = os.path.join(BASE_DIR, "stickers")
+STICKERS_ROOT = os.path.join(DATA_ROOT, "stickers")
 STICKER_IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp")
-STICKER_DESCRIPTIONS_FILE = os.path.join(BASE_DIR, "configs", "sticker_descriptions_sorted.txt")
+STICKER_DESCRIPTIONS_FILE = os.path.join(DATA_ROOT, "configs", "sticker_descriptions_sorted.txt")
 
 # ==================== 全局系统规则 ====================
 GLOBAL_SYSTEM_RULES_ZH_COMMON = """## 基本行为
@@ -65,20 +64,20 @@ GLOBAL_SYSTEM_RULES_ZH_MODE_CONTEXT_ONLINE = """## 背景设定
 
 GLOBAL_SYSTEM_RULES_ZH_MODE_CONTEXT_OFFLINE = """## 背景设定
 - 你现在正与用户同步互动，可能是见面、语音通话或视频通话；根据最近对话判断具体形式。
-- 除发起或接通视频通话时可使用一次[视频通话]外，禁止使用其他线上特殊消息格式（如[voice]、[转账]、[文件]、[音乐]、[链接]、[视频]、[图片]、[表情]、[已读不回]、[未回复]、[tickle]、[tickle_user]、[recall]等）。通话进行中不要重复发送通话标签；Agent Action Tags 不受此限制。
+- 除发起或接通视频通话时可使用一次[VIDEO_CALL]外，禁止使用其他线上特殊消息格式（如[voice]、[TRANSFER]、[FILE]、[MUSIC]、[LINK]、[VIDEO]、[IMAGE]、[STICKER]、[READ_RECEIPT]、[UNANSWERED]、[tickle]、[tickle_user]、[recall]等）。通话进行中不要重复发送通话标签；Agent Action Tags 不受此限制。
 - 语音通话时不得声称看见用户；视频通话时只能描述镜头范围内可见的信息。
 - 可用括号描述动作（例如：（笑了笑）（起身倒了杯水））。"""
 
 GLOBAL_SYSTEM_RULES_ZH_MODE_ONLINE = """## 特殊消息格式
 - 表情符号：酌情添加，注意流行含义。
-- 视频通话：[视频通话]。
-- 转账（仅限与用户单聊）：`[转账:金额与币种|备注]`，备注可省略。人民币在金额后加“元”，日元加“円”，其他货币在金额前使用常见货币符号，例如 `[转账:88.00元|请你喝奶茶]`、`[转账:1000円]`、`[转账:$12.50|午饭钱]`。必须独立成段，每次回复最多一笔。收到用户的转账时，根据你的性格、关系和情境当轮自主决定：领取用 `[领取转账:原金额与币种]`，退回用 `[退回转账:原金额与币种]`；二选一、独立成段，不得修改金额或币种。没有收到待处理转账时不要输出领取或退回标签。
-- 音乐：[音乐]曲名。
-- 文件：[文件]文件名.扩展名（内容描述）。
-- 链接：[链接]链接名/内容。
-- 视频：[视频] 或 [视频（说明）]。
-- 已读未回：[已读不回]
-- 未读未回：[未回复]"""
+- 视频通话：[VIDEO_CALL]。
+- 转账（仅限与用户单聊）：`[TRANSFER:金额与币种|备注]`，备注可省略。人民币在金额后加“元”，日元加“円”，其他货币在金额前使用常见货币符号，例如 `[TRANSFER:88.00元|请你喝奶茶]`、`[TRANSFER:1000円]`、`[TRANSFER:$12.50|午饭钱]`。必须独立成段，每次回复最多一笔。收到用户的转账时，根据你的性格、关系和情境当轮自主决定：领取用 `[TRANSFER_ACCEPT:原金额与币种]`，退回用 `[TRANSFER_RETURN:原金额与币种]`；二选一、独立成段，不得修改金额或币种。没有收到待处理转账时不要输出领取或退回标签。
+- 音乐：[MUSIC]曲名。
+- 文件：[FILE]文件名.扩展名（内容描述）。
+- 链接：[LINK]链接名/内容。
+- 视频：[VIDEO] 或 [VIDEO（说明）]。
+- 已读未回：[READ_RECEIPT]
+- 未读未回：[UNANSWERED]"""
 
 GLOBAL_SYSTEM_RULES_ZH_MODE_OFFLINE = """"""
 
@@ -146,20 +145,20 @@ GLOBAL_SYSTEM_RULES_JA_MODE_CONTEXT_ONLINE = """## 背景設定
 
 GLOBAL_SYSTEM_RULES_JA_MODE_CONTEXT_OFFLINE = """## 背景設定
 - 今はユーザーとリアルタイムで交流しています。対面、音声通話、ビデオ通話のどれかを直近の会話から判断してください。
-- ビデオ通話を開始・接続するときに一度だけ[ビデオ通話]を使えるが、それ以外のオンライン特殊メッセージ形式（[voice]、[转账]、[ファイル]、[音楽]、[リンク]、[ビデオ]、[画像]、[絵文字]、[既読スルー]、[未返信]、[tickle]、[tickle_user]、[recall]など）は禁止する。通話中に通話タグを繰り返さないこと。Agent Action Tags はこの制限の対象外です。
+- ビデオ通話を開始・接続するときに一度だけ[VIDEO_CALL]を使えるが、それ以外のオンライン特殊メッセージ形式（[voice]、[TRANSFER]、[FILE]、[MUSIC]、[LINK]、[VIDEO]、[IMAGE]、[STICKER]、[READ_RECEIPT]、[UNANSWERED]、[tickle]、[tickle_user]、[recall]など）は禁止する。通話中に通話タグを繰り返さないこと。Agent Action Tags はこの制限の対象外です。
 - 音声通話ではユーザーが見えると述べないこと。ビデオ通話ではカメラに映る範囲の情報だけを描写すること。
 - 括弧（）を使って動作を描写できます（例：（笑った）（立ち上がって水を注いだ））。"""
 
 GLOBAL_SYSTEM_RULES_JA_MODE_ONLINE = """## 特殊なメッセージ形式
 - 絵文字：状況に応じて追加。流行のニュアンスに注意する。
-- ビデオ通話：[ビデオ通話]。
-- 送金（ユーザーとの個別チャットのみ。タグ名は固定）：`[转账:金額と通貨|メモ]`。メモは省略可。人民元は金額の後に「元」、日本円は「円」、その他は金額の前に一般的な通貨記号を付ける。例：`[转账:88.00元|ミルクティー代]`、`[转账:1000円]`、`[转账:$12.50|昼食代]`。必ず独立したセグメントにし、1回の返信につき1件まで。ユーザーから送金を受けたら、性格・関係・状況に応じてその返信で自律的に決める。受け取る場合は `[领取转账:元の金額と通貨]`、返す場合は `[退回转账:元の金額と通貨]` のどちらか一つを独立したセグメントで出力し、金額や通貨を変更しない。未処理の送金がない場合は受取・返金タグを出力しない。
-- 音楽：[音楽]曲名。
-- ファイル：[ファイル]ファイル名.拡張子（内容の説明）。
-- リンク：[リンク]リンク名/内容。
-- ビデオ：[ビデオ] または [ビデオ（説明）]。
-- 既読スルー：[既読スルー]
-- 未読スルー：[未返信]"""
+- ビデオ通話：[VIDEO_CALL]。
+- 送金（ユーザーとの個別チャットのみ。タグ名は固定）：`[TRANSFER:金額と通貨|メモ]`。メモは省略可。人民元は金額の後に「元」、日本円は「円」、その他は金額の前に一般的な通貨記号を付ける。例：`[TRANSFER:88.00元|ミルクティー代]`、`[TRANSFER:1000円]`、`[TRANSFER:$12.50|昼食代]`。必ず独立したセグメントにし、1回の返信につき1件まで。ユーザーから送金を受けたら、性格・関係・状況に応じてその返信で自律的に決める。受け取る場合は `[TRANSFER_ACCEPT:元の金額と通貨]`、返す場合は `[TRANSFER_RETURN:元の金額と通貨]` のどちらか一つを独立したセグメントで出力し、金額や通貨を変更しない。未処理の送金がない場合は受取・返金タグを出力しない。
+- 音楽：[MUSIC]曲名。
+- ファイル：[FILE]ファイル名.拡張子（内容の説明）。
+- リンク：[LINK]リンク名/内容。
+- ビデオ：[VIDEO] または [VIDEO（説明）]。
+- 既読スルー：[READ_RECEIPT]
+- 未読スルー：[UNANSWERED]"""
 
 GLOBAL_SYSTEM_RULES_JA_MODE_OFFLINE = """"""
 
@@ -227,20 +226,20 @@ GLOBAL_SYSTEM_RULES_EN_MODE_CONTEXT_ONLINE = """## Context Setting
 
 GLOBAL_SYSTEM_RULES_EN_MODE_CONTEXT_OFFLINE = """## Context Setting
 - You are interacting with the user in real time, either in person, on an audio call, or on a video call. Infer the specific setting from the recent conversation.
-- You may use [Video Call] once when starting or connecting a video call. Otherwise, do NOT use online-only special message formats such as [voice], [转账], [File], [Music], [Link], [Video], [Image], emojis, [Read Receipt], [Unanswered], [tickle], [tickle_user], or [recall]. Do not repeat the call tag while a call is in progress. Agent Action Tags are exempt from this restriction.
+- You may use [VIDEO_CALL] once when starting or connecting a video call. Otherwise, do NOT use online-only special message formats such as [voice], [TRANSFER], [FILE], [MUSIC], [LINK], [VIDEO], [IMAGE], emojis, [READ_RECEIPT], [UNANSWERED], [tickle], [tickle_user], or [recall]. Do not repeat the call tag while a call is in progress. Agent Action Tags are exempt from this restriction.
 - On an audio call, do not claim to see the user. On a video call, describe only information visible within the camera view.
 - You CAN use parentheses to describe actions (e.g., (smiled) (stood up and poured some water))."""
 
 GLOBAL_SYSTEM_RULES_EN_MODE_ONLINE = """## Special Message Formats
 - Emojis: Use appropriately, mindful of popular meanings.
-- Video Call: [Video Call].
-- Transfer (private chat with the user only; use these exact Chinese tag names): `[转账:amount-and-currency|note]`. The note is optional. Put “元” after CNY amounts, “円” after JPY amounts, and a common currency symbol before other amounts, for example `[转账:88.00元|Milk tea]`, `[转账:1000円]`, or `[转账:$12.50|Lunch]`. It must be a standalone segment, with at most one transfer per reply. When the user sends a transfer, decide in that reply based on your personality, relationship, and context: use `[领取转账:original-amount-and-currency]` to accept or `[退回转账:original-amount-and-currency]` to return it. Choose exactly one as a standalone segment and never change the amount or currency. Do not output either decision tag when no pending transfer exists.
-- Music: [Music] Song Title.
-- File: [File] filename.ext (content description).
-- Link: [Link] name/content.
-- Video: [Video] or [Video (description)].
-- Read Receipts: [Read Receipt]
-- Unanswered: [Unanswered]"""
+- Video Call: [VIDEO_CALL].
+- Transfer (private chat with the user only; use these exact protocol tag names): `[TRANSFER:amount-and-currency|note]`. The note is optional. Put “元” after CNY amounts, “円” after JPY amounts, and a common currency symbol before other amounts, for example `[TRANSFER:88.00元|Milk tea]`, `[TRANSFER:1000円]`, or `[TRANSFER:$12.50|Lunch]`. It must be a standalone segment, with at most one transfer per reply. When the user sends a transfer, decide in that reply based on your personality, relationship, and context: use `[TRANSFER_ACCEPT:original-amount-and-currency]` to accept or `[TRANSFER_RETURN:original-amount-and-currency]` to return it. Choose exactly one as a standalone segment and never change the amount or currency. Do not output either decision tag when no pending transfer exists.
+- Music: [MUSIC] Song Title.
+- File: [FILE] filename.ext (content description).
+- Link: [LINK] name/content.
+- Video: [VIDEO] or [Video (description)].
+- Read Receipts: [READ_RECEIPT]
+- Unanswered: [UNANSWERED]"""
 
 GLOBAL_SYSTEM_RULES_EN_MODE_OFFLINE = """"""
 
@@ -298,7 +297,8 @@ GLOBAL_SYSTEM_RULES_EN_AGENT_BRIEF = """## Timeline @ Feature
 # ==================== 系统规则辅助函数 ====================
 
 def get_global_system_rules(
-    lang="zh", chat_mode="online", include_proactive_voice_call=True
+    lang="zh", chat_mode="online", include_proactive_voice_call=True,
+    include_private_chat_rules=True,
 ):
     if lang == "ja":
         common = GLOBAL_SYSTEM_RULES_JA_COMMON
@@ -315,7 +315,15 @@ def get_global_system_rules(
         mode_part = GLOBAL_SYSTEM_RULES_ZH_MODE_ONLINE if chat_mode == "online" else GLOBAL_SYSTEM_RULES_ZH_MODE_OFFLINE
         agent = GLOBAL_SYSTEM_RULES_ZH_AGENT
         voice_call = GLOBAL_SYSTEM_RULES_ZH_PROACTIVE_VOICE_CALL
-    if include_proactive_voice_call:
+    if not include_private_chat_rules:
+        # Group callers provide their own mode/presence instructions. Keep
+        # supported group message formats, excluding private transfers/calls.
+        mode_part = "\n".join(
+            line for line in mode_part.splitlines()
+            if "[TRANSFER" not in line and "[VIDEO_CALL]" not in line
+        )
+        agent = "\n".join(line for line in agent.splitlines() if "[SET_CHAT_MODE:" not in line)
+    if include_proactive_voice_call and include_private_chat_rules:
         agent += "\n\n" + voice_call
     safety = GLOBAL_SYSTEM_RULES_SAFETY_ALERT
     if mode_part:
@@ -330,11 +338,3 @@ def get_mode_context(lang="zh", chat_mode="online"):
         return GLOBAL_SYSTEM_RULES_EN_MODE_CONTEXT_ONLINE if chat_mode == "online" else GLOBAL_SYSTEM_RULES_EN_MODE_CONTEXT_OFFLINE
     else:
         return GLOBAL_SYSTEM_RULES_ZH_MODE_CONTEXT_ONLINE if chat_mode == "online" else GLOBAL_SYSTEM_RULES_ZH_MODE_CONTEXT_OFFLINE
-
-
-def _load_sakura_gemini_key():
-    from core.credentials import get_user_credential
-    user_key = get_user_credential(1, "gemini", allow_legacy=True)
-    if user_key:
-        return user_key
-    return os.getenv("GEMINI_API_KEY", "")

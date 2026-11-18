@@ -1,6 +1,7 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="{{ ui_language }}" data-ai-brand-line="{{ ui_t('ai_brand_line', brand=saki_brand) }}">
 <head>
+  {% include "ui_language_head.html" %}
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link rel="manifest" href="/manifest.json">
@@ -35,6 +36,8 @@
             overflow: hidden;
         }
         body {
+            display: flex; flex-direction: column;
+            height: 100dvh;
             font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
             background: var(--bg);
             margin: 0; padding: 0;
@@ -43,6 +46,7 @@
 
         /* ===== Header ===== */
         .header {
+            flex-shrink: 0;
             background: rgba(255,255,255,0.88);
             backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
             padding: 12px 18px;
@@ -60,14 +64,14 @@
         }
         .header-back:active { background: var(--primary-rgba); color: var(--primary-dark); }
         .header-back svg { width: 18px; height: 18px; stroke-width: 2.5px; }
-        .header-title { font-size: 17px; font-weight: 700; color: var(--text); }
-        .header-subtitle { font-size: 12px; color: var(--text-muted); margin-left: 4px; font-weight: 400; }
+        .header-title { font-size: 17px; font-weight: 700; color: var(--text); white-space: nowrap; flex-shrink: 0; }
+        .header-subtitle { font-size: 12px; color: var(--text-muted); margin-left: 4px; font-weight: 400; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
         /* ===== Main Layout ===== */
         .forum-layout {
             display: flex; gap: 0;
             max-width: 1100px; margin: 0 auto;
-            height: calc(100vh - 60px);
+            flex: 1; min-height: 0; width: 100%;
             padding: 16px;
             box-sizing: border-box;
             overflow: hidden;
@@ -78,8 +82,12 @@
             flex: 1; min-width: 0;
             display: flex; flex-direction: column; gap: 16px;
             overflow-y: auto;
+            min-height: 0;
             padding-right: 4px;
+            padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+            scroll-padding-bottom: 24px;
         }
+        .settings-panel > * { flex-shrink: 0; }
         .settings-panel .section {
             background: var(--card);
             border-radius: var(--radius);
@@ -394,12 +402,25 @@
         }
         .toast.show { opacity: 1; }
 
+        .background-hint { font-size: 12px; color: var(--text-muted); margin: 7px 0; line-height: 1.6; }
+        .background-source-group { margin: 8px 0; padding: 9px; border: 1px solid var(--border); border-radius: 10px; }
+        .background-source-group > summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+        .background-card { margin: 7px 0; border: 1px solid var(--border); border-radius: 8px; padding: 8px; min-width: 0; }
+        .background-card > summary { cursor: pointer; display: flex; gap: 7px; align-items: center; font-size: 13px; }
+        .background-card > summary span { flex: 1; overflow-wrap: anywhere; }
+        .background-card > summary small { color: var(--text-muted); font-size: 11px; }
+        .background-card input[type="checkbox"] { width: 16px; height: 16px; flex: 0 0 auto; }
+        .background-preview { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; line-height: 1.6; max-height: 220px; overflow-y: auto; margin: 8px 0 0; }
+        .background-action { border: 1px solid var(--border); background: var(--bg); color: var(--text-muted); border-radius: 7px; padding: 6px 9px; cursor: pointer; font-size: 12px; margin-top: 6px; }
+        #backgroundNameRow { margin-top: 10px; }
+        #backgroundNameRow[hidden] { display: none; }
+
         /* ===== Responsive ===== */
         @media (max-width: 800px) {
             .forum-layout {
                 flex-direction: column; padding: 12px;
                 overflow: hidden;
-                height: calc(100vh - 60px);
+                min-height: 0;
             }
             .settings-panel {
                 overflow-y: auto;
@@ -482,8 +503,31 @@
         </div>
 
         <div class="section">
-            <div class="section-label">补充信息</div>
-            <textarea id="supplementaryInput" placeholder="作品背景、人物关系、前情提要等…帮助网友更好地理解上下文" maxlength="2000"></textarea>
+            <label class="section-label" for="forumLanguage">本次生成语言</label>
+            <input type="text" id="forumLanguage" list="forumLanguageOptions" value="{{ ui_language }}" maxlength="100">
+            <datalist id="forumLanguageOptions"><option value="ja">日本語</option><option value="en">English</option><option value="zh-CN">中文</option></datalist>
+            <div style="font-size:12px;color:var(--text-muted)">仅用于本次新增标题、正文和回复，不修改历史帖子或用户语言。</div>
+        </div>
+        <div class="section">
+            <div class="section-label">背景来源（可多选）</div>
+            <div class="background-hint">展开查看实际内容。已选设定保留当时的版本，可主动更新。</div>
+            <div id="backgroundSelection"></div>
+            <div id="backgroundSources"></div>
+            <button type="button" class="background-action" id="backgroundReload">刷新可选来源</button>
+            <div class="background-hint" id="backgroundStatus" role="status"></div>
+            <label class="section-label" for="supplementaryInput">本次补充</label>
+            <textarea id="supplementaryInput" placeholder="作品背景、人物关系、前情提要等…帮助网友更好地理解上下文" maxlength="20000"></textarea>
+            <label class="section-label" for="backgroundMode">背景使用方式</label>
+            <select id="backgroundMode">
+                <option value="once">仅本次使用</option>
+                <option value="save">保存并使用</option>
+            </select>
+            <div class="background-hint" id="backgroundModeHint"></div>
+            <div id="backgroundNameRow" hidden>
+                <label class="section-label" for="backgroundName">背景组合名称（可选）</label>
+                <input id="backgroundName" type="text" maxlength="100" placeholder="例如：校园 AU、当前人物关系">
+                <div class="background-hint">填写名称后可在其他论坛复用；留空只保存到此论坛。</div>
+            </div>
         </div>
 
         <button class="btn-generate" id="generateBtn" onclick="generateForum()">
@@ -543,29 +587,37 @@
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
+<script src="{{ url_for('static', filename='forum-backgrounds.js') }}"></script>
 <script>
     // ===== State =====
     let chatSegments = [];
     let currentForumData = null;
     let isResultMode = false;
+    const historyForums = new Map();
+    let restoredHistoryId = '';
+    let restoredBackgroundDraft = false;
 
     // ===== Chat Segments =====
     function renderSegments() {
         const list = document.getElementById('segmentsList');
         if (chatSegments.length === 0) {
-            list.innerHTML = '<div class="segments-empty">还未载入聊天记录</div>';
+            list.innerHTML = SakiI18n.fragment('<div class="segments-empty">还未载入聊天记录</div>');
             return;
         }
-        list.innerHTML = chatSegments.map((seg, i) => `
+        list.innerHTML = chatSegments.map((seg, i) => {
+            const names = [...new Set([seg.user_name, seg.character_name, ...seg.messages.map(m => m.sender_name)].filter(Boolean))];
+            return SakiI18n.ui`
             <div class="segment-card">
                 <div class="seg-avatar">💬</div>
                 <div class="seg-info">
                     <div class="seg-name">${escHtml(seg.contact_name)}</div>
                     <div class="seg-meta">${seg.messages.length} 条消息</div>
+                    ${names.length ? `<div class="seg-meta">${escHtml(names.join(' · '))}</div>` : ''}
                 </div>
                 <button class="seg-remove" onclick="removeSegment(${i})" title="移除">&times;</button>
             </div>
-        `).join('');
+        `;
+        }).join('');
     }
 
     function removeSegment(idx) {
@@ -592,6 +644,7 @@
             customType: document.getElementById('customTypeInput').value,
             supplementary: document.getElementById('supplementaryInput').value,
             historyId: document.getElementById('historyForumSelect').value,
+            background: typeof ForumBackgrounds !== 'undefined' ? ForumBackgrounds.capture() : null,
             segments: chatSegments
         };
         sessionStorage.setItem('forumFormState', JSON.stringify(state));
@@ -611,7 +664,11 @@
             if (state.floorLimit) document.getElementById('floorLimitSelect').value = state.floorLimit;
             if (state.customType) document.getElementById('customTypeInput').value = state.customType;
             if (state.supplementary) document.getElementById('supplementaryInput').value = state.supplementary;
-            if (state.historyId) document.getElementById('historyForumSelect').value = state.historyId;
+            if (typeof ForumBackgrounds !== 'undefined') {
+                restoredBackgroundDraft = Boolean(state.background || state.supplementary);
+                ForumBackgrounds.restore(state.background || {items: [], note: state.supplementary || ''});
+            }
+            if (state.historyId) restoredHistoryId = String(state.historyId);
             if (state.segments && state.segments.length > 0) {
                 chatSegments = state.segments;
                 renderSegments();
@@ -621,13 +678,13 @@
 
     async function loadContacts() {
         const inner = document.getElementById('contactListInner');
-        inner.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;">加载中...</div>';
+        inner.innerHTML = SakiI18n.fragment('<div style="text-align:center;color:var(--text-muted);padding:20px;">加载中...</div>');
         try {
             const resp = await fetch('/api/contacts');
             if (!resp.ok) throw new Error('Failed');
             const contacts = await resp.json();
             if (contacts.length === 0) {
-                inner.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;">暂无联系人</div>';
+                inner.innerHTML = SakiI18n.fragment('<div style="text-align:center;color:var(--text-muted);padding:20px;">暂无联系人</div>');
                 return;
             }
             inner.innerHTML = contacts.map(c => {
@@ -635,7 +692,7 @@
                 const jumpUrl = c.type === 'group'
                     ? `/chat/group/${c.id}?forumPicker=1&forumName=${name}`
                     : `/chat/${c.id}?forumPicker=1&forumName=${name}`;
-                return `
+                return SakiI18n.ui`
                 <div class="picker-contact" onclick="window.location.href='${jumpUrl}'">
                     <img class="c-avatar" src="${escHtml(c.avatar || '/static/default_avatar.png')}" alt="">
                     <div class="c-info">
@@ -647,7 +704,7 @@
                 `;
             }).join('');
         } catch (e) {
-            inner.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;">加载失败，请重试</div>';
+            inner.innerHTML = SakiI18n.fragment('<div style="text-align:center;color:var(--text-muted);padding:20px;">加载失败，请重试</div>');
         }
     }
 
@@ -676,23 +733,41 @@
             if (!resp.ok) return;
             const forums = await resp.json();
             forums.forEach(f => {
+                historyForums.set(String(f.id), f);
                 const opt = document.createElement('option');
                 opt.value = f.id;
-                opt.textContent = `${f.title} (${f.forum_type === 'novel_readers' ? '小说读者' : f.forum_type === 'world_bystanders' ? '世界路人' : f.custom_type_description || '自定义'} · ${f.created_at})`;
+                opt.textContent = SakiI18n.ui`${f.title} (${f.forum_type === 'novel_readers' ? SakiI18n.t('小说读者') : f.forum_type === 'world_bystanders' ? SakiI18n.t('世界路人') : f.custom_type_description || SakiI18n.t('自定义')} · ${f.created_at})`;
                 sel.appendChild(opt);
             });
+            if (restoredHistoryId && historyForums.has(restoredHistoryId)) {
+                sel.value = restoredHistoryId;
+                restoredHistoryId = '';
+                onHistoryForumSelected({ preserveDraft: true, restoreBackground: !restoredBackgroundDraft });
+            }
         } catch (e) {}
     }
 
-    function onHistoryForumSelected() {
-        // If a historical forum is selected, the AI will continue from there
-        // No need for extra UI changes
+    function onHistoryForumSelected({ preserveDraft = false, restoreBackground = false } = {}) {
+        const forum = historyForums.get(document.getElementById('historyForumSelect').value);
+        if (!forum) return;
+        const fields = {
+            topicInput: forum.topic,
+            forumTypeSelect: forum.forum_type,
+            customTypeInput: forum.custom_type_description,
+        };
+        if (typeof ForumBackgrounds === 'undefined') fields.supplementaryInput = forum.supplementary_info;
+        for (const [id, value] of Object.entries(fields)) {
+            const input = document.getElementById(id);
+            if (!preserveDraft || !input.value.trim()) input.value = value || '';
+        }
+        toggleCustomType();
+        if ((!preserveDraft || restoreBackground) && typeof ForumBackgrounds !== 'undefined') ForumBackgrounds.loadForum(forum);
     }
 
     async function viewHistoryForum() {
         const sel = document.getElementById('historyForumSelect');
         const forumId = sel.value;
-        if (!forumId) return alert('请先选择一个历史论坛');
+        if (!forumId) return alert(SakiI18n.t('请先选择一个历史论坛'));
 
         try {
             const resp = await fetch(`/api/forums/${forumId}`);
@@ -700,7 +775,7 @@
             const data = await resp.json();
             showResult(data);
         } catch (e) {
-            alert('加载历史论坛失败');
+            alert(SakiI18n.t('加载历史论坛失败'));
         }
     }
 
@@ -713,8 +788,8 @@
     // ===== Generate Forum (流式 SSE) =====
     async function generateForum() {
         const topic = document.getElementById('topicInput').value.trim();
-        if (!topic) { alert('请输入论坛主题！'); return; }
-        if (chatSegments.length === 0) { alert('请至少载入一段聊天记录！'); return; }
+        if (!topic) { alert(SakiI18n.t('请输入论坛主题！')); return; }
+        if (chatSegments.length === 0) { alert(SakiI18n.t('请至少载入一段聊天记录！')); return; }
 
         const forumType = document.getElementById('forumTypeSelect').value;
         const floorLimit = parseInt(document.getElementById('floorLimitSelect').value);
@@ -723,12 +798,19 @@
         const historyId = document.getElementById('historyForumSelect').value;
 
         if (forumType === 'custom' && !customTypeDesc) {
-            alert('请填写自定义论坛类型描述！'); return;
+            alert(SakiI18n.t('请填写自定义论坛类型描述！')); return;
+        }
+        if (typeof ForumBackgrounds === 'undefined') {
+            alert(SakiI18n.t('背景面板未加载，请刷新页面后重试。')); return;
+        }
+        const background = ForumBackgrounds.request();
+        if (background.name && !background.items.length && !background.note.trim()) {
+            alert(SakiI18n.t('请先选择或填写背景，再命名保存。')); return;
         }
 
         var btn = document.getElementById('generateBtn');
         btn.disabled = true;
-        btn.textContent = '流式生成中...';
+        btn.textContent = SakiI18n.t('流式生成中...');
 
         // 准备手机屏幕
         var phonePreview = document.getElementById('phonePreview');
@@ -747,19 +829,22 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     topic: topic,
+                    language: document.getElementById("forumLanguage").value.trim(),
                     chat_segments: chatSegments,
                     forum_type: forumType,
                     custom_type_description: customTypeDesc,
                     floor_limit: floorLimit,
                     supplementary_info: supplementary,
+                    background: background,
                     historical_forum_id: historyId ? parseInt(historyId) : null
                 })
             });
             if (!resp.ok) {
                 var errData = await resp.json().catch(function(){ return {}; });
-                alert(errData.error || '提交失败');
-                btn.disabled = false; btn.textContent = '🚀 生成论坛';
+                alert(errData.error || SakiI18n.t('提交失败'));
+                btn.disabled = false; btn.textContent = SakiI18n.t('🚀 生成论坛');
                 phonePreview.style.display = 'none';
+                document.getElementById('settingsPanel').style.display = '';
                 return;
             }
 
@@ -822,11 +907,11 @@
                             break;
                         }
                         if (data.done) {
-                            currentForumData = data.forum;
-                            refreshHistorySelect(data.forum);
+                            showResult(data.forum);
+                            if (typeof ForumBackgrounds !== 'undefined') ForumBackgrounds.useResult(data.forum);
                             actions.style.display = 'flex';
                             btn.disabled = false;
-                            btn.textContent = '🚀 生成论坛';
+                            btn.textContent = SakiI18n.t('🚀 生成论坛');
                             return;
                         }
                         if (data.text) {
@@ -843,11 +928,12 @@
                 }
             }
         } catch (e) {
-            alert('流式连接中断，请重试');
+            alert(SakiI18n.t('流式连接中断，请重试'));
         }
 
         btn.disabled = false;
-        btn.textContent = '🚀 生成论坛';
+        btn.textContent = SakiI18n.t('🚀 生成论坛');
+        document.getElementById('settingsPanel').style.display = '';
     }
 
     function showResult(data) {
@@ -860,7 +946,7 @@
         const phonePreview = document.getElementById('phonePreview');
 
         phonePreview.style.display = 'flex';
-        placeholder.style.display = 'none';
+        if (placeholder) placeholder.style.display = 'none';
         actions.style.display = 'flex';
 
         let html = `<div class="forum-thread-title">${escHtml(data.title)}</div>`;
@@ -882,16 +968,16 @@
     }
 
     function renderForumPost(post, idx) {
-        const floorNum = post.floor != null ? post.floor : idx;
-        const tag = floorNum === 0 ? '楼主' : `#${floorNum}楼`;
+        const floorNum = /^\d+$/.test(String(post.floor)) && Number.isSafeInteger(Number(post.floor)) ? Number(post.floor) : idx;
+        const tag = floorNum === 0 ? SakiI18n.t('楼主') : '#' + floorNum;
         const role = post.role || 'npc';
-        const roleLabel = role === 'self' ? '自己' : '网友';
+        const roleLabel = role === 'self' ? SakiI18n.t('自己') : SakiI18n.t('网友');
         const roleClass = role === 'self' ? 'self' : 'npc';
-        const hasReply = post.replyTo !== null && post.replyTo !== undefined;
+        const hasReply = /^\d+$/.test(String(post.replyTo)) && Number.isSafeInteger(Number(post.replyTo));
 
         let replyHtml = '';
         if (hasReply) {
-            replyHtml = `<span class="forum-post-reply-to" onclick="scrollToFloor(${post.replyTo})">回复 #${post.replyTo}</span>`;
+            replyHtml = SakiI18n.ui`<span class="forum-post-reply-to" onclick="scrollToFloor(${post.replyTo})">回复 #${post.replyTo}</span>`;
         }
 
         return `
@@ -920,7 +1006,7 @@
     function backToEdit() {
         isResultMode = false;
         document.getElementById('phonePreview').style.display = 'none';
-        document.getElementById('phoneScreen').innerHTML = `
+        document.getElementById('phoneScreen').innerHTML = SakiI18n.ui`
             <div class="phone-placeholder" id="phonePlaceholder">
                 <svg viewBox="0 0 24 24" width="48" height="48" stroke="currentColor" stroke-width="1.5" fill="none">
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -934,6 +1020,8 @@
     }
 
     function refreshHistorySelect(data) {
+        const key = String(data.id);
+        historyForums.set(key, { ...historyForums.get(key), ...data });
         const sel = document.getElementById('historyForumSelect');
         // Check if this forum is already in the list
         let found = false;
@@ -943,15 +1031,18 @@
         if (!found) {
             const opt = document.createElement('option');
             opt.value = data.id;
-            opt.textContent = `${data.title} (${data.forum_type === 'novel_readers' ? '小说读者' : data.forum_type === 'world_bystanders' ? '世界路人' : data.custom_type_description || '自定义'} · 刚刚)`;
+            opt.textContent = SakiI18n.ui`${data.title} (${data.forum_type === 'novel_readers' ? SakiI18n.t('小说读者') : data.forum_type === 'world_bystanders' ? SakiI18n.t('世界路人') : data.custom_type_description || SakiI18n.t('自定义')} · 刚刚)`;
             sel.insertBefore(opt, sel.options[1] || null);
         }
+        if (sel.value === key) onHistoryForumSelected({ preserveDraft: true });
     }
 
     // ===== Copy Forum Block =====
     function copyForumBlock() {
-        if (!currentForumData) { showToast('没有论坛数据'); return; }
-        if (!currentForumData.posts || currentForumData.posts.length === 0) { showToast('论坛内容为空'); return; }
+        if (!currentForumData) { showToast(SakiI18n.t('没有论坛数据')); return; }
+        if (!currentForumData.posts || currentForumData.posts.length === 0) { showToast(SakiI18n.t('论坛内容为空')); return; }
+        const copiedCount = currentForumData.posts.length;
+        const copiedMessage = SakiI18n.t('已复制论坛块代码（共 {count} 楼）', {count: copiedCount});
 
         let block = '[FORUM:' + currentForumData.title + ']';
         for (var i = 0; i < currentForumData.posts.length; i++) {
@@ -981,15 +1072,15 @@
         document.body.removeChild(ta);
 
         if (ok) {
-            showToast('已复制 ' + currentForumData.posts.length + ' 楼论坛块！');
+            showToast(copiedMessage);
         } else if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(block).then(function() {
-                showToast('已复制论坛块代码！');
+                showToast(copiedMessage);
             }).catch(function() {
-                showToast('复制失败，请长按手动选择复制');
+                showToast(SakiI18n.t('复制失败，请长按手动选择复制'));
             });
         } else {
-            showToast('复制失败，请长按手动选择复制');
+            showToast(SakiI18n.t('复制失败，请长按手动选择复制'));
         }
     }
 
@@ -1013,7 +1104,7 @@
             idx = (idx + 1) % loadingPhrases.length;
             document.getElementById('loadingText').textContent = loadingPhrases[idx];
         }, 2500);
-        document.getElementById('loadingSubtext').textContent = '大型语言模型正在全力生成中...';
+        document.getElementById('loadingSubtext').textContent = SakiI18n.t('大型语言模型正在全力生成中...');
     }
 
     function hideLoading() {
@@ -1042,6 +1133,7 @@
     }
 
     // ===== Init =====
+    if (typeof ForumBackgrounds !== 'undefined') ForumBackgrounds.init();
     loadHistoryForums();
 </script>
 

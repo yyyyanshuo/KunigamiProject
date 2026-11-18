@@ -1,6 +1,7 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="{{ ui_language }}" data-ai-brand-line="{{ ui_t('ai_brand_line', brand=saki_brand) }}">
 <head>
+  {% include "ui_language_head.html" %}
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>世界</title>
@@ -17,6 +18,7 @@
     :root {
       --primary-color: #ff9eb5;
       --primary-hover: #ff89a5;
+      --primary-dark: #ff89a5;
 
       --secondary-color: #6ea8ff;
 
@@ -100,6 +102,8 @@
     }
 
     .map-title {
+      flex: 0 0 auto;
+      white-space: nowrap;
       display: flex;
       flex-direction: column;
       justify-content: center;
@@ -122,7 +126,9 @@
     }
 
     #char-select{
-      flex:1;
+      flex: 1 1 0;
+      min-width: 0;
+      width: 0;
 
       height:44px;
 
@@ -151,6 +157,10 @@
     }
 
     .btn-me{
+      flex: 0 0 44px;
+      padding: 0;
+      display: grid;
+      place-items: center;
       width:44px;
       height:44px;
 
@@ -179,12 +189,12 @@
       background:
         linear-gradient(
           135deg,
-          #ff9eb5,
-          #ff89a5
+          var(--primary-color),
+          var(--primary-dark)
         );
 
       box-shadow:
-        0 8px 20px rgba(255,158,181,.35);
+        0 8px 20px var(--primary-rgba-dark, rgba(255,158,181,.35));
     }
 
     /* =========================
@@ -361,12 +371,12 @@
 
     #bottom-bar button.primary{
       color:white;
-      border: 1px solid rgba(255,137,165,0.8);
+      border: 1px solid var(--primary-dark);
       background:
         linear-gradient(
           135deg,
-          #ff9eb5,
-          #ff89a5
+          var(--primary-color),
+          var(--primary-dark)
         );
     }
 
@@ -548,12 +558,12 @@
 
     .btn-ok{
       color:white;
-      border: 1px solid rgba(255,137,165,0.8);
+      border: 1px solid var(--primary-dark);
       background:
         linear-gradient(
           135deg,
-          #ff9eb5,
-          #ff89a5
+          var(--primary-color),
+          var(--primary-dark)
         );
     }
   </style>
@@ -799,7 +809,7 @@
   function populateCharSelect() {
     let sel = document.getElementById('char-select');
     let currentVal = sel.value;
-    sel.innerHTML = '<option value="">-- 选择角色 --</option>';
+    sel.innerHTML = SakiI18n.fragment('<option value="">-- 选择角色 --</option>');
     for (let cid in charPositions) {
       let name = charPositions[cid].name || cid;
       sel.innerHTML += `<option value="${cid}">${name}</option>`;
@@ -850,14 +860,14 @@
       bar.style.display = 'flex';
       knownBtn.classList.remove('visible');
       let locName = userPos.location_id ? (locations.find(l=>l.id===userPos.location_id)?.name || userPos.location_id) : '无命名地点';
-      curSpan.textContent = `当前: ${locName}(${userPos.x}, ${userPos.y})`;
+      curSpan.textContent = SakiI18n.ui`当前: ${locName}(${userPos.x}, ${userPos.y})`;
       input.value = '';
     } else if (selectedCharId) {
       bar.style.display = 'flex';
       knownBtn.classList.add('visible');
       let p = charPositions[selectedCharId];
       let locName = p.location_id ? (locations.find(l=>l.id===p.location_id)?.name || p.location_id) : '无命名地点';
-      curSpan.textContent = `当前: ${locName}(${p.x}, ${p.y})`;
+      curSpan.textContent = SakiI18n.ui`当前: ${locName}(${p.x}, ${p.y})`;
       input.value = '';
     } else {
       bar.style.display = 'none';
@@ -874,10 +884,10 @@
     if (coordMatch) {
       x = parseFloat(coordMatch[1]);
       y = parseFloat(coordMatch[2]);
-      if (isNaN(x) || isNaN(y)) { alert("坐标格式错误"); return; }
+      if (isNaN(x) || isNaN(y)) { alert(SakiI18n.t("坐标格式错误")); return; }
     } else {
       let loc = locations.find(l => l.name === val || l.id === val);
-      if (!loc) { alert("未找到地点，请选择下拉列表中的地点或输入坐标(如 1, 2)"); return; }
+      if (!loc) { alert(SakiI18n.t("未找到地点，请选择下拉列表中的地点或输入坐标(如 1, 2)")); return; }
       x = loc.x; y = loc.y; loc_id = loc.id;
     }
 
@@ -916,7 +926,7 @@
           );
         } else {
           let err = await res.json();
-          alert("移动失败: " + err.error);
+          alert(SakiI18n.t("移动失败: ") + err.error);
         }
       } catch(e) { alert(e.message); }
     }
@@ -998,7 +1008,7 @@
 
   window.autoGeocode = async function(prefix) {
     let city = document.getElementById(prefix + '-loc-city').value.trim();
-    if (!city) { alert('请输入城市名'); return; }
+    if (!city) { alert(SakiI18n.t('请输入城市名')); return; }
     let country = document.getElementById(prefix + '-loc-country').value.trim();
     let btn = document.querySelector(`#${prefix}-loc-city + button, #${prefix}-location-modal button[onclick*="autoGeocode('${prefix}'"]`);
     try {
@@ -1011,10 +1021,10 @@
         document.getElementById(prefix + '-loc-lon').value = data.lon;
         document.getElementById(prefix + '-loc-timezone').value = data.timezone || '';
       } else {
-        alert('未找到该城市，请检查拼写或手动填写经纬度');
+        alert(SakiI18n.t('未找到该城市，请检查拼写或手动填写经纬度'));
       }
     } catch(e) {
-      alert('查询失败: ' + e.message);
+      alert(SakiI18n.t('查询失败: ') + e.message);
     }
   };
 
@@ -1024,8 +1034,8 @@
     let finalX = parseFloat(document.getElementById('new-loc-x').value);
     let finalY = parseFloat(document.getElementById('new-loc-y').value);
 
-    if (!name) { alert('请输入地点名称'); return; }
-    if (isNaN(finalX) || isNaN(finalY)) { alert('坐标格式错误'); return; }
+    if (!name) { alert(SakiI18n.t('请输入地点名称')); return; }
+    if (isNaN(finalX) || isNaN(finalY)) { alert(SakiI18n.t('坐标格式错误')); return; }
 
     let city = document.getElementById('new-loc-city').value.trim();
     let country = document.getElementById('new-loc-country').value.trim();
@@ -1054,7 +1064,7 @@
       });
       if (!res.ok) {
         let e = await res.json();
-        alert(e.error || '创建失败');
+        alert(e.error || SakiI18n.t('创建失败'));
         return;
       }
       let result = await res.json();
@@ -1062,14 +1072,14 @@
         closeAddLocationModal();
         await loadData();
         draw();
-        alert(`该坐标已有地点“${result.location.name}”[${result.location.id}]，未重复创建。`);
+        alert(SakiI18n.ui`该坐标已有地点“${result.location.name}”[${result.location.id}]，未重复创建。`);
         return;
       }
       closeAddLocationModal();
       await loadData();
       draw();
     } catch(e) {
-      alert('请求失败: ' + e.message);
+      alert(SakiI18n.t('请求失败: ') + e.message);
     }
   };
 
@@ -1201,8 +1211,8 @@
       if (loc.is_default) {
         ctx.fillStyle = '#ff89a5';
         ctx.font = '10px -apple-system, sans-serif';
-        ctx.strokeText('(起点)', s.x, s.y - 42);
-        ctx.fillText('(起点)', s.x, s.y - 42);
+        ctx.strokeText(SakiI18n.t('起点'), s.x, s.y - 42);
+        ctx.fillText(SakiI18n.t('起点'), s.x, s.y - 42);
       }
 
       let w = weatherData[loc.id];
@@ -1503,7 +1513,7 @@
     if (dragTarget.type === 'character') {
       let fromX = dragTarget.x, fromY = dragTarget.y;
       let dist = Math.sqrt((g.x-fromX)**2 + (g.y-fromY)**2);
-      if (dist > 1.0) { alert(`距离 ${dist.toFixed(1)} > 1格，无法移动`); return; }
+      if (dist > 1.0) { alert(SakiI18n.ui`距离 ${dist.toFixed(1)} > 1格，无法移动`); return; }
       try {
         let res = await fetch(`/api/map/character/${dragTarget.id}/position`, {
           method: 'PUT',
@@ -1512,7 +1522,7 @@
         });
         if (!res.ok) {
           let e = await res.json();
-          alert(e.error || '移动失败');
+          alert(e.error || SakiI18n.t('移动失败'));
           return;
         }
         let r = await res.json();
@@ -1534,7 +1544,7 @@
            updateActionBar();
         }
       } catch(e) {
-        alert('请求失败: ' + e.message);
+        alert(SakiI18n.t('请求失败: ') + e.message);
       }
     } else if (dragTarget.type === 'user') {
       try {
@@ -1543,13 +1553,13 @@
           headers: {'Content-Type':'application/json'},
           body: JSON.stringify({x: Math.round(g.x*100)/100, y: Math.round(g.y*100)/100})
         });
-        if (!res.ok) { alert('移动失败'); return; }
+        if (!res.ok) { alert(SakiI18n.t('移动失败')); return; }
         let r = await res.json();
         userPos = r;
         if (userMode) updateActionBar();
         draw();
       } catch(e) {
-        alert('请求失败: ' + e.message);
+        alert(SakiI18n.t('请求失败: ') + e.message);
       }
     }
   }
@@ -1563,13 +1573,13 @@
     const tzText = loc.real_world && loc.real_world.timezone
       ? ` 时区: ${loc.real_world.timezone}`
       : '';
-    document.getElementById('bubble-coords').textContent = `坐标: (${loc.x}, ${loc.y}) 极坐标: (${loc.r}, ${loc.theta?.toFixed(2)})${tzText}`;
+    document.getElementById('bubble-coords').textContent = SakiI18n.ui`坐标: (${loc.x}, ${loc.y}) 极坐标: (${loc.r}, ${loc.theta?.toFixed(2)})${tzText}`;
 
     let weatherEl = document.getElementById('bubble-weather');
     let w = weatherData[loc.id];
     if (w && w.emoji) {
       let cityStr = w.city ? w.city + ' ' : '';
-      weatherEl.textContent = `${cityStr}${w.emoji} ${w.condition} ${w.temperature}°C 湿度${w.humidity}%`;
+      weatherEl.textContent = SakiI18n.ui`${cityStr}${w.emoji} ${w.condition} ${w.temperature}°C 湿度${w.humidity}%`;
       weatherEl.style.display = 'block';
     } else {
       weatherEl.style.display = 'none';
@@ -1601,7 +1611,7 @@
 
     // Add User checkbox
     let isUserHere = (userPos.location_id === loc.id) || (Math.abs(userPos.x - loc.x) < 0.01 && Math.abs(userPos.y - loc.y) < 0.01);
-    let uHtml = `
+    let uHtml = SakiI18n.ui`
       <label style="display:flex; align-items:center; margin-bottom:8px; cursor:pointer;">
         <input type="checkbox" class="bulk-cb" value="user" style="width:16px; margin:0 8px 0 0;" ${isUserHere ? 'disabled checked title="已在此处"' : ''}>
         <span style="font-size:14px; color:var(--text-main);">我 (用户)</span>
@@ -1614,7 +1624,7 @@
       let cp = charPositions[cid];
       let isHere = (cp.location_id === loc.id) || (Math.abs(cp.x - loc.x) < 0.01 && Math.abs(cp.y - loc.y) < 0.01);
       let name = cp.name || cid;
-      let cHtml = `
+      let cHtml = SakiI18n.ui`
         <label style="display:flex; align-items:center; margin-bottom:8px; cursor:pointer;">
           <input type="checkbox" class="bulk-cb" value="${cid}" style="width:16px; margin:0 8px 0 0;" ${isHere ? 'disabled checked title="已在此处"' : ''}>
           <span style="font-size:14px; color:var(--text-main);">${name}</span>
@@ -1689,7 +1699,7 @@
         draw();
       }
     } catch(e) {
-      alert('保存失败: ' + e.message);
+      alert(SakiI18n.t('保存失败: ') + e.message);
     }
   };
   // ========= 编辑认知地点 结束 =========
@@ -1726,8 +1736,8 @@
     let desc = document.getElementById('edit-loc-desc').value.trim();
     let x = parseFloat(document.getElementById('edit-loc-x').value);
     let y = parseFloat(document.getElementById('edit-loc-y').value);
-    if (!name) { alert('请输入地点名称'); return; }
-    if (isNaN(x) || isNaN(y)) { alert('坐标格式错误'); return; }
+    if (!name) { alert(SakiI18n.t('请输入地点名称')); return; }
+    if (isNaN(x) || isNaN(y)) { alert(SakiI18n.t('坐标格式错误')); return; }
     let city = document.getElementById('edit-loc-city').value.trim();
     let country = document.getElementById('edit-loc-country').value.trim();
     let latStr = document.getElementById('edit-loc-lat').value.trim();
@@ -1758,10 +1768,10 @@
         draw();
       } else {
         let e = await res.json();
-        alert('保存失败: ' + e.error);
+        alert(SakiI18n.t('保存失败: ') + e.error);
       }
     } catch(e) {
-      alert('请求失败: ' + e.message);
+      alert(SakiI18n.t('请求失败: ') + e.message);
     }
   };
   // ========= 编辑地点 结束 =========
@@ -1788,11 +1798,11 @@
     });
 
     if (toMove.length === 0) {
-      alert('请选择要移动的角色');
+      alert(SakiI18n.t('请选择要移动的角色'));
       return;
     }
 
-    document.querySelector('#bulk-move-modal .btn-ok').textContent = '正在移动...';
+    document.querySelector('#bulk-move-modal .btn-ok').textContent = SakiI18n.t('正在移动...');
     document.querySelector('#bulk-move-modal .btn-ok').disabled = true;
 
     try {
@@ -1830,11 +1840,11 @@
         alert(timezoneMessages.join('\n'));
       }
 
-      document.querySelector('#bulk-move-modal .btn-ok').textContent = '确认移动';
+      document.querySelector('#bulk-move-modal .btn-ok').textContent = SakiI18n.t('确认移动');
       document.querySelector('#bulk-move-modal .btn-ok').disabled = false;
     } catch(e) {
-      alert('批量移动发生错误: ' + e.message);
-      document.querySelector('#bulk-move-modal .btn-ok').textContent = '确认移动';
+      alert(SakiI18n.t('批量移动发生错误: ') + e.message);
+      document.querySelector('#bulk-move-modal .btn-ok').textContent = SakiI18n.t('确认移动');
       document.querySelector('#bulk-move-modal .btn-ok').disabled = false;
     }
   };

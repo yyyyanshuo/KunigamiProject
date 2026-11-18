@@ -20,10 +20,11 @@ def test_chat_v2_does_not_persist_character_local_time():
     assert "character_now.strftime('%Y-%m-%d %H:%M:%S')" not in handler
 
 
-def test_chat_and_moments_templates_display_record_time_in_beijing():
+def test_chat_and_moments_display_in_user_zone_but_parse_legacy_storage():
     for template in ("templates/chat.html", "templates/moments.html"):
         source = _source(template)
-        assert "const RECORD_TIMEZONE = 'Asia/Shanghai';" in source
+        assert "const RECORD_TIMEZONE = {{ user_timezone | default('Asia/Shanghai') | tojson }};" in source
+        assert "+08:00" in source
         assert "timeZone: RECORD_TIMEZONE" in source
         assert "USER_TIMEZONE" not in source
         assert ".getHours()" not in source

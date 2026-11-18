@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import shutil
 import sqlite3
 import sys
@@ -26,7 +25,6 @@ from core.context import clear_background_user, set_background_user  # noqa: E40
 from core.config import USERS_ROOT  # noqa: E402
 from core.utils import get_paths  # noqa: E402
 from services.memory import (  # noqa: E402
-    call_ai_to_summarize,
     generate_medium_memory_for_date,
     update_short_memory_for_date,
 )
@@ -35,6 +33,7 @@ from services.memory_store import (  # noqa: E402
     load_json_object,
     memory_file_lock,
 )
+from services.moment_memory import format_moment_memory, moment_reply_source  # noqa: E402
 
 
 def _load_character_names(user_id: int):
@@ -65,11 +64,11 @@ def _moment_actions(user_id: int, char_id: str, target_date: str):
         author_id = str(post.get("char_id", ""))
         author_name = "用户" if author_id == "user" else names.get(author_id, author_id)
         post_ts = str(post.get("timestamp", ""))
-        content = str(post.get("content", "")).strip().replace("\n", " ")[:300]
+        content = str(post.get("content", ""))
         if author_id == char_id and post_ts.startswith(target_date):
             actions.append({
                 "time": post_ts[11:16],
-                "context": f"你发了一条朋友圈，内容：「{content}」。",
+                "context": format_moment_memory(content),
             })
         comments = post.get("comments", []) or []
         for comment_index, comment in enumerate(comments):
@@ -78,31 +77,15 @@ def _moment_actions(user_id: int, char_id: str, target_date: str):
             comment_ts = str(comment.get("timestamp", ""))
             if not comment_ts.startswith(target_date):
                 continue
-            comment_text = str(comment.get("content", "")).strip().replace("\n", " ")[:300]
-            reply_to = str(comment.get("reply_to", ""))
-            if author_id == char_id:
-                target = "用户" if reply_to == "user" else names.get(reply_to, reply_to)
-                prior_text = ""
-                if reply_to:
-                    for prior in reversed(comments[:comment_index]):
-                        prior_id = str(prior.get("commenter_id", ""))
-                        if prior_id == reply_to or (reply_to == "user" and prior_id == "user"):
-                            prior_text = str(prior.get("content", "")).strip().replace("\n", " ")[:200]
-                            break
-                detail = (
-                    f"你在自己的朋友圈「{content}」下，回复了{target or '评论者'}"
-                    f"的评论「{prior_text}」，你说：「{comment_text}」。"
-                )
-            elif reply_to:
-                target = "用户" if reply_to == "user" else names.get(reply_to, reply_to)
-                detail = (
-                    f"在{author_name}的朋友圈「{content}」下，你回复了{target}，"
-                    f"你说：「{comment_text}」。"
-                )
-            else:
-                detail = (
-                    f"看到{author_name}的朋友圈「{content}」，你评论说：「{comment_text}」。"
-                )
+            comment_text = str(comment.get("content", ""))
+            reply_to = comment.get("reply_to")
+            source = moment_reply_source(comments, comment_index)
+            target = ("用户" if reply_to == "user" else names.get(reply_to, reply_to)) if reply_to else None
+            detail = format_moment_memory(
+                content, author_name=author_name, comment_content=comment_text,
+                reply_to_name=target,
+                upstream_content=source.get("content", "") if source is not None else None,
+            )
             actions.append({"time": comment_ts[11:16], "context": detail})
     unique = []
     seen = set()
@@ -114,40 +97,9 @@ def _moment_actions(user_id: int, char_id: str, target_date: str):
     return unique
 
 
-def _summarize_moment_actions(actions, char_id: str, user_id: int):
-    events = []
-    for index, action in enumerate(actions, start=1):
-        summary = None
-        for retry_delay in (0, 15, 30, 60):
-            if retry_delay:
-                print(
-                    f"Moments memory {index}/{len(actions)} retrying in "
-                    f"{retry_delay} seconds"
-                )
-                time.sleep(retry_delay)
-            summary = call_ai_to_summarize(
-                action["context"], "moment", char_id, user_id=user_id
-            )
-            if summary:
-                break
-        if not summary:
-            raise SystemExit(
-                f"Moments memory {index}/{len(actions)} failed; no memory files were changed."
-            )
-        line = str(summary).strip().splitlines()[0].strip()
-        line = re.sub(r"^-\s*(?:\[\d{2}:\d{2}\]\s*)?", "", line).strip()
-        if not line:
-            raise SystemExit(
-                f"Moments memory {index}/{len(actions)} was empty; no memory files were changed."
-            )
-        events.append({
-            "time": action["time"],
-            "event": line if line.startswith("[朋友圈]") else f"[朋友圈] {line}",
-        })
-        print(f"Moments summarized {index}/{len(actions)}")
-        if index < len(actions):
-            time.sleep(8)
-    return events
+def _moment_events(actions):
+    """Restore full source records without a summary model or API delays."""
+    return [{"time": action["time"], "event": action["context"]} for action in actions]
 
 
 def _replace_moment_events(short_file: Path, target_date: str, restored_events):
@@ -204,7 +156,7 @@ def main():
                 "FROM messages WHERE timestamp >= ? AND timestamp <= ?",
                 (start, end),
             ).fetchone()
-        print(f"Database messages: {total}; excluded [THOUGHTS] rows: {thoughts or 0}")
+        print(f"Database messages: {total}; included [THOUGHTS] rows: {thoughts or 0}")
         print(f"Short file: {short_file}")
         print(f"Medium file: {medium_file}")
         moment_actions = _moment_actions(args.user_id, args.char_id, args.date)
@@ -215,14 +167,7 @@ def main():
             print("No files changed. Re-run with --apply to back up and rebuild this date.")
             return
 
-        # Generate every Moments summary first.  If any API call fails, the
-        # script exits before touching short or medium memory files.
-        restored_moments = _summarize_moment_actions(
-            moment_actions, args.char_id, args.user_id
-        )
-        if restored_moments:
-            print("Waiting 15 seconds before rebuilding private-chat memory...")
-            time.sleep(15)
+        restored_moments = _moment_events(moment_actions)
 
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         backup_dir = Path(args.backup_root).resolve() / stamp / str(args.user_id) / args.char_id

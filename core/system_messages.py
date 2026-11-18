@@ -8,13 +8,16 @@ SYSTEM_PROMPT_SUFFIX = "）"
 
 
 def is_system_prompt_message(message: object) -> bool:
-    """Return True only when the entire message uses （系统提示：内容）."""
-
+    """Recognize complete Chinese, Japanese and English system notices only."""
+    import re
     text = str(message or "").strip()
-    if not text.startswith(SYSTEM_PROMPT_PREFIX) or not text.endswith(SYSTEM_PROMPT_SUFFIX):
-        return False
-    content = text[len(SYSTEM_PROMPT_PREFIX):-len(SYSTEM_PROMPT_SUFFIX)]
-    return bool(content.strip())
+    patterns = (
+        r"^（系统提示：([\s\S]*)）$",
+        r"^\(System(?:\s+(?:prompt|notice|tip|hint|message))?:\s*([\s\S]*)\)$",
+        r"^（システム(?:提示|通知)?：\s*([\s\S]*)）$",
+    )
+    return any(match and match.group(1).strip()
+               for pattern in patterns if (match := re.fullmatch(pattern, text, re.IGNORECASE)))
 
 
 def should_suppress_reply_for_deep_sleep(deep_sleep: object, message: object) -> bool:

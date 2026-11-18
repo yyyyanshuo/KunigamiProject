@@ -6,6 +6,7 @@ from flask import Flask
 
 import blueprints.square as square
 import core.utils as core_utils
+import core.user_resources as user_resources
 from services.ai_client import AIResponseText
 
 
@@ -25,9 +26,10 @@ def _setup_trial(tmp_path, monkeypatch):
     monkeypatch.setattr(square, "USERS_DB", str(users_db))
     monkeypatch.setattr(square, "USERS_ROOT", str(users_root))
     monkeypatch.setattr(core_utils, "USERS_ROOT", str(users_root))
+    monkeypatch.setattr(user_resources, "USERS_ROOT", str(users_root))
     monkeypatch.setattr(square, "get_current_user_id", lambda: 2)
     monkeypatch.setattr(square, "get_current_username", lambda: "测试用户")
-    monkeypatch.setattr(square, "get_user_credential", lambda *args, **kwargs: "admin-gemini-key")
+    monkeypatch.setenv("SAKI_SERVICE_GEMINI_API_KEY", "synthetic-service-key")
     monkeypatch.setattr(square, "TRIAL_RATE_LIMIT_PER_MINUTE", 100)
 
     with sqlite3.connect(users_db) as conn:
@@ -99,7 +101,8 @@ def test_trial_prompt_uses_only_direct_user_relationship(tmp_path, monkeypatch):
 
     assert status == 200
     assert body["turn"] == 1
-    assert captured["kwargs"]["user_id"] == 1
+    assert captured["kwargs"]["user_id"] == 2
+    assert captured["kwargs"]["service_key"] is True
     system_prompt = captured["messages"][0]["content"]
     assert "朋友" in system_prompt
     assert "刚认识，但比较聊得来" in system_prompt
@@ -183,22 +186,7 @@ def test_add_to_local_imports_relationship_and_trial_history(tmp_path, monkeypat
     config_path.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(square, "_get_characters_config_file", lambda: str(config_path))
 
-    def fake_init_char_db(char_id):
-        db_path, _ = square.get_paths(char_id, user_id=2)
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(db_path) as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS messages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    role TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-
-    monkeypatch.setattr("app.init_char_db", fake_init_char_db)
+    # Exercise the real, explicit creation path before catalog insertion.
     with app.test_request_context(
         "/api/square/add_to_local",
         method="POST",
@@ -230,8 +218,8 @@ def test_trial_template_uses_chat_style_text_and_image_export():
     assert "复制图片" in source
     assert "下载图片" in source
     assert "KunigamiAiDisclosure" in source
-    assert "由 Sakura樱语🌸 AI 生成" in source
-    assert "https://kunigami-project-api.online" in source
+    assert "ai_brand_line" in source
+    assert "https://kunigami-project-api.online" not in source
     assert "hideCharIdentity=hide&&!isUser" in source
     assert "if(!hideCharIdentity)row.appendChild(avatar)" in source
     assert "if(!hideCharIdentity)stack.appendChild(name)" in source

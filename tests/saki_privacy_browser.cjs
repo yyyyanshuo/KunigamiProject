@@ -1,0 +1,70 @@
+// Runs only against the isolated local app and synthetic test account.
+const assert=require('node:assert/strict');
+const {chromium}=require(process.env.KUNIGAMI_PLAYWRIGHT_MODULE||'C:/Users/96980/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const base='http://127.0.0.1:5098';
+(async()=>{
+ const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe'});
+ try{
+  const context=await browser.newContext({baseURL:base,viewport:{width:390,height:844},serviceWorkers:'block'});
+  await context.route('**/*',r=>new URL(r.request().url()).origin===base?r.continue():r.abort());
+  const login=()=>context.request.post('/api/login',{data:{username:'test@saki.invalid',password:'synthetic-browser-password'}});
+  assert.equal((await login()).status(),200);
+  const initial=await (await context.request.get('/api/system_config')).json();initial.active_route='gemini';
+  assert.equal((await context.request.post('/api/system_config',{headers:{'X-Requested-With':'XMLHttpRequest'},data:initial})).status(),200);
+  const published=await context.request.post('/api/square/upload',{multipart:{id:'privacy_'+Date.now(),name:'Synthetic privacy trial',base_persona:'Synthetic public persona',relationship_graph:'{}',tags:'test',ip:'synthetic'}});
+  assert.equal(published.status(),200);const publicId=(await published.json()).id;
+  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  for(const language of ['zh-CN','en','ja']){
+   await context.request.post('/api/ui/language',{data:{user_language:language}});
+   assert.equal((await page.goto('/profile')).status(),200);
+   await page.waitForFunction(()=>document.querySelectorAll('#model-settings-overview .api-status-item').length>0);
+   assert.equal(await page.locator('html').getAttribute('lang'),language);
+   await page.evaluate(()=>document.getElementById('module-api').classList.remove('collapsed'));
+   const notice=await page.locator('#module-api .privacy-note').textContent();
+   assert(notice.length>45, JSON.stringify({language,notice}));
+   if(language==='en')assert(!/[\u4e00-\u9fff]/.test(notice),notice);
+   if(language==='ja')assert(notice.includes('サーバー'),notice);
+   await page.evaluate(()=>{document.getElementById('module-api').classList.remove('collapsed');toggleApiEdit(true);});
+   await page.locator('#radio-custom').check();
+   await page.locator('#custom-route-url').fill('https://synthetic-relay.invalid/v1');
+   await page.locator('#route-key-input').fill('synthetic-never-sent');
+   const dialogPromise=page.waitForEvent('dialog');
+   const save=page.evaluate(()=>saveApiConfig());
+   const dialog=await dialogPromise;
+   assert(dialog.message().includes('https://synthetic-relay.invalid/v1'));await dialog.dismiss();await save;
+   const config=await (await context.request.get('/api/system_config')).json();assert.equal(config.active_route,'gemini');
+   await page.evaluate(()=>toggleApiEdit(false));
+   assert.equal((await page.goto('/square/upload')).status(),200);
+   const pub=await page.locator('.privacy-note').innerText();assert(pub.length>50);
+   const confirmPromise=page.waitForEvent('dialog');
+   const submit=page.evaluate(()=>document.getElementById('upload-form').dispatchEvent(new Event('submit',{cancelable:true,bubbles:true})));
+   const publication=await confirmPromise;assert(publication.message().length>50);await publication.dismiss();await submit;
+   assert.equal((await page.goto('/stickers/upload')).status(),200);
+   assert((await page.locator('.privacy-note').innerText()).length>30);
+  }
+  await page.goto('/square/character/'+publicId+'/trial');
+  await page.waitForFunction(()=>document.getElementById('trialServiceHost')?.textContent.includes('generativelanguage.googleapis.com'));
+  assert.equal(await page.locator('#inputWrap .privacy-note').count(),0);
+  assert((await page.locator('#relationshipModal .privacy-note').innerText()).includes('試用'));
+  const bounds=await page.locator('#relationshipModal .modal-card').boundingBox();assert(bounds.y>=0&&bounds.y+bounds.height<=844,bounds);
+  await page.goto('/profile');
+  await page.evaluate(()=>{localStorage.setItem('private-test-transcript','synthetic');sessionStorage.setItem('private-test-form','synthetic');});
+  await page.locator('a[href="/logout"]').click();await page.waitForURL('**/login');
+  assert.equal(await page.evaluate(()=>localStorage.getItem('private-test-transcript')),null);
+  assert.equal(await page.evaluate(()=>sessionStorage.getItem('private-test-form')),null);
+  assert.equal((await login()).status(),200);await page.goto('/profile');
+  await page.evaluate(()=>openDeleteAccountModal());
+  assert((await page.locator('.delete-warning-box').innerText()).includes('公開'));
+  await page.evaluate(()=>showDeleteAccountConfirmStep());
+  await page.locator('#delete-account-password').fill('synthetic-browser-password');
+  await page.locator('#delete-account-confirm').fill('アカウント削除');
+  await page.evaluate(()=>localStorage.setItem('private-test-transcript','synthetic'));
+  const deleted=page.waitForEvent('dialog');
+  await page.locator('#delete-account-submit').click();
+  const result=await deleted;assert(result.message().includes('削除'));await result.accept();
+  await page.waitForURL('**/login');
+  assert.equal(await page.evaluate(()=>localStorage.getItem('private-test-transcript')),null);
+  assert.deepEqual(errors,[]);
+  console.log('PASS: 3 languages, custom endpoint cancellation, publication confirmation, mobile layout, logout and account deletion cache cleanup');
+ }finally{await browser.close();}
+})().catch(e=>{console.error(e);process.exitCode=1;});

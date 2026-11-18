@@ -1,21 +1,22 @@
+from core.runtime import DATA_ROOT
 import os
 import sqlite3
 import json
 from datetime import datetime, timedelta
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-USERS_DB = os.path.join(BASE_DIR, "configs", "users.db")
-USERS_ROOT = os.path.join(BASE_DIR, "users")
-MOMENTS_DATA = os.path.join(BASE_DIR, "configs", "moments_data.json")
+USERS_DB = os.path.join(DATA_ROOT, "configs", "users.db")
+USERS_ROOT = os.path.join(DATA_ROOT, "users")
+MOMENTS_DATA = os.path.join(DATA_ROOT, "configs", "moments_data.json")
 
 def get_all_users():
-    """获取所有用户信息(id, created_at)，排除 1-5 号用户"""
+    """获取参与统计的用户信息(id, created_at)，从 3 号用户开始（含 3）"""
     if not os.path.exists(USERS_DB):
         return []
     conn = sqlite3.connect(USERS_DB)
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id, created_at FROM users WHERE id NOT BETWEEN 1 AND 5")
+        cur.execute("SELECT id, created_at FROM users WHERE id >= 3")
         return cur.fetchall()
     finally:
         conn.close()

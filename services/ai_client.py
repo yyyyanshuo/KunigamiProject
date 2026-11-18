@@ -1,3 +1,4 @@
+from core.runtime import DATA_ROOT, LOCAL_TEST
 import os
 import json
 import random
@@ -5,10 +6,12 @@ import time
 import requests
 import traceback
 from datetime import datetime
+from core import public_https
+from core.log_redaction import redact_sensitive
 
 from core.config import (
     GEMINI_KEY, OPENROUTER_KEY, OPENROUTER_BASE_URL, OPENROUTER_BASE_URL_OLD,
-    SILICONFLOW_KEY, USE_OPENROUTER, COS_BASE_URL, BASE_DIR, USERS_ROOT,
+    SILICONFLOW_KEY, COS_BASE_URL, BASE_DIR, USERS_ROOT,
 )
 from core.context import (
     get_current_user_id, mark_api_fatal_error,
@@ -17,12 +20,11 @@ from core.context import (
 from core.circuit_breaker import (
     check_circuit_breaker, record_fatal_error as record_cb_fatal,
     clear_circuit_breaker_info, set_circuit_breaker_info,
-    check_relay_global_pause, mark_relay_global_pause, _is_cloudflare_block,
     reset_route_success,
 )
 from core.utils import get_effective_gemini_key, get_effective_openrouter_key
 
-API_CONFIG_FILE = os.path.join(BASE_DIR, "configs", "api_settings.json")
+API_CONFIG_FILE = os.path.join(DATA_ROOT, "configs", "api_settings.json")
 
 
 def _positive_timeout_from_env(name, default):
@@ -76,9 +78,10 @@ def ai_error_text(
     status_code=502,
 ):
     """Return a legacy-compatible string with machine-readable error metadata."""
-    display_message = str(message or "AI 服务暂时不可用，请稍后重试").strip()
+    from core.localization import public_error, tr
+    display_message = public_error(status_code, code)
     return AIResponseText(
-        f"（系统提示：{display_message}）",
+        tr("（系统提示：{message}）", message=display_message),
         error_code=code,
         error_message=display_message,
         retryable=retryable,
@@ -107,7 +110,7 @@ def _write_user_log(user_id, text):
     if user_id:
         log_dir = os.path.join(USERS_ROOT, str(user_id), "logs")
     else:
-        log_dir = os.path.join(BASE_DIR, "logs")
+        log_dir = os.path.join(DATA_ROOT, "logs")
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, "api.log")
 
@@ -116,7 +119,14 @@ def _write_user_log(user_id, text):
         # encoding. Preserve readable content instead of breaking the actual
         # AI request merely because the optional diagnostic log is malformed.
         with open(log_file, "r", encoding="utf-8", errors="replace") as f:
-            lines = f.readlines()
+            lines = []
+            for old_line in f:
+                try:
+                    old_record = json.loads(old_line)
+                except ValueError:
+                    continue
+                if isinstance(old_record, dict) and set(old_record) <= {"time", "service", "message_count", "status", "status_code"}:
+                    lines.append(json.dumps(old_record, ensure_ascii=False) + "\n")
     else:
         lines = []
 
@@ -128,80 +138,38 @@ def _write_user_log(user_id, text):
         f.writelines(lines)
 
 
-def _get_usage_log_file() -> str:
-    user_id = get_current_user_id()
+def _get_usage_log_file(user_id=None) -> str:
+    user_id = user_id or get_current_user_id()
     if user_id:
         base = os.path.join(USERS_ROOT, str(user_id), "logs")
         os.makedirs(base, exist_ok=True)
     else:
-        base = os.path.join(BASE_DIR, "logs")
+        base = os.path.join(DATA_ROOT, "logs")
     return os.path.join(base, "usage_history.json")
 
 
 def log_full_prompt(service_name, messages, response_text=None, usage=None):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    """Compatibility entry point: record request metadata, never message bodies."""
+    _write_request_metadata(service_name, message_count=len(messages or []), status="completed")
 
-    log_content = []
-    log_content.append(f"\n{'='*20} [{timestamp}] {service_name} {'='*20}")
 
-    for i, msg in enumerate(messages):
-        role = msg.get('role', 'unknown').upper()
-        content = msg.get('content', '')
-        log_content.append(f"【{i}】<{role}>:\n{content}\n{'-'*30}")
-
-    if response_text:
-        log_content.append(f"\n【🤖 AI REPLY】:\n{response_text}")
-
-    if usage:
-        input_tokens = usage.get('promptTokenCount', 0)
-        output_tokens = usage.get('candidatesTokenCount', 0)
-        total_tokens = usage.get('totalTokenCount', 0)
-
-        log_content.append(f"\n【💰 TOKEN BILL】:")
-        log_content.append(f"   📥 输入(Prompt): {input_tokens}")
-        log_content.append(f"   📤 输出(Reply):  {output_tokens}")
-        log_content.append(f"   💎 总计(Total):  {total_tokens}")
-
-    log_content.append(f"{'='*50}\n")
-
-    final_log = "\n".join(log_content)
-
-    print(final_log)
-
+def _write_request_metadata(service_name, **metadata):
+    record = {"time": datetime.now().isoformat(), "service": redact_sensitive(str(service_name))[:160], **metadata}
+    line = json.dumps(record, ensure_ascii=False) + "\n"
     try:
-        user_id = get_current_user_id()
-        _write_user_log(user_id, final_log)
-    except Exception as e:
-        print(f"FAILED TO WRITE API LOG: {e}")
-        pass
+        _write_user_log(get_current_user_id(), line)
+    except Exception:
+        print("[AI diagnostics] Unable to write request metadata")
 
 
 def log_api_error(service_name, status_code, response_text, messages=None):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_content = [
-        f"\n{'!'*20} API ERROR: {service_name} {'!'*20}",
-        f"Time: {timestamp}",
-        f"Status Code: {status_code}",
-        f"Response: {response_text}" # 打印完整的原始响应主体（包括长 HTML），供后端详细排查
-    ]
-    if messages:
-        log_content.append("--- Last Prompt Sent ---")
-        for i, m in enumerate(messages[-3:]):
-            log_content.append(f"[{m.get('role')}]: {m.get('content')[:200]}")
+    # Upstream bodies can echo private inputs, credentials, or signed URLs.
+    _write_request_metadata(service_name, status_code=status_code, status="failed")
 
-    final_log = "\n".join(log_content) + f"\n{'!'*50}\n"
-    print(final_log)
 
+def record_token_usage(char_id, model, input_tokens, output_tokens, total_tokens, user_id=None):
     try:
-        user_id = get_current_user_id()
-        _write_user_log(user_id, final_log)
-    except:
-        pass
-
-
-def record_token_usage(char_id, model, input_tokens, output_tokens, total_tokens):
-    try:
-        usage_file = _get_usage_log_file()
+        usage_file = _get_usage_log_file(user_id)
 
         logs = []
         if os.path.exists(usage_file):
@@ -232,32 +200,16 @@ def record_token_usage(char_id, model, input_tokens, output_tokens, total_tokens
 
 
 def get_relay_provider(user_id=None):
-    if user_id is None:
-        user_id = get_current_user_id()
-
-    if user_id:
-        user_cfg_dir = os.path.join(USERS_ROOT, str(user_id), "configs")
-        api_cfg_file = os.path.join(user_cfg_dir, "api_settings.json")
-    else:
-        api_cfg_file = API_CONFIG_FILE
-
-    if not os.path.exists(api_cfg_file):
-        return "old"
-
-    try:
-        with open(api_cfg_file, "r", encoding="utf-8") as f:
-            config = json.load(f)
-        relay_config = config.get("routes", {}).get("relay", {})
-        provider = relay_config.get("relay_provider", "old")
-
-        if provider == "custom":
-            custom_url = relay_config.get("relay_custom_url")
-            if custom_url:
-                return custom_url
-
-        return provider
-    except:
-        return "old"
+    from core.model_settings import read_config
+    routes = read_config(user_id).get("routes", {})
+    current_url = (routes.get("custom") or {}).get("base_url")
+    if current_url:
+        return current_url
+    relay = routes.get("relay") or {}
+    provider = relay.get("relay_provider", "old")
+    if provider == "custom":
+        return relay.get("relay_custom_url") or provider
+    return provider
 
 
 def call_openrouter(
@@ -268,6 +220,19 @@ def call_openrouter(
     max_tokens=4096,
     temperature=1,
 ):
+    # Compatibility entry points share routing for all newly configured providers.
+    from core.model_settings import load_config, model_settings_lock
+    with model_settings_lock(user_id):
+        route = load_config(user_id)['active_route']
+        if route in ('gemini', 'relay') and not LOCAL_TEST:
+            relay_provider = get_relay_provider(user_id)
+            relay_key = get_effective_openrouter_key(user_id=user_id)
+    if route not in ('gemini', 'relay'):
+        from services.model_provider import call_provider
+        return call_provider(messages, char_id=char_id, model_name=model_name,
+                             user_id=user_id, max_tokens=max_tokens, temperature=temperature)
+    if LOCAL_TEST:
+        return "【本地模拟回复 MOCK】已收到消息；未调用真实模型。"
     user_agents = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -277,10 +242,13 @@ def call_openrouter(
 
     log_full_prompt(f"OpenRouter ({model_name})", messages)
 
-    relay_provider = get_relay_provider(user_id)
-    if relay_provider.startswith("http://") or relay_provider.startswith("https://"):
-        base_url = relay_provider
-        print(f"--- [Debug] Using CUSTOM relay provider: {base_url}")
+    custom_url = relay_provider.startswith(("https://", "http://"))
+    if custom_url:
+        from core.model_settings import validate_base_url
+        try:
+            base_url = validate_base_url(relay_provider)
+        except ValueError:
+            return ai_error_text("", code="provider_request_failed", provider="relay", status_code=503)
     elif relay_provider == "old":
         base_url = OPENROUTER_BASE_URL_OLD
         print(f"--- [Debug] Using OLD relay provider: {base_url}")
@@ -288,10 +256,12 @@ def call_openrouter(
         base_url = OPENROUTER_BASE_URL
         print(f"--- [Debug] Using NEW relay provider: {base_url}")
 
+    if not base_url or not relay_key:
+        return ai_error_text("relay 未配置：在界面填写用户 Key 和自定义线路，或配置 OPENROUTER_KEY 与所选 OPENROUTER_BASE_URL / OPENROUTER_BASE_URL_OLD。", code="service_not_configured", status_code=503)
     url = f"{base_url}/chat/completions"
 
     headers = {
-        "Authorization": f"Bearer {get_effective_openrouter_key(user_id=user_id)}",
+        "Authorization": f"Bearer {relay_key}",
         "Content-Type": "application/json",
     }
 
@@ -325,17 +295,6 @@ def call_openrouter(
 
     clear_circuit_breaker_info()
 
-    gcb = check_relay_global_pause()
-    if gcb:
-        set_circuit_breaker_info(gcb)
-        return ai_error_text(
-            gcb["message"],
-            code="circuit_breaker",
-            retryable=True,
-            provider="relay",
-            status_code=503,
-        )
-
     _uid = user_id or get_current_user_id()
     if _uid:
         cb = check_circuit_breaker(_uid, "relay")
@@ -350,26 +309,13 @@ def call_openrouter(
             )
 
     try:
-        r = requests.post(url, json=payload, headers=headers, timeout=300)
+        if custom_url:
+            r = public_https.post_json(url, json=payload, headers=headers, timeout=(15, 300))
+        else:
+            r = requests.post(url, json=payload, headers=headers, timeout=300)
 
         if r.status_code != 200:
             log_api_error(f"OpenRouter ({model_name})", r.status_code, r.text, messages=messages)
-
-            # 检测 Cloudflare WAF HTML 页面：触发全局暂停
-            if r.status_code == 403 and _is_cloudflare_block(r.text):
-                mark_relay_global_pause()
-                set_circuit_breaker_info({
-                    "type": "cooldown",
-                    "message": "中转服务器触发安全拦截（Cloudflare），已暂停所有中转请求 3 分钟。",
-                    "remaining_seconds": 180,
-                })
-                return ai_error_text(
-                    "中转服务器触发安全拦截，已暂停所有中转请求 3 分钟，请稍后重试。",
-                    code="circuit_breaker",
-                    retryable=True,
-                    provider="relay",
-                    status_code=503,
-                )
 
             if r.status_code in RELAY_FATAL_CODES:
                 mark_api_fatal_error("relay", r.status_code)
@@ -432,9 +378,6 @@ def call_openrouter(
             print(f"⚠️ [Empty Response] API 返回了空列表。")
             return ai_error_text("AI 暂时陷入了沉思，请换个话题试试。", code="empty_response", retryable=True, provider="relay", status_code=502)
 
-        import json as _json
-        print("🔍 [DEBUG] API 原始完整响应:")
-        print(_json.dumps(result, indent=2, ensure_ascii=False))
 
         try:
             content = result["choices"][0]["message"]["content"]
@@ -470,9 +413,26 @@ def call_gemini(
     user_id=None,
     temperature=1,
     max_tokens=4096,
+    *,
+    service_key=False,
 ):
-    base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
-    api_key = get_effective_gemini_key(user_id=user_id)
+    # Compatibility entry points share routing for all newly configured providers.
+    from core.model_settings import load_config
+    route = load_config(user_id)['active_route']
+    if not service_key and route not in ('gemini', 'relay'):
+        from services.model_provider import call_provider
+        return call_provider(messages, char_id=char_id, model_name=model_name,
+                             user_id=user_id, max_tokens=max_tokens, temperature=temperature)
+    if LOCAL_TEST:
+        return "【本地模拟回复 MOCK】已收到消息；未调用真实模型。"
+    base_url = (os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
+                if service_key else "https://generativelanguage.googleapis.com")
+    api_key = (os.getenv("SAKI_SERVICE_GEMINI_API_KEY", "").strip()
+               if service_key else get_effective_gemini_key(user_id=user_id))
+    if service_key and not api_key:
+        return ai_error_text("公共功能尚未配置 SAKI_SERVICE_GEMINI_API_KEY，请在本项目 .env 填写服务专用 Gemini Key。", code="service_not_configured", status_code=503)
+    if not api_key or not base_url:
+        return ai_error_text("Gemini 未配置：在界面填写用户 Key，或配置 GEMINI_API_KEY；如设置 GEMINI_BASE_URL 则不能留空。", code="service_not_configured", status_code=503)
     url = f"{base_url}/v1beta/models/{model_name}:generateContent"
 
     gemini_contents = []
@@ -645,44 +605,9 @@ def call_gemini(
 
 
 def get_model_config(task_type="chat", user_id=None):
-    if user_id is None:
-        from core.context import get_current_user_id
-        user_id = get_current_user_id()
-    if user_id is None:
-        user_id = get_current_user_id()
-
-    if user_id:
-        user_cfg_dir = os.path.join(USERS_ROOT, str(user_id), "configs")
-        api_cfg_file = os.path.join(user_cfg_dir, "api_settings.json")
-    else:
-        api_cfg_file = API_CONFIG_FILE
-
-    if not os.path.exists(api_cfg_file):
-        if task_type == "call":
-            return "relay", "gemini-3.6-flash"
-        return "relay", "gpt-3.5-turbo"
-
-    try:
-        with open(api_cfg_file, "r", encoding="utf-8") as f:
-            config = json.load(f)
-
-        route = config.get("active_route", "gemini")
-        models = config.get("routes", {}).get(route, {}).get("models", {})
-        if task_type == "moments" and "moments" not in models:
-            model_name = models.get("chat", "gpt-3.5-turbo")
-        elif task_type == "call" and "call" not in models:
-            model_name = "gemini-3.6-flash"
-        elif task_type == "translation" and "translation" not in models:
-            model_name = models.get("chat", "gpt-3.5-turbo")
-        elif task_type == "summary" and "summary" not in models:
-            model_name = models.get("chat", "gpt-3.5-turbo")
-        elif task_type == "forum" and "forum" not in models:
-            model_name = models.get("chat", "gpt-3.5-turbo")
-        else:
-            model_name = models.get(task_type, "gpt-3.5-turbo")
-
-        return route, model_name
-    except:
-        if task_type == "call":
-            return "gemini", "gemini-3.6-flash"
-        return "gemini", "gemini-2.5-pro"
+    from core.model_settings import load_config, TASKS
+    if task_type not in TASKS:
+        raise ValueError("Unknown model task")
+    config = load_config(user_id)
+    route = config['active_route']
+    return route, config['routes'][route]['models'][task_type]

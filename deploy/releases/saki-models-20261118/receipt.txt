@@ -1,0 +1,16 @@
+批次：saki-models-20261118
+变更：CHG-20261118-001
+验收时间（Asia/Shanghai）：2026-11-18T15:07:15+08:00
+站点：https://hellosaki.com
+状态：已发布、已验收
+发布包 SHA-256：a805a92b83cecc2d11930c1671658c814bf469dc6e032c2f178d47c3912c36d7
+生产备份：/var/backups/sakiglobal/saki-models-20261118
+远程包：/home/ubuntu/saki-releases/saki-models-20261118
+安装单元：saki-models-release-20261118.service，Result=success，ExecMainStatus=0
+文件清单与 before/after：manifest.json，9 个文件
+发布前检查：preflight.txt，160 passed、32 subtests passed、2 项安全边界测试通过，生产基线与包哈希一致。
+线上隔离验收：默认值、模型目录、Gemini 4 分类、保留用户选择、三语指南渲染通过。使用临时合成数据，无真实模型计费调用。
+独立线上复核：verification.txt，9 个文件和备份哈希一致，公网中/英/日指南 Content-Language、新模型内容和 models 锚点通过，公网新 JS 通过，三个服务 active。
+回滚：未触发；安装器故障时恢复备份、删除新增文件并重启三个服务。
+边界：未执行真实账号模型请求或手机浏览器端到端测试，不证明供应商对每个账号的模型访问权限。
+保留线上独有翻译与无关更新日志；不修改用户配置和凭据。已保存旧模型的用户需恢复推荐值并保存。

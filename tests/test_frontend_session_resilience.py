@@ -55,5 +55,9 @@ def test_profile_validates_core_configuration_responses():
 
     assert "if (handleApiUnauthorized(resConfig)) return false;" in profile
     assert "if (handleApiUnauthorized(resUser)) return false;" in profile
-    assert "线路配置数据格式错误" in profile
+    # Model routing lives in its own settings script; the profile still checks
+    # both global-persona and account-setting HTTP failures before rendering.
+    assert "if (!resConfig.ok)" in profile
+    assert "if (!resUser.ok)" in profile
+    assert "if(!response.ok)" in _read("static/model-settings.js")
     assert "if (!Array.isArray(logs))" in profile

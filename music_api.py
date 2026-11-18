@@ -1,3 +1,4 @@
+from core.runtime import LOCAL_TEST, load_environment
 """
 网易云音乐开放平台 API 封装
 RSA-SHA256 签名认证
@@ -8,9 +9,8 @@ import json
 import os
 import time
 import requests
-from dotenv import load_dotenv
 
-load_dotenv()
+load_environment()
 
 NCM_APP_ID = os.getenv("NCM_APP_ID", "")
 NCM_PRIVATE_KEY = os.getenv("NCM_PRIVATE_KEY", "")

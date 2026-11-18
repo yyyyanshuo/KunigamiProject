@@ -15,6 +15,8 @@ def test_current_state_lists_agent_mutable_values(tmp_path, monkeypatch):
     prompts_dir = users_root / "12" / "characters" / "hero" / "prompts"
     monkeypatch.setattr(core_utils, "USERS_ROOT", str(users_root))
     monkeypatch.setattr(prompt_builder, "USERS_ROOT", str(users_root))
+    # This test verifies state fields; language resolution has its own fixtures.
+    monkeypatch.setattr(prompt_builder, "get_ai_language", lambda *args, **kwargs: "zh")
 
     _write(config_dir / "characters.json", {
         "hero": {

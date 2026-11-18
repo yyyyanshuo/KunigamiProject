@@ -1,0 +1,1 @@
+PASS: transfer send/cancel/failure/translation and accept/return captions; saved prompts reuse/delete; Moments shared prompt/failure retry; narrow/landscape/keyboard-height/desktop layout and bottom-nav stacking

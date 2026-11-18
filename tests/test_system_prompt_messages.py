@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 import pytest
 
@@ -48,11 +49,79 @@ def test_both_chat_routes_use_the_shared_deep_sleep_gate():
     assert source.count("should_suppress_reply_for_deep_sleep(is_deep_sleep, user_msg_raw)") == 2
 
 
-def test_private_and_group_short_memory_filter_system_prompts():
-    private_source = (ROOT / "services/memory.py").read_text(encoding="utf-8")
-    group_source = (ROOT / "blueprints/group.py").read_text(encoding="utf-8")
-    assert "and not is_system_prompt_message(row[3])" in private_source
-    assert "rows if not is_system_prompt_message(row[3])" in group_source
+@pytest.mark.parametrize("scope", ["private", "group"])
+@pytest.mark.parametrize("force_reset", [False, True])
+@pytest.mark.parametrize(
+    "role, message, speaker",
+    [
+        ("user", "（系统提示：约定地点改为图书馆。）", "System"),
+        ("user", "(System notice: Meet at the library instead.)", "System"),
+        ("user", "（システム通知：待ち合わせ場所は図書館に変更。）", "System"),
+        ("system", "约定地点改为图书馆。", "System"),
+        ("assistant", "[THOUGHTS]我决定下次主动道歉。[/THOUGHTS]", "凛"),
+        ("assistant", "明天见。[THOUGHTS]我期待明天见面。[/THOUGHTS]", "凛"),
+    ],
+)
+def test_short_memory_remembers_system_notices_and_thoughts(
+    tmp_path, monkeypatch, scope, force_reset, role, message, speaker
+):
+    from blueprints import group as group_blueprint
+    from services import memory
+    from tests.test_memory_integrity import _make_chat_db, _patch_character, _write_json
+
+    db_path = tmp_path / "chat.db"
+    prompts_dir = tmp_path / "prompts"
+    stored_role = "rin" if scope == "group" and role == "assistant" else role
+    _make_chat_db(db_path, [(1, stored_role, message, "2026-08-07 09:00:00")])
+    _patch_character(monkeypatch, db_path, prompts_dir)
+    monkeypatch.setattr(memory, "memory_timezone", lambda *_args: "Asia/Shanghai")
+    monkeypatch.setattr(memory, "list_memory_turns", lambda *_args, **_kwargs: [])
+
+    if scope == "private":
+        short_file = prompts_dir / "6_memory_short.json"
+        summarize = lambda: memory.update_short_memory_for_date(
+            "rin", "2026-08-07", force_reset=force_reset
+        )
+    else:
+        short_file = tmp_path / "memory_short.json"
+        groups_file, chars_file = tmp_path / "groups.json", tmp_path / "characters.json"
+        _write_json(groups_file, {"g1": {"name": "测试群", "members": ["rin"]}})
+        _write_json(chars_file, {"rin": {"name": "凛"}})
+        monkeypatch.setattr(group_blueprint, "get_group_dir", lambda _group_id: str(tmp_path))
+        monkeypatch.setattr(group_blueprint, "_get_groups_config_file", lambda: str(groups_file))
+        monkeypatch.setattr(group_blueprint, "_get_characters_config_file", lambda: str(chars_file))
+        monkeypatch.setattr(group_blueprint, "memory_timezone", lambda: "Asia/Shanghai")
+        monkeypatch.setattr(group_blueprint, "group_language", lambda _group_id: "zh")
+        monkeypatch.setattr(group_blueprint, "distribute_group_memory", lambda *_args, **_kwargs: None)
+        summarize = lambda: group_blueprint.update_group_short_memory(
+            "g1", "2026-08-07", force_reset=force_reset
+        )
+
+    # A rebuild must also revisit rows that the previous policy already skipped.
+    _write_json(short_file, {"2026-08-07": {
+        "events": [], "last_id": 1 if force_reset else 0, "timezone": "Asia/Shanghai",
+    }})
+    sources = []
+    event = {"time": "09:00", "event": "保留系统背景或角色明确的内心决定。"}
+
+    def fake_summary(source, *_args, **_kwargs):
+        sources.append(source)
+        assert f"[09:00] {speaker}: {message}" in source
+        return json.dumps({"events": [event]}, ensure_ascii=False)
+
+    monkeypatch.setattr(memory, "call_ai_to_summarize", fake_summary)
+    count, events = summarize()
+
+    assert count == 1
+    assert events[0]["event"] == event["event"]
+    assert len(sources) == 1
+    saved = json.loads(short_file.read_text(encoding="utf-8"))["2026-08-07"]
+    assert saved["last_id"] == 1
+    assert saved["events"][0]["event"] == event["event"]
+    if not force_reset:
+        count, _events = summarize()
+        assert count == 0
+        assert len(sources) == 1
 
 
 def test_chat_template_marks_and_styles_system_prompt_messages():

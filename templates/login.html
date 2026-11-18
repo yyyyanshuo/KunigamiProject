@@ -1,9 +1,10 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="{{ ui_language }}" data-ai-brand-line="{{ ui_t('ai_brand_line', brand=saki_brand) }}">
 <head>
+  {% include "ui_language_head.html" %}
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>登录 | Kunigami</title>
+  <title>登录 | {{ saki_brand }}</title>
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#fff3f8">
   <style>
@@ -12,7 +13,7 @@
       background: linear-gradient(135deg, #fff3f8 0%, #ffe9e1 100%);
       margin: 0; padding: 0;
       display: flex; justify-content: center; align-items: center;
-      height: 100vh; color: #444;
+      min-height: 100vh; padding: 72px 0 24px; box-sizing: border-box; color: #444;
     }
     .login-card {
       background: rgba(255, 255, 255, 0.9);
@@ -46,23 +47,27 @@
 
     .error-msg { color: red; font-size: 12px; margin-bottom: 10px; display: none; }
   </style>
+  <link rel="stylesheet" href="/static/auth-layout.css">
 </head>
-<body>
+<body class="auth-page">
+{% include "ui_language_select.html" %}
+{% include "auth_guide_link.html" %}
 
 <div class="login-card">
+
   <img src="/static/logo.png" class="logo" onerror="this.src='/static/default_avatar.png'">
   <h2>欢迎回来</h2>
 
   <div id="error-msg" class="error-msg"></div>
 
-  <!-- 现在统一使用邮箱登录，请填写注册时的邮箱地址 -->
+  <!-- 现在统一使用邮箱登录，请填写管理员开通账号时使用的邮箱地址 -->
   <input type="text" id="username" name="username" placeholder="邮箱 (Email)">
   <input type="password" id="password" name="password" placeholder="密码 (Password)">
 
   <button onclick="doLogin()">登 录</button>
 
-  <div style="margin-top: 8px; font-size: 12px; color: #888;">
-    还没有账号？<a href="/register" style="color:#d81b60; text-decoration:none;">去注册</a>
+  <div class="auth-account-links">
+    <a href="/forgot_password">{{ ui_t('忘记密码') }}</a>
   </div>
 </div>
 
@@ -73,7 +78,7 @@
     const errorEl = document.getElementById('error-msg');
 
     if(!username || !password) {
-      errorEl.textContent = "请输入邮箱和密码";
+      errorEl.textContent = SakiI18n.t("请输入邮箱和密码");
       errorEl.style.display = 'block';
       return;
     }
@@ -99,14 +104,17 @@
         errorEl.style.display = 'block';
       }
     } catch(e) {
-      errorEl.textContent = "网络错误";
+      errorEl.textContent = SakiI18n.t("网络错误");
       errorEl.style.display = 'block';
     }
   }
 
   // 回车提交
   document.addEventListener('keydown', (e) => {
-    if(e.key === 'Enter') doLogin();
+    if (e.key === 'Enter' && e.target.matches('input')) {
+      e.preventDefault();
+      doLogin();
+    }
   });
 </script>
 

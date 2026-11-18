@@ -1,6 +1,7 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="{{ ui_language }}" data-ai-brand-line="{{ ui_t('ai_brand_line', brand=saki_brand) }}">
 <head>
+  {% include "ui_language_head.html" %}
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>管理员数据看板</title>
@@ -46,6 +47,13 @@
         .support-input { width: 180px; padding: 9px 12px; border: 1px solid #ddd; border-radius: 7px; font-size: 14px; }
         .support-btn { padding: 9px 16px; border: 0; border-radius: 7px; background: #d9534f; color: #fff; cursor: pointer; font-size: 14px; }
         .support-hint { margin-top: 10px; color: #856404; font-size: 13px; line-height: 1.6; }
+        .account-form { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
+        .account-field { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: #555; max-width: 100%; }
+        .account-field input { width: 260px; max-width: 100%; box-sizing: border-box; }
+        .account-btn { background: #4779a8; }
+        .support-btn:disabled { opacity: .6; cursor: wait; }
+        .account-status { margin-top: 12px; font-size: 14px; color: #a83232; }
+        .account-credentials { margin: 16px 0 10px; width: 100%; box-sizing: border-box; resize: vertical; padding: 12px; border: 1px solid #ddd; border-radius: 7px; font: 14px/1.8 monospace; }
 
         @media (max-width: 768px) {
             .kpi-card { min-width: 40%; }
@@ -60,13 +68,36 @@
         <a href="/" class="back-btn">返回首页</a>
     </div>
 
+    <section class="table-card" aria-labelledby="create-account-title">
+        <h2 id="create-account-title" class="chart-title">新建账号</h2>
+        <form id="create-account-form" class="account-form">
+            <label class="account-field" for="create-account-email">账号邮箱
+                <input id="create-account-email" class="support-input" type="email" required maxlength="254" autocomplete="off">
+            </label>
+            <label class="account-field" for="create-account-name">昵称（可选）
+                <input id="create-account-name" class="support-input" type="text" maxlength="100" autocomplete="off">
+            </label>
+            <button id="create-account-btn" class="support-btn account-btn" type="submit">创建账号</button>
+        </form>
+        <p class="support-hint">账号由管理员开通。系统自动生成 24 位随机强密码，请通过私密渠道交给用户，并提醒用户登录后修改密码。</p>
+        <div id="create-account-status" class="account-status" role="status" aria-live="polite"></div>
+        <div id="create-account-result" hidden>
+            <p class="support-hint">账号已创建。初始密码仅在本次创建后显示，离开页面后无法再次查看；遗失时可通过忘记密码重置。</p>
+            <textarea id="create-account-credentials" class="account-credentials" rows="4" readonly autocomplete="off" spellcheck="false" aria-label="新账号登录信息"></textarea>
+            <div class="support-row">
+                <button id="copy-account-btn" class="support-btn account-btn" type="button">复制登录信息</button>
+                <button id="next-account-btn" class="back-btn" type="button">清除并新建下一个</button>
+            </div>
+        </div>
+    </section>
+
     <div id="loading" class="loading">正在努力统计数据中，请稍候...</div>
 
     <div id="dashboard-content" style="display: none;">
         <div class="table-card">
             <div class="chart-title">🛠️ 模拟用户排查</div>
             <div class="support-row">
-                <input id="impersonate-user-id" class="support-input" type="number" min="2" placeholder="输入用户 ID">
+                <input id="impersonate-user-id" class="support-input" type="number" min="1" placeholder="输入用户 ID">
                 <button id="impersonate-btn" class="support-btn" type="button" onclick="impersonateUser()">进入用户账号</button>
             </div>
             <div class="support-hint">仅用于问题排查，有效期 15 分钟。不会修改用户密码；进入后页面顶部会持续显示模拟状态，可随时退出。</div>
@@ -180,12 +211,13 @@
     </div>
 </div>
 
+<script src="/static/admin-accounts.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     fetch('/api/admin/stats')
         .then(res => {
             if(res.status === 403) {
-                alert("无权限访问！");
+                alert(SakiI18n.t("无权限访问！"));
                 window.location.href = "/";
                 return;
             }
@@ -198,19 +230,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // 填充 KPI
             document.getElementById('kpi-total-users').innerText = data.users.total;
-            document.getElementById('kpi-new-users').innerText = '今日新增: ' + data.users.new_today;
+            document.getElementById('kpi-new-users').innerText = SakiI18n.t('今日新增：{count}', {count:data.users.new_today});
             document.getElementById('kpi-dau').innerText = data.users.dau;
-            document.getElementById('kpi-wau').innerText = '周活 (WAU): ' + data.users.wau;
+            document.getElementById('kpi-wau').innerText = SakiI18n.t('周活：{count}', {count:data.users.wau});
             document.getElementById('kpi-retention-1d').innerText = data.users.retention_1d + '%';
-            document.getElementById('kpi-retention-7d').innerText = '7日留存: ' + data.users.retention_7d + '%';
+            document.getElementById('kpi-retention-7d').innerText = SakiI18n.t('7日留存：{percent}%', {percent:data.users.retention_7d});
 
             document.getElementById('kpi-total-msgs').innerText = data.messages.total;
-            document.getElementById('kpi-avg-msgs').innerText = '人均: ' + data.messages.avg_per_user + ' 条';
+            document.getElementById('kpi-avg-msgs').innerText = SakiI18n.t('人均：{count} 条', {count:data.messages.avg_per_user});
             document.getElementById('kpi-user-msgs').innerText = data.messages.user_sent;
             document.getElementById('kpi-ai-msgs').innerText = data.messages.ai_sent;
 
             let proactiveRatio = data.messages.ai_sent > 0 ? ((data.messages.ai_proactive / data.messages.ai_sent) * 100).toFixed(1) : 0;
-            document.getElementById('kpi-ai-proactive').innerText = `其中主动回复: ${data.messages.ai_proactive} (${proactiveRatio}%)`;
+            document.getElementById('kpi-ai-proactive').innerText = SakiI18n.ui`其中主动回复: ${data.messages.ai_proactive} (${proactiveRatio}%)`;
 
             document.getElementById('kpi-daily-sessions').innerText = data.messages.daily_sessions;
             document.getElementById('kpi-avg-streak').innerText = data.users.avg_streak;
@@ -229,13 +261,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 legend: { top: '5%', left: 'center' },
                 series: [
                     {
-                        name: '消息类型',
+                        name: SakiI18n.t('消息类型'),
                         type: 'pie',
                         radius: ['40%', '70%'],
                         itemStyle: { borderRadius: 10, borderColor: '#fff', borderWidth: 2 },
                         data: [
-                            { value: data.messages.single_chat, name: '单聊消息', itemStyle: {color: '#84b6eb'} },
-                            { value: data.messages.group_chat, name: '群聊消息', itemStyle: {color: '#ffb6b9'} }
+                            { value: data.messages.single_chat, name: SakiI18n.t('单聊消息'), itemStyle: {color: '#84b6eb'} },
+                            { value: data.messages.group_chat, name: SakiI18n.t('群聊消息'), itemStyle: {color: '#ffb6b9'} }
                         ]
                     }
                 ]
@@ -249,12 +281,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 color: ['#ffd3b6', '#a8e6cf'],
                 series: [
                     {
-                        name: '发布者',
+                        name: SakiI18n.t('发布者'),
                         type: 'pie',
                         radius: '70%',
                         data: [
-                            { value: data.moments.user_posts, name: '用户发布' },
-                            { value: data.moments.ai_posts, name: '角色发布' }
+                            { value: data.moments.user_posts, name: SakiI18n.t('用户发布') },
+                            { value: data.moments.ai_posts, name: SakiI18n.t('角色发布') }
                         ],
                         emphasis: {
                             itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' }
@@ -282,7 +314,7 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .catch(err => {
             console.error("Fetch error:", err);
-            document.getElementById('loading').innerText = "加载失败，请检查网络或控制台。";
+            document.getElementById('loading').innerText = SakiI18n.t("加载失败，请检查网络或控制台。");
         });
 
     // 加载熔断状态
@@ -295,35 +327,35 @@ document.addEventListener('DOMContentLoaded', function() {
             const filtered = (data.users || []).filter(u => u.is_frozen || u.has_disabled_route || u.breakers.length > 0);
 
             if (filtered.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999;">当前无异常用户 🎉</td></tr>';
+                tbody.innerHTML = SakiI18n.fragment('<tr><td colspan="5" style="text-align:center;color:#999;">当前无异常用户 🎉</td></tr>');
                 return;
             }
 
             filtered.forEach(user => {
                 let statusHtml = '';
                 if (user.has_disabled_route) {
-                    statusHtml = '<span class="status-badge status-frozen">路由禁用</span>';
+                    statusHtml = SakiI18n.fragment('<span class="status-badge status-frozen">路由禁用</span>');
                 } else if (user.is_frozen) {
-                    statusHtml = '<span class="status-badge status-frozen">旧冻结</span>';
+                    statusHtml = SakiI18n.fragment('<span class="status-badge status-frozen">旧冻结</span>');
                 } else {
                     const hasCooldown = user.breakers.some(b => b.cooldown_until);
                     if (hasCooldown) {
-                        statusHtml = '<span class="status-badge status-cooldown">冷却中</span>';
+                        statusHtml = SakiI18n.fragment('<span class="status-badge status-cooldown">冷却中</span>');
                     } else {
-                        statusHtml = '<span class="status-badge status-normal">警告</span>';
+                        statusHtml = SakiI18n.fragment('<span class="status-badge status-normal">警告</span>');
                     }
                 }
 
                 let detailHtml = user.breakers.map(b => {
                     let cdStr = '';
                     if (b.route_disabled) {
-                        cdStr = ' | 已禁用';
+                        cdStr = ' | ' + SakiI18n.t('已禁用');
                     } else if (b.cooldown_until) {
                         const cdTime = new Date(b.cooldown_until);
                         const now = new Date();
                         if (cdTime > now) {
                             const mins = Math.ceil((cdTime - now) / 60000);
-                            cdStr = ` | 冷却: ${mins}分钟后`;
+                            cdStr = ' | ' + SakiI18n.t('冷却：{minutes}分钟后', {minutes:mins});
                         }
                     }
                     return `${b.route}:${b.status_code} (×${b.count})${cdStr}`;
@@ -331,7 +363,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 let actionHtml = '';
                 if (user.is_frozen || user.has_disabled_route || user.breakers.length > 0) {
-                    actionHtml = `<button class="unfreeze-btn" onclick="unfreezeUser(${user.user_id})">清除限制</button>`;
+                    actionHtml = SakiI18n.ui`<button class="unfreeze-btn" onclick="unfreezeUser(${user.user_id})">清除限制</button>`;
                 }
 
                 const tr = document.createElement('tr');
@@ -347,12 +379,12 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .catch(err => {
             console.error("Circuit status fetch error:", err);
-            document.getElementById('table-circuit-users').innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999;">加载失败</td></tr>';
+            document.getElementById('table-circuit-users').innerHTML = SakiI18n.fragment('<tr><td colspan="5" style="text-align:center;color:#999;">加载失败</td></tr>');
         });
 });
 
 function unfreezeUser(userId) {
-    if (!confirm(`确定要解除用户 ${userId} 的冻结状态？`)) return;
+    if (!confirm(SakiI18n.ui`确定要解除用户 ${userId} 的冻结状态？`)) return;
     fetch(`/api/admin/user/${userId}/unfreeze`, { method: 'POST' })
         .then(res => res.json())
         .then(data => {
@@ -360,22 +392,22 @@ function unfreezeUser(userId) {
                 alert(data.message);
                 location.reload();
             } else {
-                alert('操作失败: ' + (data.error || 'Unknown'));
+                alert(SakiI18n.t('操作失败：{error}', {error:data.error || SakiI18n.t('未知错误')}));
             }
         })
-        .catch(err => alert('请求失败: ' + err));
+        .catch(err => alert(SakiI18n.t('请求失败：{error}', {error:String(err)})));
 }
 async function impersonateUser() {
     const input = document.getElementById('impersonate-user-id');
     const button = document.getElementById('impersonate-btn');
     const userId = Number(input.value);
-    if (!Number.isInteger(userId) || userId <= 1) {
-        alert('请输入有效的用户 ID');
+    if (!Number.isInteger(userId) || userId <= 0) {
+        alert(SakiI18n.t('请输入有效的用户 ID'));
         return;
     }
-    if (!confirm('将临时进入用户 ' + userId + ' 的账号排查问题，是否继续？')) return;
+    if (!confirm(SakiI18n.t('将临时进入用户 {user_id} 的账号排查问题，是否继续？', {user_id:userId}))) return;
     button.disabled = true;
-    button.textContent = '正在进入...';
+    button.textContent = SakiI18n.t('正在进入...');
     try {
         const res = await fetch('/api/admin/impersonate', {
             method: 'POST',
@@ -383,16 +415,16 @@ async function impersonateUser() {
             body: JSON.stringify({ user_id: userId })
         });
         const data = await res.json();
-        if (!res.ok || data.status !== 'success') throw new Error(data.message || '进入失败');
+        if (!res.ok || data.status !== 'success') throw new Error(data.message || SakiI18n.t('进入失败'));
         window.location.href = '/';
     } catch (err) {
-        alert(err.message || '请求失败');
+        alert(err.message || SakiI18n.t('请求失败'));
         button.disabled = false;
-        button.textContent = '进入用户账号';
+        button.textContent = SakiI18n.t('进入用户账号');
     }
 }
 </script>
-  <!-- AI巡航悬浮球 -->
+  <!-- 管理员模拟登录状态 -->
   <script src="/static/ai-cruise.js"></script>
 </body>
 </html>

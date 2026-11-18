@@ -6,6 +6,19 @@
 版本遵循[语义化版本](https://semver.org/spec/v2.0.0.html)。
 
 ## [Unreleased] - 未发布
+
+- 新增统一发布前检查，校验离线回归、发布包及生产基线。[A12 变更记录](docs/changes/CHG-20261115-003-release-preflight.md)
+
+- 降低单聊和群聊历史接口的消息总数及边界统计成本。[A14 性能测量](docs/changes/CHG-20261115-002-chat-history-cost.md)
+
+- 修复账号设置和朋友圈并发保存可能覆盖独立修改的问题。[A06 变更记录](docs/changes/CHG-20261115-001-shared-saves.md)
+- **项目协作规范**：统一变更理由与决策记录、三语指南维护、同批发布和验收要求，提供记录模板，便于追溯功能意图与实际交付状态。[变更记录](docs/changes/CHG-20261110-001-collaboration-rules.md)
+- **联系人搜索**支持用分号输入多个角色关键词，查找同时匹配这些关键词的群聊。[变更说明](docs/contact-search-multiple-members.md)
+- **聊天页未读圆标**在暂时取不到统计时隐藏，避免显示上次的数字。[变更说明](docs/chat-unread-refresh-20261108.md)
+
+### Fixed (修复)
+- 单聊近期有消息或角色正在回复时跳过主动消息，丢弃生成期间已过时的主动回复。见[故障与修复记录](docs/architecture-audit/26-proactive-chat-race.md)。
+
 ### Added (新增)
 - **角色资料自主维护协议**:
   - 新增人设、关系、计划各自独立的 `ADD / DELETE / EDIT / REWRITE` Action Tags，并使用支持嵌套 JSON 的统一解析器。
@@ -79,6 +92,26 @@
   - **长期记忆时间算法修正**: 重构 `parse_week_key_to_dates`，将 `WeekN` 的排序基准点修正为该周真实的**周日 23:59**（或月底），显著提升了时间线的逻辑严密性。
 - **群聊系统增强**:
   - 修复了群聊接口 `group_chat` 未能正确包含全局格式规范（Global Format）的问题。
+
+## 2026-11-18 · 转账与识图提示词（已上线并验收）
+
+- 聊天扩展面板新增转账，领取/退回可附言；识图提示词支持保存复用，朋友圈支持共用提示词并修复弹窗遮挡。[变更记录](docs/changes/CHG-20261118-002-attachment-composers.md)
+- 保留转账原有黄色及白色弹窗，仅细化粉色焦点边框和提示词下拉框圆角。[变更记录](docs/changes/CHG-20261118-003-composer-styling.md)
+- 聊天和朋友圈的识图提示词输入字号统一为朋友圈正文的15px。[变更记录](docs/changes/CHG-20261118-013-vision-prompt-font.md)
+
+## 2026-11-18 · Gemini 模型配置（已上线并验收）
+
+- 更新 Gemini 默认模型与生图默认值，新增 Gemini 4 并按 Flash / Pro 分组；保留已保存的用户选择。[变更记录](docs/changes/CHG-20261118-001-gemini-model-refresh.md)
+
+## 2026-11-17 · 聊天页顶栏按压样式
+- **聊天页顶栏按钮**使用同色、等高的按压背景，返回键用胶囊，其余按钮用圆形。[变更记录](docs/changes/CHG-20261117-001-chat-back-press.md)
+
+## 2026-11-06 · 聊天页更新
+- **聊天页未读与搜索**：返回和右侧按钮组的边距对齐，未读圆标显隐时搜索位置固定，圆标只合计其他会话。[变更说明](deploy/releases/saki-chat-unread-scope-20261106/CHANGES.md)
+- **角色生图提示词**：角色按生图模型完全不认识自己来写英文描述，明确自拍的手机视角、景别和构图，并把出众外貌、身材与情绪写成可见细节。[变更说明](deploy/releases/saki-chat-title-20261106/CHANGES.md#角色生图提示词)
+- **聊天页标题与未读圆标**：聊天名与状态在原工具栏居中，长名字可延伸到按钮下方。新取的角色名和备注限 10 个全角字符，群聊名限 15 个。角色新建群时若与同账号的群重名，会自动加数字编号。返回和搜索靠近左边缘并排显示，返回箭头旁的未读总数采用浅灰半透明圆形底色和较深的细边框。[变更原因与范围](deploy/releases/saki-chat-title-20261106/CHANGES.md)
+- **聊天页在线状态与未读总数**（2026-11-06）：角色状态和全账号未读数随新消息轮询刷新，查看历史时也能看到更新。[变更原因与范围](deploy/releases/saki-chat-header-20261106/CHANGES.md)
+- **角色生图提示词**：按角色原设指定画风，用独立的英文描述交代出镜人物和画面细节。[变更原因与范围](deploy/releases/saki-image-prompt-20261106/CHANGES.md)
 
 ## [2.6.0] - 2026-03-16
 ### Added (新增)

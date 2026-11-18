@@ -1,0 +1,20 @@
+批次：saki-attachments-20261118
+变更：CHG-20261118-002-attachment-composers、CHG-20261118-003-composer-styling、CHG-20261118-013-vision-prompt-font
+状态：已发布、已验收
+验收时间（Asia/Shanghai）：2026-11-18T19:47:46+08:00
+站点：https://hellosaki.com
+发布包 SHA-256：3eaad9430f88b2b2734fe26b06e0f453f1907d88e252f7d09718df1d148a1405
+生产备份：/var/backups/sakiglobal/saki-attachments-20261118
+远程包：/home/ubuntu/saki-releases/saki-attachments-20261118
+安装单元：saki-attachments-release-20261118.service，Result=success，ExecMainStatus=0
+文件与哈希：manifest.json，共18个生产文件；未修改依赖哈希见dependency-baseline.json
+预检：preflight.txt，160 passed、32 subtests passed、2项安全边界测试通过，包与生产before哈希一致。
+针对实际生产组装的包：payload-tests.txt，82 passed、1 deselected。保留线上图片预设接口、正常化函数、语音匹配代码、原翻译和无关更新日志。
+浏览器：browser-tests.txt，转账创建/取消/失败保留/翻译/领取退回附言、提示词保存/复用/删除、朋友圈共用提示词及失败重试，以及窄屏/横屏/短视口/桌面与底部导航遮挡检查通过。
+服务器安装隔离探针：install-result.txt，单聊/群聊转账附言、来源/重复操作校验，提示词持久化及账号隔离，AI/手动混合图片共用指令、三语指南通过。
+独立公网验收：verification.txt，18个安装文件和备份哈希一致；依赖未变；三语指南语言、锚点和内容通过；5个公网JS/CSS哈希一致；未登录提示词接口401；三个服务active。
+实际页面验收：runtime-pages-result.txt，使用临时库与合成账号登录，已安装的聊天/朋友圈模板实际渲染200，新增入口与提示词控件存在，保存和读取提示词成功，旧预设接口仍为200。最初探针尝试引用未部署的开发启动器，随后改用临时库直接创建合成账号并通过，未修改生产用户或程序。
+最终视觉：转账保持原黄色、弹窗保持原白底；仅粉色焦点/选中边框与圆角下拉框；聊天和朋友圈识图提示词15px，与朋友圈正文一致。
+回滚：未触发。安装器会恢复备份、删除本批新增文件并重启三个服务；已核实备份before哈希。
+限制：无真实模型计费调用，无真实支付；手机键盘使用缩短视口模拟，未做实机验收。
+包内变更记录保留发布前状态快照；本回执记录实际最终状态。

@@ -214,13 +214,9 @@ def test_memory_template_has_copyable_ai_prompt_with_schema_and_current_json():
     assert "复制 AI Prompt" in source
     assert "function buildRelationshipPrompt" in source
     assert "function copyRelationshipPrompt" in source
-    assert "role、score、description 三个字段" in source
-    assert "顶层键必须使用下方允许列表中的角色 ID" in source
-    assert "可生成关系的其他角色" in source
-    assert "顶层键必须使用下方可生成角色列表中的“原名”" in source
-    assert "只允许新增下方列表中的角色，不要虚构其他角色" in source
-    assert "原名：${name}；ID：${contact.id}" in source
-    assert "请在以下当前完整 JSON 基础上修改" in source
+    assert "/relationship_prompt" in source
+    assert "current_graph:relationshipGraphForPrompt(perspective, contacts)" in source
+    assert "await buildRelationshipPrompt(perspective, contacts)" in source
     assert "function relationshipGraphForPrompt" in source
     assert "relationshipGraphForPrompt(perspective, contacts)" in source
     assert "（备注：${contact.remark}）" not in source
@@ -230,3 +226,32 @@ def test_memory_template_has_copyable_ai_prompt_with_schema_and_current_json():
     assert "function showToast(message)" in source
     assert "let copied = false" in source
     assert "if (copied)" in source
+
+
+def test_copy_relationship_prompt_preserves_draft_and_uses_owner_languages(tmp_path, monkeypatch):
+    import core.languages as languages
+    import core.localization as localization
+
+    _, *paths = _prepare_relationship_files(tmp_path, monkeypatch)
+    originals = {path: path.read_text(encoding="utf-8") for path in paths}
+    monkeypatch.setattr(localization, "user_language", lambda *_: "en")
+    monkeypatch.setattr(languages, "character_language", lambda cid, *_: {
+        "hero": "Español", "isagi": "ja", "bachira": "Français"
+    }[cid])
+    draft = {"isagi": {"role": "Unsaved", "score": 4, "description": "Original {target}"}}
+    app = Flask(__name__)
+    for perspective in ("normal", "reverse"):
+        with app.test_request_context(json={"perspective": perspective, "current_graph": draft}):
+            result = chat.copy_relationship_prompt("hero").get_json()
+        assert result["status"] == "success"
+        prompt = result["prompt"]
+        assert prompt.startswith("Using the character settings" if perspective == "normal" else "Generate or revise how each other character")
+        assert json.loads(prompt.rsplit("\n\n", 1)[1]) == draft
+        assert all(field in prompt for field in ("role", "score", "description"))
+        if perspective == "normal":
+            assert "Español" in prompt
+        else:
+            assert '"output_language": "ja"' in prompt
+            assert '"output_language": "Français"' in prompt
+    for path, original in originals.items():
+        assert path.read_text(encoding="utf-8") == original

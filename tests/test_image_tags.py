@@ -58,9 +58,9 @@ def test_description_normalization_preserves_pairs_only():
     assert normalize_image_description("多余)以及(") == "多余）以及（"
     with pytest.raises(ValueError, match="不能为空"):
         normalize_image_description("  ")
-    with pytest.raises(ValueError, match="不得超过500字"):
-        normalize_image_description("字" * 501)
-    assert build_image_tag("a/b.jpg", "说明(保留)但这里(") == "[图片](a/b.jpg)(说明(保留)但这里（)"
+    with pytest.raises(ValueError, match="不得超过4000字"):
+        normalize_image_description("字" * 4001)
+    assert build_image_tag("a/b.jpg", "说明(保留)但这里(") == "[IMAGE](a/b.jpg)(说明(保留)但这里（)"
 
 
 def test_browser_parser_matches_python_parser(project_root):
@@ -97,7 +97,9 @@ def test_upload_interfaces_offer_ai_and_manual_description(project_root):
     chat_html = open(project_root + "/templates/chat.html", encoding="utf-8").read()
     moments_html = open(project_root + "/templates/moments.html", encoding="utf-8").read()
 
-    assert "description_mode" in chat_html
+    composer_js = open(project_root + "/static/image-composer.js", encoding="utf-8").read()
+    assert "description_mode" in composer_js
+    assert "image-composer.js" in chat_html
     assert "手动描述" in chat_html
     assert "image_metadata" in moments_html
     assert "preview-description" in moments_html
@@ -197,4 +199,4 @@ def test_moments_rejects_invalid_image_metadata_before_publish(app_client, monke
     )
 
     assert response.status_code == 400
-    assert "图片描述信息" in response.get_json()["error"]
+    assert isinstance(response.get_json()["error"], str) and response.get_json()["error"]

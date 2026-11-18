@@ -1,0 +1,8 @@
+active
+active
+active
+PUBLIC_GUIDE_OK zh-CN
+PUBLIC_GUIDE_OK en
+PUBLIC_GUIDE_OK ja
+PUBLIC_ASSETS_OK white/yellow original surfaces, pink focus, rounded dropdown and 15px CSS; scripts match
+HASHES_OK 18 BACKUP_OK DEPENDENCIES_PRESERVED AUTH_OK

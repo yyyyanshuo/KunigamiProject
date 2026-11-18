@@ -23,7 +23,7 @@ from core.utils import (
     get_location_by_id,
     get_location_at_exact_coord,
     auto_toggle_chat_mode_on_move,
-    normalize_map_state,
+    normalize_map_state, map_state_transaction,
     normalize_real_world_timezone,
     sync_character_timezone_to_location,
     move_character_position,
@@ -55,6 +55,7 @@ def api_get_locations():
     return jsonify(load_locations())
 
 @map_bp.route("/api/map/locations", methods=["POST"])
+@map_state_transaction
 def api_add_location():
     init_map_data()
     data = request.json or {}
@@ -108,6 +109,7 @@ def api_add_location():
     return jsonify(new_loc), 201
 
 @map_bp.route("/api/map/locations/<loc_id>", methods=["PUT"])
+@map_state_transaction
 def api_update_location(loc_id):
     data = request.json or {}
     locs = load_locations()
@@ -181,6 +183,7 @@ def api_update_location(loc_id):
     return jsonify(loc)
 
 @map_bp.route("/api/map/locations/<loc_id>", methods=["DELETE"])
+@map_state_transaction
 def api_delete_location(loc_id):
     locs = load_locations()
     for i, loc in enumerate(locs.get("locations", [])):
@@ -198,6 +201,7 @@ def api_delete_location(loc_id):
                 if positions[cid].get("location_id") == loc_id:
                     positions[cid]["location_id"] = None
             save_character_positions(positions)
+            normalize_map_state()
             return jsonify({"ok": True})
     return jsonify({"error": "location not found"}), 404
 
@@ -296,6 +300,7 @@ def api_move_user():
     return jsonify(user_pos)
 
 @map_bp.route("/api/map/character/<char_id>/locations", methods=["GET"])
+@map_state_transaction
 def api_get_character_known_locations(char_id):
     cfg_file = _get_characters_config_file()
     try:
@@ -318,6 +323,7 @@ def api_get_character_known_locations(char_id):
     return jsonify({"locations": known_locs, "position": positions[char_id]})
 
 @map_bp.route("/api/map/character/<char_id>/known_locations", methods=["PUT"])
+@map_state_transaction
 def api_update_character_known_locations(char_id):
     data = request.json or {}
     cfg_file = _get_characters_config_file()
@@ -408,6 +414,7 @@ def api_timezones():
         })
     return jsonify({"timezones": result})
 
+@map_state_transaction
 def sync_known_locations(char_id):
     positions = load_character_positions()
     if char_id not in positions:

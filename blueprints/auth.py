@@ -1,9 +1,13 @@
+from core.localization import user_language
+from core.runtime import DATA_ROOT, LOCAL_TEST
 import os
 import json
-import time
+from contextlib import closing
 import sqlite3
 import uuid
-import random
+import re
+import secrets
+import ssl
 import threading
 import shutil
 import smtplib
@@ -17,12 +21,12 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from pywebpush import webpush, WebPushException
 
 from core.config import BASE_DIR, USERS_DB, USERS_ROOT, DEVICE_ACCOUNTS_FILE, USER_SETTINGS_FILE
+from core.json_storage import update_user_settings
 from core.utils import safe_save_json
 from core.context import get_current_user_id
-from core.session_security import establish_authenticated_session
+from core.session_security import establish_authenticated_session, get_auth_version
+from core.password_recovery import COOLDOWN, Limited, RecoveryStore, Unavailable, source_address
 from core.legal import (
-    get_current_legal_versions,
-    get_legal_documents,
     get_user_legal_status,
     init_legal_consents_table,
     record_current_legal_consents,
@@ -30,9 +34,9 @@ from core.legal import (
 )
 
 
-SUBSCRIPTIONS_FILE = os.path.join(BASE_DIR, "configs", "subscriptions.json")
-SQUARE_DB = os.path.join(BASE_DIR, "configs", "square.db")
-FORUMS_DB = os.path.join(BASE_DIR, "configs", "forums.db")
+SUBSCRIPTIONS_FILE = os.path.join(DATA_ROOT, "configs", "subscriptions.json")
+SQUARE_DB = os.path.join(DATA_ROOT, "configs", "square.db")
+FORUMS_DB = os.path.join(DATA_ROOT, "configs", "forums.db")
 VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY")
 VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY")
 VAPID_CLAIMS = {"sub": "mailto:yyyyanshuo@foxmail.com"}
@@ -43,6 +47,18 @@ auth_bp = Blueprint("auth", __name__)
 # ---------------------------------------------------------------------------
 # 设备账号辅助函数
 # ---------------------------------------------------------------------------
+
+def _shared_config_lock(path_for_request):
+    from functools import wraps
+    from services.character_state import character_state_lock
+    def decorate(func):
+        @wraps(func)
+        def locked(*args, **kwargs):
+            with character_state_lock(path_for_request()):
+                return func(*args, **kwargs)
+        return locked
+    return decorate
+
 
 def _load_device_accounts() -> dict:
     """读取设备账号映射表：device_id -> { user_id: {email, display_name, last_login} }"""
@@ -60,13 +76,14 @@ def _save_device_accounts(data: dict) -> None:
     safe_save_json(DEVICE_ACCOUNTS_FILE, data or {})
 
 
+@_shared_config_lock(lambda: DEVICE_ACCOUNTS_FILE)
 def _track_device_login(user_id: int, email: str, display_name: str) -> str:
     """
     在当前设备上记录一次登录：
     - 生成/读取 device_id（存入 cookie）
     - 在 DEVICE_ACCOUNTS_FILE 中记录该 device_id 下最近登录过的账号列表
     """
-    device_id = request.cookies.get("device_id") or uuid.uuid4().hex
+    device_id = request.cookies.get(("saki_global_device_id" if LOCAL_TEST else "device_id")) or uuid.uuid4().hex
     data = _load_device_accounts()
     entry = data.get(device_id, {})
     now_str = datetime.now().isoformat()
@@ -75,6 +92,7 @@ def _track_device_login(user_id: int, email: str, display_name: str) -> str:
         "email": email,
         "display_name": display_name,
         "last_login": now_str,
+        "auth_version": session["auth_version"],
     }
     data[device_id] = entry
     _save_device_accounts(data)
@@ -86,7 +104,7 @@ def _get_recent_device_accounts(max_age_days: int = 30) -> list[dict]:
     返回当前设备在最近 max_age_days 天内登录过的账号列表。
     仅按 device_id 区分"同一设备"。
     """
-    device_id = request.cookies.get("device_id")
+    device_id = request.cookies.get(("saki_global_device_id" if LOCAL_TEST else "device_id"))
     if not device_id or not os.path.exists(DEVICE_ACCOUNTS_FILE):
         return []
 
@@ -122,44 +140,9 @@ def _get_recent_device_accounts(max_age_days: int = 30) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def init_user_workspace(user_id: int) -> None:
-    """
-    为新注册的用户创建 users/<user_id>/ 下的基础结构：
-    - characters/ : 暂不主动复制，按需由 get_paths 懒加载模板
-    - groups/     : 暂不主动复制，全局 groups.json 仍作为模板
-    - configs/    : 复制当前 configs/ 目录下的配置文件快照（排除 users.db）
-    - logs/       : 预建空日志目录
-
-    这样每个用户都有独立的 configs 和 logs，不再依赖全局文件。
-    """
-    try:
-        user_root = os.path.join(USERS_ROOT, str(user_id))
-        os.makedirs(user_root, exist_ok=True)
-
-        chars_root = os.path.join(user_root, "characters")
-        groups_root = os.path.join(user_root, "groups")
-        configs_root = os.path.join(user_root, "configs")
-        logs_root = os.path.join(user_root, "logs")
-        for d in (chars_root, groups_root, configs_root, logs_root):
-            os.makedirs(d, exist_ok=True)
-
-        global_configs = os.path.join(BASE_DIR, "configs")
-        if os.path.exists(global_configs):
-            for name in os.listdir(global_configs):
-                if name == "users.db":
-                    continue
-                src = os.path.join(global_configs, name)
-                dst = os.path.join(configs_root, name)
-                try:
-                    if os.path.isdir(src):
-                        if not os.path.exists(dst):
-                            shutil.copytree(src, dst)
-                    else:
-                        if not os.path.exists(dst):
-                            shutil.copy2(src, dst)
-                except Exception as e:
-                    print(f"[InitUser] 拷贝 configs/{name} 给用户 {user_id} 失败: {e}")
-    except Exception as e:
-        print(f"[InitUser] 初始化用户 {user_id} 工作区失败: {e}")
+    """Generate new-account defaults without copying shared or personal data."""
+    from core.user_workspace import initialize_user_workspace
+    initialize_user_workspace(USERS_ROOT, user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -173,17 +156,6 @@ def login_page():
     return render_template("login.html")
 
 
-@auth_bp.route("/register")
-def register_page():
-    if 'user_id' in session or 'logged_in' in session:
-        return redirect('/')
-    return render_template(
-        "register.html",
-        legal_documents=get_legal_documents(),
-        legal_versions=get_current_legal_versions(),
-    )
-
-
 @auth_bp.route("/forgot_password")
 def forgot_password_page():
     if 'user_id' in session or 'logged_in' in session:
@@ -192,66 +164,8 @@ def forgot_password_page():
 
 
 # ---------------------------------------------------------------------------
-# 注册 / 登录 API
+# 登录 / 协议 API
 # ---------------------------------------------------------------------------
-
-@auth_bp.route("/api/register", methods=["POST"])
-def register_api():
-    """注册新用户：email + password (+ display_name)，需确认已满 18 周岁。"""
-    data = request.get_json() or {}
-    email = (data.get("email") or "").strip().lower()
-    password = data.get("password") or ""
-    display_name = (data.get("display_name") or "").strip()
-    adult_confirmed = data.get("adult_confirmed") is True
-
-    if not email or not password:
-        return jsonify({"status": "error", "message": "邮箱和密码不能为空"}), 400
-
-    if not adult_confirmed:
-        return jsonify({"status": "error", "message": "请先确认你已年满18周岁"}), 400
-
-    legal_valid, legal_message = validate_legal_acceptance(data)
-    if not legal_valid:
-        return jsonify({"status": "error", "message": legal_message}), 400
-
-    if not display_name:
-        display_name = email
-
-    try:
-        conn = sqlite3.connect(USERS_DB)
-        cur = conn.cursor()
-
-        cur.execute("SELECT id FROM users WHERE email = ?", (email,))
-        row = cur.fetchone()
-        if row:
-            conn.close()
-            return jsonify({"status": "error", "message": "该邮箱已被注册"}), 400
-
-        init_legal_consents_table(conn)
-        cur.execute(
-            "INSERT INTO users (email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?)",
-            (email, generate_password_hash(password), display_name, datetime.now().isoformat())
-        )
-        user_id = cur.lastrowid
-        record_current_legal_consents(conn, user_id)
-        conn.commit()
-        conn.close()
-
-        init_user_workspace(user_id)
-
-        establish_authenticated_session(user_id)
-
-        device_id = _track_device_login(user_id, email=email, display_name=display_name)
-        resp = jsonify({"status": "success"})
-        resp.set_cookie(
-            "device_id", device_id, max_age=30 * 24 * 3600,
-            secure=bool(current_app.config.get("SESSION_COOKIE_SECURE")), httponly=True, samesite="Lax",
-        )
-        return resp
-    except Exception as e:
-        print(f"[Register] 注册失败: {e}")
-        return jsonify({"status": "error", "message": "服务器错误"}), 500
-
 
 @auth_bp.route("/api/legal/status")
 def legal_status_api():
@@ -293,7 +207,7 @@ def login_api():
         try:
             conn = sqlite3.connect(USERS_DB)
             cur = conn.cursor()
-            cur.execute("SELECT id, email, password_hash, display_name FROM users WHERE email = ?", (input_user.lower(),))
+            cur.execute("SELECT id, email, password_hash, display_name, COALESCE(auth_version,1) FROM users WHERE email = ?", (input_user.lower(),))
             row = cur.fetchone()
             conn.close()
             if row and check_password_hash(row[2], input_pass):
@@ -302,11 +216,19 @@ def login_api():
                 display_name = row[3] or email
 
                 establish_authenticated_session(user_id)
+                # A password reset between the credential read and session creation
+                # must not turn an old password into a grant for the new version.
+                if session['auth_version'] != row[4]:
+                    session.clear()
+                    return jsonify({"status": "error", "message": "用户名或密码错误"}), 401
 
+                from core.account_lifecycle import pending
+                if pending(user_id):
+                    return jsonify(status="success", account_deleting=True)
                 device_id = _track_device_login(user_id, email=email, display_name=display_name)
                 resp = jsonify({"status": "success"})
                 resp.set_cookie(
-                    "device_id", device_id, max_age=30 * 24 * 3600,
+                    ("saki_global_device_id" if LOCAL_TEST else "device_id"), device_id, max_age=30 * 24 * 3600,
                     secure=bool(current_app.config.get("SESSION_COOKIE_SECURE")), httponly=True, samesite="Lax",
                 )
                 return resp
@@ -351,13 +273,12 @@ def login_api():
 
             # 数据库账号已建立后立即清除旧配置中的明文登录密码。
             if "password" in user_data:
-                user_data.pop("password", None)
-                safe_save_json(USER_SETTINGS_FILE, user_data)
+                update_user_settings(USER_SETTINGS_FILE, {}, remove=("password",))
 
             device_id = _track_device_login(user_id, email=email, display_name=saved_user)
             resp = jsonify({"status": "success"})
             resp.set_cookie(
-                "device_id", device_id, max_age=30 * 24 * 3600,
+                ("saki_global_device_id" if LOCAL_TEST else "device_id"), device_id, max_age=30 * 24 * 3600,
                 secure=bool(current_app.config.get("SESSION_COOKIE_SECURE")), httponly=True, samesite="Lax",
             )
             return resp
@@ -372,137 +293,152 @@ def login_api():
 # 忘记密码
 # ---------------------------------------------------------------------------
 
-reset_codes = {}
+def _reset_response(message, status=400, *, retry=None, field=None):
+    from core.localization import tr
+    data = {'status': 'accepted' if status == 202 else ('success' if status == 200 else 'error'),
+            'message': tr(message)}
+    if field:
+        data['error_type'] = field
+    response = jsonify(data)
+    response.status_code = status
+    response.headers['Cache-Control'] = 'no-store'
+    if retry is not None:
+        response.headers['Retry-After'] = str(retry)
+    return response
 
 
-@auth_bp.route("/api/forgot_password/send_code", methods=["POST"])
-def forgot_password_send_code():
-    data = request.get_json() or {}
-    email = (data.get("email") or "").strip().lower()
+def _reset_input():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return {}, ''
+    raw = data.get('email')
+    email = raw.strip().lower() if isinstance(raw, str) else ''
+    if (len(email) > 254 or email.count('@') != 1 or not all(email.split('@')) or
+            any(c.isspace() or not c.isprintable() for c in email)):
+        email = ''
+    return data, email
 
-    if not email or "@" not in email:
-        return jsonify({"status": "error", "message": "请输入有效的邮箱"}), 400
 
+def _recovery_store():
+    return RecoveryStore(USERS_DB, current_app.secret_key)
+
+
+def _reset_mail(email, uid, code):
+    from core.branding import brand_name
+    from core.localization import tr
+    language = user_language(uid)
+    brand = brand_name(language)
+    sender, host = os.environ['MAIL_SENDER'], os.environ['MAIL_SERVER']
+    msg = MIMEText(tr('reset_body', language, brand=brand, code=code), 'plain', 'utf-8')
+    msg['From'] = formataddr([brand, sender]); msg['To'] = email
+    msg['Subject'] = Header(tr('reset_subject', language, brand=brand), 'utf-8')
+    port = int(os.getenv('MAIL_PORT', '465'))
+    tls = ssl.create_default_context()
+    if port == 465:
+        smtp = smtplib.SMTP_SSL(host, port, timeout=8, context=tls)
+    else:
+        smtp = smtplib.SMTP(host, port, timeout=8)
     try:
-        conn = sqlite3.connect(USERS_DB)
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM users WHERE email = ?", (email,))
-        user = cur.fetchone()
-        conn.close()
+        if port != 465:
+            smtp.starttls(context=tls)
+        smtp.login(sender, os.environ['MAIL_PASSWORD'])
+        # Returning from sendmail means acceptance by SMTP, not inbox delivery.
+        if smtp.sendmail(sender, [email], msg.as_bytes()):
+            raise smtplib.SMTPRecipientsRefused({})
+    finally:
+        smtp.close()  # An error in a later QUIT must not invalidate accepted mail.
 
-        if not user:
-            return jsonify({"status": "error", "message": "该邮箱未注册", "error_type": "email"}), 404
 
-        code = str(random.randint(100000, 999999))
-
-        reset_codes[email] = {
-            "code": code,
-            "expire": time.time() + 600
-        }
-
-        subject = "Kunigami AI - 重置密码验证码"
-        content = f"您好！您正尝试为 Kunigami AI 账号重置密码。\n\n您的验证码是：{code}\n\n该验证码 10 分钟内有效。如果不是您本人操作，请忽略此邮件。"
-
-        print(f"DEBUG: Attempting to send reset code {code} to {email}")
-
-        def _send_reset_email(addr, sub, body):
-            sender = os.getenv("MAIL_SENDER")
-            pwd = os.getenv("MAIL_PASSWORD")
-            host = os.getenv("MAIL_SERVER", "smtp.qq.com")
-            port = int(os.getenv("MAIL_PORT", 465))
-
-            if not sender or not pwd:
-                print("❌ [Reset] 配置缺失: MAIL_SENDER 或 MAIL_PASSWORD")
-                return
-
+def _deliver_reset(app_obj, users_db, store, email, ticket):
+    accepted = None
+    transport_down = False
+    from core.account_lifecycle import activity, DeletionPending
+    lease = None
+    with app_obj.app_context():
+        try:
+            with closing(sqlite3.connect(users_db)) as db:
+                row = db.execute('SELECT id,COALESCE(auth_version,1) FROM users WHERE email=?', (email,)).fetchone()
+            if row:
+                lease = activity(row[0], os.path.dirname(os.path.dirname(users_db)))
+                code = f'{secrets.randbelow(1_000_000):06d}'
+                _reset_mail(email, row[0], code)
+                accepted = (*row, code)
+        except DeletionPending:
+            pass
+        except smtplib.SMTPRecipientsRefused:
+            app_obj.logger.warning('Password recovery: recipient rejected')
+        except (OSError, smtplib.SMTPException, KeyError, ValueError) as exc:
+            transport_down = True
+            app_obj.logger.warning('Password recovery: transport unavailable (%s)', type(exc).__name__)
+        except Exception as exc:
+            app_obj.logger.error('Password recovery: worker failed (%s)', type(exc).__name__)
+        finally:
             try:
-                msg = MIMEText(body, 'plain', 'utf-8')
-                msg['From'] = formataddr(["Kunigami AI", sender])
-                msg['To'] = formataddr(["User", addr])
-                msg['Subject'] = Header(sub, 'utf-8')
-
-                if port == 465:
-                    server = smtplib.SMTP_SSL(host, port, timeout=10)
-                else:
-                    server = smtplib.SMTP(host, port, timeout=10)
-                    if port == 587:
-                        server.starttls()
-
-                server.login(sender, pwd)
-                server.sendmail(sender, [addr], msg.as_string())
-                server.quit()
-                print(f"📧 [Reset] 成功发送验证码到 {addr}")
-            except Exception as e:
-                print(f"❌ [Reset] 验证码发送失败: {e}")
-                if "Connection unexpectedly closed" in str(e) and port == 465:
-                    print("🔄 [Reset] 尝试使用 STARTTLS (587端口) 重试...")
-                    try:
-                        server = smtplib.SMTP(host, 587, timeout=10)
-                        server.starttls()
-                        server.login(sender, pwd)
-                        server.sendmail(sender, [addr], msg.as_string())
-                        server.quit()
-                        print(f"📧 [Reset] 通过 587 端口重试成功！")
-                    except Exception as e2:
-                        print(f"❌ [Reset] 587 端口重试也失败: {e2}")
-
-        threading.Thread(target=_send_reset_email, args=(email, subject, content)).start()
-
-        return jsonify({"status": "success", "message": "验证码已发送至您的邮箱"})
-
-    except Exception as e:
-        print(f"[Reset] 数据库异常: {e}")
-        return jsonify({"status": "error", "message": "系统繁忙，请重试"}), 500
+                store.finish(email, ticket, accepted=accepted, transport_down=transport_down)
+            except (OSError, sqlite3.Error) as exc:
+                app_obj.logger.error('Password recovery: delivery state unavailable (%s)', type(exc).__name__)
+            finally:
+                if lease is not None:
+                    lease.close()
 
 
-@auth_bp.route("/api/forgot_password/reset", methods=["POST"])
-def forgot_password_reset():
-    data = request.get_json() or {}
-    email = (data.get("email") or "").strip().lower()
-    code = (data.get("code") or "").strip()
-    new_password = data.get("password") or ""
-
-    if not email or not code or not new_password:
-        return jsonify({"status": "error", "message": "请填写完整信息"}), 400
-
-    record = reset_codes.get(email)
-    if not record:
-        return jsonify({"status": "error", "message": "验证码错误或已失效", "error_type": "code"}), 400
-
-    if time.time() > record["expire"]:
-        del reset_codes[email]
-        return jsonify({"status": "error", "message": "验证码已过期，请重新发送", "error_type": "code"}), 400
-
-    target_code = str(record["code"]).strip()
-    input_code = str(code).strip()
-
-    if target_code != input_code:
-        return jsonify({"status": "error", "message": "验证码输入错误", "error_type": "code"}), 400
-
+@auth_bp.route('/api/forgot_password/send_code', methods=['POST', 'GET'])
+def forgot_password_send_code():
+    if request.method in ('GET', 'HEAD'):
+        try:
+            retry = _recovery_store().transport_retry_after()
+        except (OSError, sqlite3.Error):
+            retry = 30
+        if retry:
+            return _reset_response('找回密码服务暂时不可用，请稍后重试。', 503, retry=retry)
+        return '', 204, {'Cache-Control': 'no-store'}
+    _, email = _reset_input()
+    if not email:
+        return _reset_response('请输入有效的邮箱地址', field='email')
+    store = _recovery_store()
     try:
-        conn = sqlite3.connect(USERS_DB)
-        cur = conn.cursor()
+        ticket = store.reserve(email, source_address(request.remote_addr, request.headers.get('X-Real-IP')))
+        try:
+            threading.Thread(target=_deliver_reset,
+                             args=(current_app._get_current_object(), USERS_DB, store, email, ticket),
+                             daemon=True).start()
+        except (OSError, RuntimeError):
+            store.finish(email, ticket)
+            raise Unavailable()
+    except Limited as exc:
+        return _reset_response('请求过于频繁，请稍后重试。', 429, retry=exc.retry_after)
+    except (OSError, sqlite3.Error, Unavailable):
+        return _reset_response('找回密码服务暂时不可用，请稍后重试。', 503, retry=30)
+    # Lookup and delivery happen after admission; never reveal membership or say mail was sent.
+    return _reset_response('已受理请求。如果该邮箱绑定了账号，请稍后查看收件箱和垃圾邮件；持续未收到请联系支持。', 202, retry=COOLDOWN)
 
-        cur.execute("SELECT id FROM users WHERE email = ?", (email,))
-        if not cur.fetchone():
-            conn.close()
-            return jsonify({"status": "error", "message": "找回失败：该邮箱账号不存在", "error_type": "email"}), 404
 
-        password_hash = generate_password_hash(new_password)
-        cur.execute(
-            "UPDATE users SET password_hash = ?, auth_version = COALESCE(auth_version, 1) + 1 WHERE email = ?",
-            (password_hash, email),
-        )
-        conn.commit()
-        conn.close()
-
-        del reset_codes[email]
-
-        return jsonify({"status": "success", "message": "密码重置成功"})
-
-    except Exception as e:
-        print(f"[Reset] 更新密码失败: {e}")
-        return jsonify({"status": "error", "message": "系统错误，请联系管理员"}), 500
+@auth_bp.route('/api/forgot_password/reset', methods=['POST'])
+def forgot_password_reset():
+    data, email = _reset_input()
+    password, code = data.get('password'), data.get('code')
+    if not isinstance(password, str) or not 8 <= len(password) <= 256:
+        return _reset_response('新密码长度应为 8 至 256 个字符。', field='password')
+    if not email or not isinstance(code, str) or not re.fullmatch(r'[0-9]{6}', code):
+        return _reset_response('验证码错误或已失效', field='code')
+    try:
+        grant = _recovery_store().claim(email, source_address(request.remote_addr, request.headers.get('X-Real-IP')), code)
+        if grant is None:
+            return _reset_response('验证码错误或已失效', field='code')
+        # Consume first (fail closed). Even a second challenge racing a password change
+        # cannot overwrite it: the user DB independently checks the issue-time version.
+        uid, version = grant
+        digest = generate_password_hash(password)
+        with closing(sqlite3.connect(USERS_DB)) as db, db:
+            changed = db.execute('''UPDATE users SET password_hash=?,auth_version=COALESCE(auth_version,1)+1
+                WHERE id=? AND email=? AND COALESCE(auth_version,1)=?''', (digest, uid, email, version)).rowcount
+        if not changed:
+            return _reset_response('验证码错误或已失效', field='code')
+        return _reset_response('密码重置成功，请重新登录', 200)
+    except Limited as exc:
+        return _reset_response('请求过于频繁，请稍后重试。', 429, retry=exc.retry_after)
+    except (OSError, sqlite3.Error):
+        return _reset_response('找回密码服务暂时不可用，请稍后重试。', 503, retry=30)
 
 
 @auth_bp.route("/api/user/change_password", methods=["POST"])
@@ -541,11 +477,7 @@ def change_password():
     settings_path = os.path.join(USERS_ROOT, str(int(current_uid)), "configs", "user_settings.json")
     if os.path.exists(settings_path):
         try:
-            with open(settings_path, "r", encoding="utf-8") as handle:
-                settings = json.load(handle) or {}
-            if isinstance(settings, dict) and "password" in settings:
-                settings.pop("password", None)
-                safe_save_json(settings_path, settings)
+            update_user_settings(settings_path, {}, remove=("password",))
         except Exception:
             current_app.logger.exception("Failed to remove legacy plaintext password for user %s", current_uid)
 
@@ -575,9 +507,11 @@ def logout():
     return redirect('/login')
 
 
+@_shared_config_lock(lambda: DEVICE_ACCOUNTS_FILE)
 def _remove_user_from_device_accounts(user_id: int) -> None:
     user_key = str(user_id)
-    all_devices = _load_device_accounts()
+    from services.memory_store import load_json_object
+    all_devices = load_json_object(DEVICE_ACCOUNTS_FILE)
     changed = False
 
     for device_id in list(all_devices.keys()):
@@ -595,18 +529,17 @@ def _remove_user_from_device_accounts(user_id: int) -> None:
         _save_device_accounts(all_devices)
 
 
+@_shared_config_lock(lambda: SUBSCRIPTIONS_FILE)
 def _remove_user_subscriptions(user_id: int) -> None:
     if not os.path.exists(SUBSCRIPTIONS_FILE):
         return
 
-    try:
-        with open(SUBSCRIPTIONS_FILE, "r", encoding="utf-8") as f:
-            all_subs = json.load(f) or {}
-    except Exception:
-        return
-
+    with open(SUBSCRIPTIONS_FILE, encoding="utf-8") as handle:
+        all_subs = json.load(handle)
+    if isinstance(all_subs, list):
+        return  # Legacy unowned subscription list.
     if not isinstance(all_subs, dict):
-        return
+        raise ValueError("Invalid subscription store")
 
     user_key = str(user_id)
     if user_key in all_subs:
@@ -632,6 +565,10 @@ def _delete_user_forums(user_id: int) -> None:
     try:
         cur = conn.cursor()
         cur.execute("DELETE FROM forums WHERE user_id = ?", (int(user_id),))
+        if cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='forum_backgrounds'").fetchone():
+            cur.execute("DELETE FROM forum_backgrounds WHERE user_id = ?", (int(user_id),))
+        if cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='forum_tasks'").fetchone():
+            cur.execute("DELETE FROM forum_tasks WHERE user_id=?", (int(user_id),))
         conn.commit()
     finally:
         conn.close()
@@ -643,11 +580,8 @@ def _cleanup_square_user_data(user_id: int, email: str) -> None:
 
     conn = sqlite3.connect(SQUARE_DB)
     try:
-        cur = conn.cursor()
-        cur.execute("DELETE FROM favorites WHERE user_id = ?", (int(user_id),))
-        cur.execute("DELETE FROM likes WHERE user_id = ?", (int(user_id),))
-        if email:
-            cur.execute("UPDATE characters SET author_email = NULL WHERE author_email = ?", (email,))
+        from core.account_cleanup import clean_square
+        clean_square(conn, user_id, email, users_root=USERS_ROOT)
         conn.commit()
     finally:
         conn.close()
@@ -658,6 +592,9 @@ def _delete_user_account_record(user_id: int) -> None:
     try:
         cur = conn.cursor()
         cur.execute("DELETE FROM circuit_breaker WHERE user_id = ?", (int(user_id),))
+        from core.account_cleanup import columns
+        if "user_id" in columns(conn, "legal_consents"):
+            cur.execute("DELETE FROM legal_consents WHERE user_id = ?", (int(user_id),))
         cur.execute("DELETE FROM users WHERE id = ?", (int(user_id),))
         conn.commit()
     finally:
@@ -677,7 +614,7 @@ def delete_account():
     password = data.get("password") or ""
     confirm_text = (data.get("confirm_text") or "").strip()
 
-    if confirm_text != "注销账户":
+    if confirm_text not in {"注销账户", "アカウント削除", "DELETE ACCOUNT"}:
         return jsonify({"status": "error", "message": "请输入“注销账户”确认操作"}), 400
     if not password:
         return jsonify({"status": "error", "message": "请输入当前密码"}), 400
@@ -698,19 +635,46 @@ def delete_account():
     if not password_hash or not check_password_hash(password_hash, password):
         return jsonify({"status": "error", "message": "当前密码不正确"}), 403
 
+    from pathlib import Path
+    from core.account_lifecycle import deletion, step, DeletionPending
+    from core.account_cleanup import preserve_square_avatars, clean_image_usage, unlink_sticker_packs
+    from cos_utils import delete_user_objects
+    root = Path(USERS_ROOT).parent
     try:
-        _delete_user_forums(current_uid)
-        _cleanup_square_user_data(current_uid, email)
-        _remove_user_from_device_accounts(current_uid)
-        _remove_user_subscriptions(current_uid)
-        _safe_remove_user_workspace(current_uid)
-        _delete_user_account_record(current_uid)
-        _clear_auth_session()
-    except Exception as e:
-        print(f"[AccountDelete] 注销账户失败 user_id={current_uid}: {e}")
-        return jsonify({"status": "error", "message": "注销失败，请稍后重试或联系管理员"}), 500
+        with deletion(current_uid, root) as marker:
+            step(marker, 'public-avatars', preserve_square_avatars, SQUARE_DB, current_uid, email)
+            step(marker, 'cloud', delete_user_objects, current_uid)
+            step(marker, 'image-usage', clean_image_usage, Path(USERS_DB).with_name('image_usage.db'), current_uid)
+            step(marker, 'stickers', unlink_sticker_packs, root / 'stickers', current_uid)
+            step(marker, 'forums', _delete_user_forums, current_uid)
+            step(marker, 'square', _cleanup_square_user_data, current_uid, email)
+            step(marker, 'devices', _remove_user_from_device_accounts, current_uid)
+            step(marker, 'subscriptions', _remove_user_subscriptions, current_uid)
+            recovery = _recovery_store()
+            if recovery.path.is_file():
+                with sqlite3.connect(recovery.path) as db:
+                    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='challenges'").fetchone():
+                        db.execute("DELETE FROM challenges WHERE account=? OR uid=?", (recovery.tag('email', email), current_uid))
+            maintenance = Path(USERS_DB).with_name('maintenance_recovery.db')
+            if maintenance.exists():
+                with sqlite3.connect(maintenance) as db:
+                    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='work'").fetchone():
+                        db.execute("DELETE FROM work WHERE owner=?", (str(current_uid),))
+            if (root / '.agent-runtime').is_dir():
+                from core.web_agent import discard_account_jobs
+                discard_account_jobs(root, current_uid)
+            step(marker, 'workspace', _safe_remove_user_workspace, current_uid)
+            _delete_user_account_record(current_uid)
+            _clear_auth_session()
+    except DeletionPending:
+        return jsonify(status="pending", message="后台任务正在结束，请稍后重试注销。"), 409
+    except Exception as exc:
+        current_app.logger.error("Account deletion paused: user=%s type=%s", current_uid, type(exc).__name__)
+        return jsonify(status="pending", message="注销尚未完成，进度已保存，请稍后重试。"), 503
 
-    return jsonify({"status": "success", "message": "账号已注销"})
+    response = jsonify({"status": "success", "message": "账号已注销"})
+    response.headers["Clear-Site-Data"] = '"cache", "storage"'
+    return response
 
 
 @auth_bp.route("/api/accounts/recent", methods=["GET"])
@@ -752,6 +716,7 @@ def get_recent_accounts():
 
 
 @auth_bp.route("/api/accounts/switch", methods=["POST"])
+@_shared_config_lock(lambda: DEVICE_ACCOUNTS_FILE)
 def switch_account():
     """
     在同一设备上，在最近 30 天内登录过的账号之间进行切换，而无需重新输入密码。
@@ -771,7 +736,7 @@ def switch_account():
     except Exception:
         return jsonify({"status": "error", "message": "无效的目标账号"}), 400
 
-    device_id = request.cookies.get("device_id")
+    device_id = request.cookies.get(("saki_global_device_id" if LOCAL_TEST else "device_id"))
     if not device_id or not os.path.exists(DEVICE_ACCOUNTS_FILE):
         return jsonify({"status": "error", "message": "当前设备暂无可切换账号"}), 403
 
@@ -791,7 +756,28 @@ def switch_account():
     except Exception:
         return jsonify({"status": "error", "message": "无法确认登录时间，请重新登录该账号"}), 403
 
-    establish_authenticated_session(target_id)
+    version = get_auth_version(target_id)
+    if version is None:
+        return jsonify({"status": "error", "message": "用户不存在"}), 404
+
+    # Legacy grants predate version binding: only accept the initial account epoch.
+    if info.get("auth_version", 1) != version:
+        return jsonify({"status": "error", "message": "账号凭据已更新，请重新登录"}), 403
+
+    # Drop account-scoped memory context and pending UI preferences. A switch
+    # must not carry the previous account's state into the destination.
+    previous_session = dict(session)
+    try:
+        session.clear()
+        establish_authenticated_session(target_id)
+        if session['auth_version'] != version:
+            session.clear()
+            session.update(previous_session)
+            return jsonify({"status": "error", "message": "账号凭据已更新，请重新登录"}), 403
+    except Exception:
+        session.clear()
+        session.update(previous_session)
+        raise
 
     info["last_login"] = datetime.now().isoformat()
     entries[str(target_id)] = info
@@ -813,6 +799,7 @@ def switch_account():
 # ---------------------------------------------------------------------------
 
 @auth_bp.route("/api/subscribe", methods=["POST"])
+@_shared_config_lock(lambda: SUBSCRIPTIONS_FILE)
 def subscribe():
     subscription = request.json
     if not subscription:
@@ -889,7 +876,7 @@ def send_push_notification(title, body, url="/", user_id=None):
             claims = dict(VAPID_CLAIMS)
             webpush(
                 subscription_info=sub_info,
-                data=json.dumps({"title": title, "body": body, "url": url}),
+                data=json.dumps({"title": title, "body": body, "url": url, "language": user_language(user_id)}),
                 vapid_private_key=VAPID_PRIVATE_KEY,
                 vapid_claims=claims,
             )
@@ -902,7 +889,6 @@ def send_push_notification(title, body, url="/", user_id=None):
                 print(f"   - 推送失败: {ex}")
                 valid_subs.append(sub_info)
 
-    if cleanup_needed and user_id is not None:
-        all_subs[user_id] = valid_subs
-        with open(SUBSCRIPTIONS_FILE, "w", encoding="utf-8") as f:
-            json.dump(all_subs, f)
+    if cleanup_needed:
+        from core.account_cleanup import prune_expired_subscriptions
+        prune_expired_subscriptions(SUBSCRIPTIONS_FILE, user_id, target_subs, valid_subs)

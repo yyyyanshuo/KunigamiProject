@@ -1,5 +1,6 @@
 import io
 import json
+import pytest
 
 import services.voice_calls as voice_calls
 
@@ -19,23 +20,55 @@ def _logged_in_client(monkeypatch):
     return client
 
 
-def test_call_model_defaults_to_gemini_36_flash(tmp_path, monkeypatch):
-    import services.ai_client as ai_client
-
-    monkeypatch.setattr(ai_client, "USERS_ROOT", str(tmp_path))
-    assert ai_client.get_model_config("call", user_id=91) == (
-        "relay", "gemini-3.6-flash"
-    )
-
-
-def test_call_stt_token_uses_only_global_key(tmp_path, monkeypatch):
+@pytest.fixture
+def stt_client(tmp_path, monkeypatch):
+    """Exercise configured STT routes while the test process still blocks all network access."""
+    from flask import Flask
     import blueprints.calls as calls
+    from core.environment_check import install_feature_checks
 
+    app = Flask(__name__)
+    app.config.update(TESTING=True, SECRET_KEY="test-only")
+    install_feature_checks(app, local=False)
+    app.register_blueprint(calls.calls_bp)
+    # The feature check reads the environment; the routes use its startup snapshot.
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "global-stt-key")
+    monkeypatch.setattr(calls.core.config, "ELEVENLABS_API_KEY", "global-stt-key")
+    monkeypatch.setattr(calls, "consume_voice_stt_quota", lambda *args, **kwargs: True)
     monkeypatch.setattr(voice_calls, "USERS_ROOT", str(tmp_path))
     voice_calls.create_call(91, call_id=CALL_ID, char_id="rin", initiator="user")
     voice_calls.accept_call(91, CALL_ID)
-    monkeypatch.setattr(calls.core.config, "ELEVENLABS_API_KEY", "global-stt-key")
-    monkeypatch.setattr(calls, "consume_voice_stt_quota", lambda *args, **kwargs: True)
+
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["user_id"] = 91
+    return client
+
+
+@pytest.mark.parametrize("endpoint", ["stt-token", "transcribe"])
+def test_offline_app_blocks_call_stt(monkeypatch, endpoint):
+    response = _logged_in_client(monkeypatch).post(
+        f"/api/calls/{CALL_ID}/{endpoint}",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+    assert response.status_code == 503
+    assert response.json["code"] == "local_feature_unavailable"
+    assert response.json["feature"] == "stt"
+
+
+def test_call_model_defaults_to_gemini_25_pro(tmp_path, monkeypatch):
+    import services.ai_client as ai_client
+
+    from core import model_settings
+    monkeypatch.setattr(model_settings, "DATA_ROOT", str(tmp_path))
+    assert ai_client.get_model_config("call", user_id=91) == (
+        "gemini", "gemini-2.5-pro"
+    )
+
+
+def test_call_stt_token_uses_only_global_key(stt_client, monkeypatch):
+    import blueprints.calls as calls
+
     seen = {}
 
     def fake_token(key):
@@ -43,7 +76,7 @@ def test_call_stt_token_uses_only_global_key(tmp_path, monkeypatch):
         return "single-use-token"
 
     monkeypatch.setattr(calls, "create_realtime_scribe_token", fake_token)
-    response = _logged_in_client(monkeypatch).post(
+    response = stt_client.post(
         f"/api/calls/{CALL_ID}/stt-token",
         headers={"X-Requested-With": "XMLHttpRequest"},
     )
@@ -53,16 +86,12 @@ def test_call_stt_token_uses_only_global_key(tmp_path, monkeypatch):
     assert seen["key"] == "global-stt-key"
 
 
+@pytest.mark.parametrize("filename,mimetype", [("call.webm", "audio/webm"), ("call.wav", "audio/wav")])
 def test_call_batch_transcription_uses_global_key_without_saving_audio(
-    tmp_path, monkeypatch
+    stt_client, monkeypatch, filename, mimetype
 ):
     import blueprints.calls as calls
 
-    monkeypatch.setattr(voice_calls, "USERS_ROOT", str(tmp_path))
-    voice_calls.create_call(91, call_id=CALL_ID, char_id="rin", initiator="user")
-    voice_calls.accept_call(91, CALL_ID)
-    monkeypatch.setattr(calls.core.config, "ELEVENLABS_API_KEY", "global-stt-key")
-    monkeypatch.setattr(calls, "consume_voice_stt_quota", lambda *args, **kwargs: True)
     seen = {}
 
     def fake_transcribe(api_key, **kwargs):
@@ -71,9 +100,9 @@ def test_call_batch_transcription_uses_global_key_without_saving_audio(
         return "这是整句话的最终识别"
 
     monkeypatch.setattr(calls, "transcribe_speech", fake_transcribe)
-    response = _logged_in_client(monkeypatch).post(
+    response = stt_client.post(
         f"/api/calls/{CALL_ID}/transcribe",
-        data={"file": (io.BytesIO(b"recorded-audio"), "call.webm", "audio/webm")},
+        data={"file": (io.BytesIO(b"recorded-audio"), filename, mimetype)},
         headers={"X-Requested-With": "XMLHttpRequest"},
         content_type="multipart/form-data",
     )
@@ -83,24 +112,40 @@ def test_call_batch_transcription_uses_global_key_without_saving_audio(
     assert response.get_json()["has_speech"] is True
     assert seen["key"] == "global-stt-key"
     assert seen["audio_bytes"] == b"recorded-audio"
+    assert seen["filename"] == filename
+    assert seen["content_type"] == mimetype
     assert seen["model_id"] == "scribe_v2"
+    assert seen["timeout"] == (5, 45)
+
+
+def test_call_recognition_timeout_is_distinct_and_does_not_send_a_turn(stt_client, monkeypatch):
+    import blueprints.calls as calls
+
+    def timeout(*args, **kwargs):
+        raise calls.requests.ReadTimeout("private upstream details")
+
+    monkeypatch.setattr(calls, "transcribe_speech", timeout)
+    response = stt_client.post(
+        f"/api/calls/{CALL_ID}/transcribe",
+        data={"file": (io.BytesIO(b"recorded-audio"), "call.wav", "audio/wav")},
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+    assert response.status_code == 504
+    assert response.get_json()["code"] == "call_recognition_timeout"
+    assert "private upstream" not in response.get_data(as_text=True)
+    assert voice_calls.list_turns(91, CALL_ID) == []
 
 
 def test_call_batch_transcription_marks_audio_only_result_as_no_speech(
-    tmp_path, monkeypatch
+    stt_client, monkeypatch
 ):
     import blueprints.calls as calls
 
-    monkeypatch.setattr(voice_calls, "USERS_ROOT", str(tmp_path))
-    voice_calls.create_call(91, call_id=CALL_ID, char_id="rin", initiator="user")
-    voice_calls.accept_call(91, CALL_ID)
-    monkeypatch.setattr(calls.core.config, "ELEVENLABS_API_KEY", "global-stt-key")
-    monkeypatch.setattr(calls, "consume_voice_stt_quota", lambda *args, **kwargs: True)
     monkeypatch.setattr(
         calls, "transcribe_speech", lambda *args, **kwargs: "（背景嘈杂）（敲门声）"
     )
 
-    response = _logged_in_client(monkeypatch).post(
+    response = stt_client.post(
         f"/api/calls/{CALL_ID}/transcribe",
         data={"file": (io.BytesIO(b"noise"), "call.webm", "audio/webm")},
         headers={"X-Requested-With": "XMLHttpRequest"},
@@ -131,6 +176,25 @@ def test_outgoing_call_disables_tts_without_personal_key(tmp_path, monkeypatch):
     assert detail.status_code == 200
     assert detail.get_json()["call"]["call_mode"] == "voice_input_text_reply"
     assert detail.get_json()["call"]["tts_enabled"] is False
+
+
+def test_call_empty_batch_result_resumes_listening(stt_client, monkeypatch):
+    import blueprints.calls as calls
+
+    def empty_transcript(*args, **kwargs):
+        raise calls.ElevenLabsAPIError("elevenlabs_empty_transcript", "No speech", 400)
+
+    monkeypatch.setattr(calls, "transcribe_speech", empty_transcript)
+    response = stt_client.post(
+        f"/api/calls/{CALL_ID}/transcribe",
+        data={"file": (io.BytesIO(b"quiet-audio"), "call.wav", "audio/wav")},
+        headers={"X-Requested-With": "XMLHttpRequest"},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 200
+    assert response.get_json()["has_speech"] is False
+    assert response.get_json()["transcript"] == ""
+    assert voice_calls.list_turns(91, CALL_ID) == []
 
 
 def test_call_disables_tts_without_character_voice_id(tmp_path, monkeypatch):

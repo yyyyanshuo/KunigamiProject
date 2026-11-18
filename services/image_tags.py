@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from typing import Iterator, Optional
 
 
-IMAGE_TAG_PREFIX = "[图片]"
+IMAGE_TAG_PREFIX = "[IMAGE]"
+IMAGE_TAG_PREFIXES = (IMAGE_TAG_PREFIX, "[图片]", "[画像]")
 
 
 @dataclass(frozen=True)
@@ -40,9 +41,10 @@ def _parse_parenthesized(text: str, start: int):
 
 def parse_image_tag_at(text: str, start: int = 0) -> Optional[ImageTag]:
     """Parse one complete image tag beginning exactly at *start*."""
-    if not text.startswith(IMAGE_TAG_PREFIX, start):
+    prefix = next((p for p in IMAGE_TAG_PREFIXES if text.startswith(p, start)), None)
+    if prefix is None:
         return None
-    cursor = start + len(IMAGE_TAG_PREFIX)
+    cursor = start + len(prefix)
     path_group = _parse_parenthesized(text, cursor)
     if not path_group:
         return None
@@ -59,7 +61,8 @@ def iter_image_tags(text: str) -> Iterator[ImageTag]:
     source = str(text or "")
     cursor = 0
     while cursor < len(source):
-        start = source.find(IMAGE_TAG_PREFIX, cursor)
+        starts = [source.find(p, cursor) for p in IMAGE_TAG_PREFIXES]
+        start = min((n for n in starts if n >= 0), default=-1)
         if start < 0:
             return
         tag = parse_image_tag_at(source, start)
@@ -67,7 +70,7 @@ def iter_image_tags(text: str) -> Iterator[ImageTag]:
             yield tag
             cursor = tag.end
         else:
-            cursor = start + len(IMAGE_TAG_PREFIX)
+            cursor = start + 1
 
 
 def split_message_bubbles(text: str) -> list[str]:
@@ -108,9 +111,18 @@ def strip_image_tags(text: str) -> str:
     return "".join(chunks)
 
 
-def normalize_image_description(value: str, max_length: Optional[int] = 500) -> str:
+def normalize_vision_prompt(value):
+    """Validate optional instructions for this image's recognition request."""
+    if value is None:
+        return ""
+    if not isinstance(value, str) or len(value.strip()) > 2000:
+        raise ValueError("总结要求不得超过2000字")
+    return value.strip()
+
+
+def normalize_image_description(value: str, max_length: Optional[int] = 4000) -> str:
     """Keep paired parentheses and neutralize only unmatched delimiters."""
-    description = str(value or "").strip()
+    description = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     if not description:
         raise ValueError("图片描述不能为空")
     if max_length is not None and len(description) > max_length:

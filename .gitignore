@@ -22,10 +22,16 @@ configs/*.db*
 configs/users.db
 
 docs/
+# Versioned change and decision records; other existing docs remain ignored.
+!docs/
+docs/*
+!docs/changes/
+!docs/decisions/
 scripts/
 users/
 !scripts/
 scripts/*
+!scripts/check_core.py
 !scripts/migrate_user_credentials.py
 !scripts/rebuild_memory_day.py
 !scripts/migrate_base_persona.py
@@ -89,3 +95,16 @@ users.db
 Voice/*.mp3
 Voice/*.mp4
 static/square_avatars/
+
+# Saki local isolated environment
+.venv/
+.env.*
+!.env.example
+.local-data/
+
+# Private key artifacts (public templates remain tracked)
+*.pem
+*.key
+*.p12
+*.pfx
+.env.backup*

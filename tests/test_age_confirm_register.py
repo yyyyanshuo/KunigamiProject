@@ -1,14 +1,17 @@
-def test_register_requires_adult_confirmation(app_client):
-    resp = app_client.post(
-        "/api/register",
-        json={"email": "no-confirm@example.com", "password": "secret"},
-        content_type="application/json",
-    )
-    assert resp.status_code == 400
-    assert "年满18周岁" in resp.get_json()["message"]
+import pytest
 
 
-def test_register_empty_still_rejected(app_client):
-    resp = app_client.post("/api/register", json={}, content_type="application/json")
-    assert resp.status_code == 400
-    assert resp.get_json()["status"] == "error"
+@pytest.mark.parametrize("authenticated", [False, True])
+@pytest.mark.parametrize("payload", [
+    {},
+    {"email": "no-confirm@example.com", "password": "secret"},
+    {"email": "complete@example.com", "password": "secret", "adult_confirmed": True,
+     "legal_accepted": True, "terms_version": "2.0-review.1", "privacy_version": "2.0-review.1"},
+])
+def test_public_registration_is_removed(accounts_client, authenticated, payload):
+    if not authenticated:
+        with accounts_client.session_transaction() as session:
+            session.clear()
+    assert accounts_client.get("/register").status_code == 404
+    assert accounts_client.post("/api/register", json=payload).status_code == 404
+    assert accounts_client.get("/api/register").status_code == 404

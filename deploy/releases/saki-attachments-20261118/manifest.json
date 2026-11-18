@@ -1,0 +1,74 @@
+{
+  "blueprints/chat.py": {
+    "before": "c9abb4fdac34ccc8acb5c15bbb07f09b7fafd03217ad12dd1e416a8509d63e2c",
+    "after": "2881f25026b0c797582bc8d55f039dc6322bedb9419f6a291d11d01e24c18dc2"
+  },
+  "blueprints/media.py": {
+    "before": "87f5b139268293b2bad28655f01268381a78ed3fa37966148c8384d65e2ff8c1",
+    "after": "a24774aadeb7ff30500631f984288d8e5802bae4bbeae11728756e721f54d36e"
+  },
+  "blueprints/moments.py": {
+    "before": "774f785abec1406438c79a5cd83a5d4a7729d41da627e7b44cbca86b29b03c20",
+    "after": "7601a5d452a4a8d04f480593cf1482257ad90a2052c3382071a4cfb1f0180dc9"
+  },
+  "templates/chat.html": {
+    "before": "2102688342263afffe8e1f79c902c79e99d030b65073d50d29adcd8e9db9f80e",
+    "after": "7bb98bff65ef3daff01f38a10448ca9aa9908bb6a8b4f90c16966508a8c84668"
+  },
+  "templates/moments.html": {
+    "before": "5ea4a6e933913475e4a0ea9a23627b84edec174eeb2020b3b9bf22a50656a7c2",
+    "after": "a3a9f9eee7204db9f7fbdeb22387a3cd469a09d3f1c973f4f59c252a65bc15a5"
+  },
+  "static/image-composer.js": {
+    "before": "f2f3e61ea03b384efb12a1f198e882b52d0bf70e8621e69eb69dc42fcfc623cc",
+    "after": "3e012eabf28cbde99c6911cc618082182b3357e1219b3e856f4c505d6471bd2c"
+  },
+  "static/transfer-composer.js": {
+    "before": null,
+    "after": "3a475c66e9e5437f8790cdf0710760ccdc269a78944bc516b307cf84b7f539f5"
+  },
+  "static/vision-prompts.js": {
+    "before": null,
+    "after": "acb85ca5e5511de0d4830ebced0c8acfc82e75ae4be2b97bb7c806598139ea5d"
+  },
+  "static/composer-viewport.js": {
+    "before": null,
+    "after": "31de1032923052177553c1eec960be7bab4bb0401857323a13995a47ba8fa22f"
+  },
+  "static/composer-surfaces.css": {
+    "before": null,
+    "after": "eed6aa2b7f252cc1ba2643fb1ca1a9112c2089cf5af9b6c89afb5dfe55d7b667"
+  },
+  "static/locales/ui.json": {
+    "before": "bcea1815d0b6a5876d78fb35d78737128cbebd3189872d045c5207faffb8155c",
+    "after": "baccf009b4783ba1ea5d921e2d43436de7a2b06507e586bdd70b02a81c9e8649"
+  },
+  "templates/guide/zh-CN.html": {
+    "before": "53352bf2b43c996de2880e52089b16904c696447e4e953f3290d60492ee29268",
+    "after": "b15b58be9f1c199a5f773baca9417b9760cb2b34a28ab76d1389a90b4fcf736f"
+  },
+  "templates/guide/en.html": {
+    "before": "0c5a4e94b1f3ec678e0d084e9d917bdaa9fee15715c6a203d881a5092ccd5922",
+    "after": "728c783db8593893403024c25aaf1b4455786c89771ff8819a5a7558f926abb4"
+  },
+  "templates/guide/ja.html": {
+    "before": "eea390eaa84527bcb8a6d6669baacc1c05961dcc2f6f8b1297a8dac20d03359e",
+    "after": "c476d34436740fa7e69d722eb3ccc8385ca62ba539a94361e217f859c6c6e89c"
+  },
+  "docs/changes/CHG-20261118-002-attachment-composers.md": {
+    "before": null,
+    "after": "ac226a1a4d705242060a20e5704029bba0f459ecfa4118d0e3521f97cfa33db4"
+  },
+  "docs/changes/CHG-20261118-003-composer-styling.md": {
+    "before": null,
+    "after": "27327011b6611b2b3abdfae53370004e12cf4db7d07726db8d34ac11454d629b"
+  },
+  "docs/changes/CHG-20261118-013-vision-prompt-font.md": {
+    "before": null,
+    "after": "bc04671c63faf39f912d48e400e2eeda17e70b7563e2ded8fcc674bdcdd12a61"
+  },
+  "CHANGELOG.md": {
+    "before": "789c51d248113134f9c4d80a4c3bce137f1ed985f5079655e79cded6b847b8f3",
+    "after": "d68b43e39dff3e8d545ba3f434dee42ce2749ef1fa1793e4324e20ecd411d370"
+  }
+}

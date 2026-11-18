@@ -1,3 +1,6 @@
+from pathlib import Path
+from services.character_state import character_state_lock, finish_diary_attempt
+from services.memory_store import memory_now, load_json_object
 import os
 import json
 import datetime
@@ -13,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 import random
 import sqlite3
 
-import tempfile # <--- 记得在最上面加这个 import
+from core.json_storage import StorageWriteError, atomic_write_json as safe_save_json
 from core.time_utils import (
     BEIJING_TZ,
     ensure_character_time_defaults,
@@ -25,29 +28,36 @@ from core.time_utils import (
 )
 from core.memory_periods import completed_week_before, week_key_for_end_date
 
-# --- 【新增】安全保存 JSON (防止文件损坏) ---
-def safe_save_json(filepath, data):
-    """
-    原子化写入：先写临时文件，再重命名。
-    防止多线程写入导致文件损坏 (Extra data 错误)。
-    """
-    dir_name = os.path.dirname(filepath)
-    # 创建临时文件
-    fd, temp_path = tempfile.mkstemp(dir=dir_name, text=True)
-
-    try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        # 瞬间替换 (Atomic Operation)
-        os.replace(temp_path, filepath)
-    except Exception as e:
-        print(f"❌ Save JSON Error: {e}")
-        os.remove(temp_path) # 出错则删掉临时文件
 
 # --- 辅助函数：角色 Prompt 路径改为从 app.get_paths 获取（支持 per-user） ---
 # get_all_char_ids 等由 app 的 get_all_char_ids_for_current_user 替代，此处不再定义
 
 # ================= 日结逻辑 (Daily) =================
+
+def run_pending_call_memory_jobs():
+    """Retry interrupted/failed hangup summaries, including historical calls."""
+    from app import list_all_user_ids, get_all_char_ids_for_current_user
+    from core.context import set_background_user, clear_background_user
+    from services.call_memory import sync_pending_call_memories
+    from services.voice_calls import expire_stale_active_calls
+
+    for user_id in list_all_user_ids():
+        try:
+            set_background_user(user_id)
+            # Browser closure has no hangup request, so finish stale calls too.
+            for call in expire_stale_active_calls(user_id):
+                from blueprints.calls import _set_call_chat_mode
+                _set_call_chat_mode(user_id, call["char_id"], "online")
+            for char_id in get_all_char_ids_for_current_user():
+                try:
+                    sync_pending_call_memories(user_id, char_id)
+                except Exception as exc:
+                    print(f"[Call Memory] retry failed for {char_id}: {type(exc).__name__}")
+        except Exception as exc:
+            print(f"[Call Memory] retry failed for user {user_id}: {type(exc).__name__}")
+        finally:
+            clear_background_user()
+
 
 def _process_single_char_daily(char_id, target_date_str, user_id=None):
     """处理单个角色的日结（调用时需已 set_background_user）"""
@@ -80,6 +90,7 @@ def _process_single_user_group_daily_rollovers(user_id, target_date_str):
 
     try:
         set_background_user(user_id)
+        target_date_str = target_date_str or (memory_now(user_id) - timedelta(days=1)).strftime("%Y-%m-%d")
         group_ids = get_all_group_ids_for_current_user()
         for group_id in group_ids:
             print(f"   > 用户 {user_id} 群聊: [{group_id}]")
@@ -103,8 +114,6 @@ def run_all_group_daily_rollovers(target_date_str=None):
     """遍历所有用户及其群聊，执行总结并分发给成员（多用户并行）"""
     from app import list_all_user_ids
 
-    if not target_date_str:
-        target_date_str = (datetime.datetime.now(BEIJING_TZ) - timedelta(days=1)).strftime('%Y-%m-%d')
 
     print(f"⏰ [定时任务] 开始群聊日结: {target_date_str}")
 
@@ -128,6 +137,7 @@ def _process_single_user_daily_rollovers(user_id, target_date_str):
 
     try:
         set_background_user(user_id)
+        target_date_str = target_date_str or (memory_now(user_id) - timedelta(days=1)).strftime("%Y-%m-%d")
         char_ids = get_all_char_ids_for_current_user()
         for char_id in char_ids:
             try:
@@ -145,8 +155,6 @@ def run_all_daily_rollovers(target_date_str=None):
     """【入口】按 user_id 遍历，为每个用户的每个角色执行日结（多用户并行）"""
     from app import list_all_user_ids
 
-    if not target_date_str:
-        target_date_str = (datetime.datetime.now(BEIJING_TZ) - timedelta(days=1)).strftime('%Y-%m-%d')
 
     print(f"⏰ [定时任务] 开始全员日结: {target_date_str}")
 
@@ -172,7 +180,7 @@ def _process_single_char_weekly(char_id, user_id=None):
 
     print(f"   > 正在处理角色: [{char_id}] (周结)")
 
-    today = datetime.datetime.now().date()
+    today = memory_now(user_id).date()
     _, end_date = completed_week_before(today)
     week_key = week_key_for_end_date(end_date)
     result = generate_long_memory_for_week(
@@ -206,13 +214,15 @@ def _process_single_user_weekly_rollovers(user_id):
         clear_background_user()
 
 
-def run_all_weekly_rollovers():
+def run_all_weekly_rollovers(*, local_calendar_only=False):
     """【入口】按 user_id 遍历，为每个用户的每个角色执行周结（多用户并行）"""
     from app import list_all_user_ids
 
     print("⏰ [定时任务] 开始全员周结...")
 
     user_ids = list_all_user_ids()
+    if local_calendar_only:
+        user_ids = [uid for uid in user_ids if memory_now(uid).weekday() == 0]
     if not user_ids:
         print("   - 无用户，跳过")
         return
@@ -237,40 +247,43 @@ def _process_single_user_yearly_age_increment(user_id, current_year: str) -> int
 
         updated_chars = []
         if os.path.exists(cfg_file):
-            with open(cfg_file, "r", encoding="utf-8") as f:
-                all_config = json.load(f)
-            for char_id, info in all_config.items():
-                age = info.get("age")
-                if age is None:
-                    continue
-                last_inc = info.get("age_last_incremented")
-                if last_inc == current_year:
-                    continue
-                try:
-                    info["age"] = int(age) + 1
-                    info["age_last_incremented"] = current_year
-                    updated_chars.append(char_id)
-                    print(f"   > 用户 {user_id} {char_id}: {age} → {age + 1} 歳")
-                except (ValueError, TypeError):
-                    pass
-            if updated_chars:
-                safe_save_json(cfg_file, all_config)
-                updated_count += len(updated_chars)
+            with character_state_lock(cfg_file):
+                all_config = load_json_object(cfg_file, missing_ok=False)
+                for char_id, info in all_config.items():
+                    age = info.get("age")
+                    if age is None:
+                        continue
+                    last_inc = info.get("age_last_incremented")
+                    if last_inc == current_year:
+                        continue
+                    try:
+                        info["age"] = int(age) + 1
+                        info["age_last_incremented"] = current_year
+                        updated_chars.append(char_id)
+                        print(f"   > 用户 {user_id} {char_id}: {age} → {age + 1} 歳")
+                    except (ValueError, TypeError):
+                        pass
+                if updated_chars:
+                    safe_save_json(cfg_file, all_config)
+                    updated_count += len(updated_chars)
 
-        if os.path.exists(user_settings_file):
-            with open(user_settings_file, "r", encoding="utf-8") as f:
-                user_data = json.load(f)
-            age = user_data.get("user_age")
-            last_inc = user_data.get("user_age_last_incremented")
-            if age is not None and last_inc != current_year:
-                try:
-                    user_data["user_age"] = int(age) + 1
-                    user_data["user_age_last_incremented"] = current_year
-                    safe_save_json(user_settings_file, user_data)
-                    updated_count += 1
-                    print(f"   > 用户 {user_id}: {age} → {age + 1} 歳")
-                except (ValueError, TypeError):
-                    pass
+        with character_state_lock(Path(user_settings_file).with_name('credentials.json')):
+            if os.path.exists(user_settings_file):
+                with open(user_settings_file, "r", encoding="utf-8") as f:
+                    user_data = json.load(f)
+                age = user_data.get("user_age")
+                last_inc = user_data.get("user_age_last_incremented")
+                if age is not None and last_inc != current_year:
+                    try:
+                        user_data["user_age"] = int(age) + 1
+                        user_data["user_age_last_incremented"] = current_year
+                        safe_save_json(user_settings_file, user_data)
+                        updated_count += 1
+                        print(f"   > 用户 {user_id}: {age} → {age + 1} 歳")
+                    except (ValueError, TypeError):
+                        pass
+    except StorageWriteError:
+        raise
     except Exception as e:
         print(f"   ❌ 用户 {user_id} 年龄递增出错: {e}")
     finally:
@@ -377,25 +390,6 @@ def _should_run_bedtime_diary(info: dict, target_date_str: str, now_dt: datetime
     return True
 
 
-def _update_bedtime_diary_status(cfg_file: str, char_id: str, target_date_str: str, status: str, error: str | None = None):
-    try:
-        with open(cfg_file, "r", encoding="utf-8") as f:
-            all_config = json.load(f)
-        if char_id not in all_config:
-            return
-        info = all_config[char_id]
-        info["bedtime_diary_date"] = target_date_str
-        info["bedtime_diary_status"] = status
-        info["bedtime_diary_updated_at"] = _now_timestamp()
-        if error:
-            info["bedtime_diary_last_error"] = str(error)[:500]
-        elif status == "success":
-            info["bedtime_diary_last_error"] = None
-        safe_save_json(cfg_file, all_config)
-    except Exception as e:
-        print(f"🌙 [Diary] 写回状态失败 {char_id}: {e}")
-
-
 def _has_short_memory_events_for_date(char_id: str, target_date_str: str, user_id=None) -> bool:
     try:
         from app import get_paths
@@ -455,97 +449,97 @@ def _process_single_user_sleep_status(user_id, now_time: str = None):
         cfg_file = _get_characters_config_file()
         if not os.path.exists(cfg_file):
             return
-        with open(cfg_file, "r", encoding="utf-8") as f:
-            all_config = json.load(f)
+        with character_state_lock(cfg_file):
+            all_config = load_json_object(cfg_file, missing_ok=False)
 
-        updated = False
-        current_utc = utc_now()
-        current_beijing = current_utc.astimezone(BEIJING_TZ)
-        today_str = current_beijing.strftime("%Y-%m-%d")
-        now_time = current_beijing.strftime("%H:%M")
-        tolerance = timedelta(minutes=DEEP_SLEEP_TIME_TOLERANCE_MINUTES)
-        user_settings = _load_user_settings()
+            updated = False
+            current_utc = utc_now()
+            current_beijing = current_utc.astimezone(BEIJING_TZ)
+            today_str = current_beijing.strftime("%Y-%m-%d")
+            now_time = current_beijing.strftime("%H:%M")
+            tolerance = timedelta(minutes=DEEP_SLEEP_TIME_TOLERANCE_MINUTES)
+            user_settings = _load_user_settings()
 
-        for char_id, info in all_config.items():
-            if not isinstance(info, dict):
-                continue
-            if ensure_character_time_defaults(info, existing_character=True):
-                updated = True
+            for char_id, info in all_config.items():
+                if not isinstance(info, dict):
+                    continue
+                if ensure_character_time_defaults(info, existing_character=True):
+                    updated = True
 
-            source_tz = sleep_source_timezone(info, user_settings)
-            local_today = current_utc.astimezone(get_zone(source_tz)).date()
-            due_events = []
-            for local_date in (local_today - timedelta(days=1), local_today):
-                for event_type in ("sleep", "wake"):
-                    event_dt = sleep_event_datetime(
+                source_tz = sleep_source_timezone(info, user_settings)
+                local_today = current_utc.astimezone(get_zone(source_tz)).date()
+                due_events = []
+                for local_date in (local_today - timedelta(days=1), local_today):
+                    for event_type in ("sleep", "wake"):
+                        event_dt = sleep_event_datetime(
+                            info,
+                            user_settings,
+                            local_date,
+                            event_type,
+                        )
+                        if event_dt is None:
+                            continue
+                        if abs(current_utc - event_dt.astimezone(datetime.timezone.utc)) <= tolerance:
+                            due_events.append((event_dt, local_date, event_type))
+
+                for event_dt, local_date, event_type in sorted(
+                    due_events, key=lambda item: item[0]
+                ):
+                    event_key = sleep_event_key(
                         info,
                         user_settings,
                         local_date,
                         event_type,
                     )
-                    if event_dt is None:
+                    if info.get("sleep_last_event_key") == event_key:
                         continue
-                    if abs(current_utc - event_dt.astimezone(datetime.timezone.utc)) <= tolerance:
-                        due_events.append((event_dt, local_date, event_type))
 
-            for event_dt, local_date, event_type in sorted(
-                due_events, key=lambda item: item[0]
-            ):
-                event_key = sleep_event_key(
-                    info,
-                    user_settings,
-                    local_date,
-                    event_type,
-                )
-                if info.get("sleep_last_event_key") == event_key:
-                    continue
-
-                old_status = bool(info.get("deep_sleep", False))
-                new_status = event_type == "sleep"
-                info["deep_sleep"] = new_status
-                info["deep_sleep_source"] = "schedule"
-                info["sleep_manual_override"] = False
-                info["sleep_last_event_key"] = event_key
-                legacy_date_field = (
-                    "ds_start_last_applied_date"
-                    if event_type == "sleep"
-                    else "ds_end_last_applied_date"
-                )
-                info[legacy_date_field] = local_date.isoformat()
-                updated = True
-
-                beijing_event = event_dt.astimezone(BEIJING_TZ).strftime(
-                    "%Y-%m-%d %H:%M"
-                )
-                if event_type == "sleep":
-                    print(
-                        f"💤 [自动睡眠] 用户 {user_id} {char_id} 到点睡觉了 "
-                        f"(来源:{source_tz} {local_date} {info.get('ds_start')}, "
-                        f"北京:{beijing_event}, 当前:{now_time})"
+                    old_status = bool(info.get("deep_sleep", False))
+                    new_status = event_type == "sleep"
+                    info["deep_sleep"] = new_status
+                    info["deep_sleep_source"] = "schedule"
+                    info["sleep_manual_override"] = False
+                    info["sleep_last_event_key"] = event_key
+                    legacy_date_field = (
+                        "ds_start_last_applied_date"
+                        if event_type == "sleep"
+                        else "ds_end_last_applied_date"
                     )
-                    if (
-                        not old_status
-                        and bedtime_diary_global_enabled
-                        and info.get("bedtime_diary_enabled", True) is not False
-                        and _mark_bedtime_diary_pending(
-                            info,
-                            today_str,
-                            "auto_sleep",
-                        )
-                    ):
+                    info[legacy_date_field] = local_date.isoformat()
+                    updated = True
+
+                    beijing_event = event_dt.astimezone(BEIJING_TZ).strftime(
+                        "%Y-%m-%d %H:%M"
+                    )
+                    if event_type == "sleep":
                         print(
-                            f"🌙 [Diary] 用户 {user_id} {char_id} "
-                            "已加入睡前日记待生成队列"
+                            f"💤 [自动睡眠] 用户 {user_id} {char_id} 到点睡觉了 "
+                            f"(来源:{source_tz} {local_date} {info.get('ds_start')}, "
+                            f"北京:{beijing_event}, 当前:{now_time})"
                         )
-                else:
-                    print(
-                        f"☀️ [自动唤醒] 用户 {user_id} {char_id} 到点起床了 "
-                        f"(来源:{source_tz} {local_date} {info.get('ds_end')}, "
-                        f"北京:{beijing_event}, 当前:{now_time})"
-                    )
+                        if (
+                            not old_status
+                            and bedtime_diary_global_enabled
+                            and info.get("bedtime_diary_enabled", True) is not False
+                            and _mark_bedtime_diary_pending(
+                                info,
+                                today_str,
+                                "auto_sleep",
+                            )
+                        ):
+                            print(
+                                f"🌙 [Diary] 用户 {user_id} {char_id} "
+                                "已加入睡前日记待生成队列"
+                            )
+                    else:
+                        print(
+                            f"☀️ [自动唤醒] 用户 {user_id} {char_id} 到点起床了 "
+                            f"(来源:{source_tz} {local_date} {info.get('ds_end')}, "
+                            f"北京:{beijing_event}, 当前:{now_time})"
+                        )
 
-        if updated:
-            safe_save_json(cfg_file, all_config)
+            if updated:
+                safe_save_json(cfg_file, all_config)
     except Exception as e:
         print(f"❌ 用户 {user_id} 睡眠检查出错: {e}")
     finally:
@@ -578,30 +572,33 @@ def _process_single_user_bedtime_diaries(user_id, target_date_str: str):
                 pending_char_ids.append(char_id)
 
         for char_id in pending_char_ids[:BEDTIME_DIARY_MAX_PER_USER_PER_CHECK]:
-            with open(cfg_file, "r", encoding="utf-8") as f:
-                latest_config = json.load(f)
-            info = latest_config.get(char_id)
-            if not info or not _should_run_bedtime_diary(info, target_date_str, datetime.datetime.now()):
-                continue
+            with character_state_lock(cfg_file):
+                latest_config = load_json_object(cfg_file, missing_ok=False)
+                info = latest_config.get(char_id)
+                if not info or not _should_run_bedtime_diary(info, target_date_str, datetime.datetime.now()):
+                    continue
 
-            info["bedtime_diary_date"] = target_date_str
-            info["bedtime_diary_status"] = "running"
-            info["bedtime_diary_attempts"] = int(info.get("bedtime_diary_attempts") or 0) + 1
-            info["bedtime_diary_updated_at"] = _now_timestamp()
-            safe_save_json(cfg_file, latest_config)
+                info["bedtime_diary_date"] = target_date_str
+                info["bedtime_diary_status"] = "running"
+                info["bedtime_diary_attempts"] = int(info.get("bedtime_diary_attempts") or 0) + 1
+                info["bedtime_diary_updated_at"] = _now_timestamp()
+                safe_save_json(cfg_file, latest_config)
+
+            attempt = info["bedtime_diary_attempts"]
+
+            def finish(status, error=None):
+                return finish_diary_attempt(cfg_file, char_id, target_date_str, status,
+                                            _now_timestamp(), error=error, attempt=attempt)
 
             try:
                 try:
                     short_result = update_short_memory_for_date(
                         char_id,
-                        target_date_str,
+                        memory_now(user_id).strftime("%Y-%m-%d"),
                         user_id=user_id,
                     )
                     if not short_result.ok:
-                        _update_bedtime_diary_status(
-                            cfg_file,
-                            char_id,
-                            target_date_str,
+                        finish(
                             "failed",
                             f"short_memory_{short_result.status}",
                         )
@@ -612,15 +609,14 @@ def _process_single_user_bedtime_diaries(user_id, target_date_str: str):
                         processed_count += 1
                         continue
                 except Exception as e:
-                    _update_bedtime_diary_status(
-                        cfg_file, char_id, target_date_str, "failed", e
+                    finish( "failed", e
                     )
                     print(f"🌙 [Diary] 用户 {user_id} {char_id} 睡前短期记忆补录异常: {e}")
                     processed_count += 1
                     continue
 
                 if not _has_short_memory_events_for_date(char_id, target_date_str, user_id=user_id):
-                    _update_bedtime_diary_status(cfg_file, char_id, target_date_str, "skipped", "no_short_memory_today")
+                    finish("skipped", "no_short_memory_today")
                     print(f"🌙 [Diary] 用户 {user_id} {char_id} 今天没有短期记忆，跳过睡前日记")
                     processed_count += 1
                     continue
@@ -629,16 +625,13 @@ def _process_single_user_bedtime_diaries(user_id, target_date_str: str):
                     char_id,
                     user_id=user_id,
                     diary_date=target_date_str,
+                    attempt=attempt,
                 )
                 if not ok:
-                    with open(cfg_file, "r", encoding="utf-8") as f:
-                        after_config = json.load(f)
-                    after_info = after_config.get(char_id, {})
-                    if after_info.get("bedtime_diary_status") == "running":
-                        _update_bedtime_diary_status(cfg_file, char_id, target_date_str, "failed", "trigger_returned_false")
+                    finish("failed", "trigger_returned_false")
                 processed_count += 1
             except Exception as e:
-                _update_bedtime_diary_status(cfg_file, char_id, target_date_str, "failed", e)
+                finish("failed", e)
                 print(f"🌙 [Diary] 用户 {user_id} {char_id} 生成睡前日记出错: {e}")
 
             time.sleep(BEDTIME_DIARY_CHAR_DELAY_SECONDS)
@@ -720,6 +713,35 @@ def _beijing_now_naive(value=None):
     current = value or datetime.datetime.now(BEIJING_TZ)
     return current.astimezone(BEIJING_TZ).replace(tzinfo=None)
 
+
+def _heartbeat_last_message(db_path, user_id, conversation_id, *, group=False):
+    """Skip uninitialized/broken chat databases without aborting the user's scan."""
+    if not os.path.isfile(db_path):
+        return None
+
+    label = f"用户 {user_id} {'群聊' if group else '角色'} {conversation_id}"
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        if not conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages'"
+        ).fetchone():
+            print(f"   ⚠️ {label} 缺少 messages 表，跳过本次心跳检测: {db_path}")
+            return None
+
+        # 群聊中的角色消息以角色 ID 作为 role，排除用户及系统消息。
+        role_filter = "role NOT IN ('user', 'system')" if group else "role = 'assistant'"
+        return conn.execute(
+            f"SELECT timestamp FROM messages WHERE {role_filter} ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    except sqlite3.Error as exc:
+        print(f"   ⚠️ {label} 聊天数据库读取失败，跳过本次心跳检测: {db_path}: {exc}")
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def _process_single_user_active_messaging(user_id):
     """处理单个用户的主动消息检测（供线程池调用）"""
     from app import (
@@ -756,14 +778,7 @@ def _process_single_user_active_messaging(user_id):
                 continue
 
             db_path, _ = get_paths(char_id)
-            if not os.path.exists(db_path):
-                continue
-
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT timestamp FROM messages WHERE role = 'assistant' ORDER BY id DESC LIMIT 1")
-            row = cursor.fetchone()
-            conn.close()
+            row = _heartbeat_last_message(db_path, user_id, char_id)
 
             if not row:
                 continue
@@ -795,15 +810,7 @@ def _process_single_user_active_messaging(user_id):
 
             group_dir_path = get_group_dir(group_id)
             db_path = os.path.join(group_dir_path, "chat.db")
-            if not os.path.exists(db_path):
-                continue
-
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            # 群聊中的角色消息以角色 ID 作为 role，排除用户及系统消息。
-            cursor.execute("SELECT timestamp FROM messages WHERE role NOT IN ('user', 'system') ORDER BY id DESC LIMIT 1")
-            row = cursor.fetchone()
-            conn.close()
+            row = _heartbeat_last_message(db_path, user_id, group_id, group=True)
 
             if not row: continue  # 尚无角色发言的群不主动
 

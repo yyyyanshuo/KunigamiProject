@@ -66,15 +66,33 @@
     }
 
     async function flush(userId, contacts) {
-        const allowed = new Set(contacts.map(c => `${c.type === 'group' ? 'group' : 'chat'}:${c.id}`));
+        // STALE_RECEIPT_GUARD_20260923: never let receipt retries hide contacts.
+        const known = new Map(contacts.map(c => [`${c.type === 'group' ? 'group' : 'chat'}:${c.id}`, c]));
         const items = pending(userId).filter(item => {
-            if (allowed.has(`${item.type}:${item.id}`)) return true;
-            acknowledge(userId, item); // A deleted conversation must not block other receipts.
-            return false;
+            const contact = known.get(`${item.type}:${item.id}`);
+            if (!contact) {
+                acknowledge(userId, item); // Preserve the existing deleted-conversation cleanup.
+                return false;
+            }
+            if (Number.isSafeInteger(contact.last_message_id) &&
+                Number.isSafeInteger(item.last_message_id) &&
+                item.last_message_id > contact.last_message_id) {
+                // History may have been truncated or reset. Keep the pending record,
+                // but do not clamp it to the newest message and mark new arrivals read.
+                return false;
+            }
+            return true;
         });
         if (!items.length) return false;
-        await saveBatch(userId, items);
-        return true;
+        try {
+            await saveBatch(userId, items);
+            return true;
+        } catch (error) {
+            // The fetched contact list is still valid. Retry receipts next refresh;
+            // explicit send/saveBatch actions continue to report failures to callers.
+            console.warn('已读状态暂未同步，待同步记录已保留', error);
+            return false;
+        }
     }
 
     async function saveBatch(userId, conversations) {

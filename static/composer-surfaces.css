@@ -1,0 +1,35 @@
+/* Small control refinements; retain each editor's original white surface and colors. */
+.vision-prompt-tools select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid #e3dfe2;
+  border-radius: 12px;
+  background-color: #fff;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-overflow: ellipsis;
+}
+.transfer-editor-field input:focus,
+.transfer-editor-field textarea:focus,
+.image-composer-fields textarea:not(.send-translation-input):focus,
+#momentModal .moment-compose-text:focus,
+#momentModal .moment-vision-prompt:focus,
+.vision-prompt-tools select:focus {
+  outline: none;
+  border-color: #e7a1bc;
+  box-shadow: 0 0 0 2px rgba(231, 161, 188, .13);
+}
+.image-description-mode.active {
+  border-color: #e7a1bc;
+}
+/* Match the existing Moments post editor's 15px text size. */
+#imageVisionPrompt,
+#momentModal .moment-vision-prompt {
+  font-size: 15px;
+}
+#imageVisionPrompt::placeholder {
+  font-size: inherit;
+}

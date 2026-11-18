@@ -6,6 +6,7 @@ from flask import Flask
 
 import blueprints.square as square
 import core.utils as core_utils
+import core.user_resources as user_resources
 
 
 def _write_json(path, value):
@@ -23,6 +24,7 @@ def _setup_square(tmp_path, monkeypatch):
     monkeypatch.setattr(square, "USERS_DB", str(users_db))
     monkeypatch.setattr(square, "SQUARE_AVATARS_DIR", str(avatars_dir))
     monkeypatch.setattr(core_utils, "USERS_ROOT", str(users_root))
+    monkeypatch.setattr(user_resources, "USERS_ROOT", str(users_root))
 
     with sqlite3.connect(users_db) as conn:
         conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)")
@@ -187,7 +189,6 @@ def test_square_import_creates_single_field_persona_json(tmp_path, monkeypatch):
 
     monkeypatch.setattr(square, "get_current_user_id", lambda: 1)
     monkeypatch.setattr(square, "_get_characters_config_file", lambda: str(config_path))
-    monkeypatch.setattr("app.init_char_db", lambda _char_id: None)
     app = Flask(__name__)
     with app.test_request_context(json={"id": "public_new"}):
         body, status = _response(square.api_square_add_to_local())
@@ -339,3 +340,18 @@ def test_square_edit_template_keeps_public_id_when_importing_local_character():
     assert "if (!isEdit) document.querySelector('[name=\"id\"]').value = data.id;" in source
     assert "formData.set('source_character_id', window.importedLocalCharacterId);" in source
     assert "document.getElementById('import-section').style.display = 'none'" not in source
+
+
+def test_public_detail_does_not_expose_account_fields(tmp_path, monkeypatch):
+    _, db_path, _ = _setup_square(tmp_path, monkeypatch)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO characters(id,name,author_email,author_user_id,source_character_id,base_persona) VALUES (?,?,?,?,?,?)",('privacy','Public','author@example.com',1,'private-source','shared persona'))
+    app=Flask(__name__); app.secret_key='synthetic-only'; app.register_blueprint(square.square_bp)
+    client=app.test_client()
+    with client.session_transaction() as s: s['user_id']=2
+    result=client.get('/api/square/character/privacy')
+    assert result.status_code==200
+    character=result.json['character']
+    assert character['base_persona']=='shared persona'
+    assert not {'author_email','author_user_id','source_character_id'} & character.keys()
+    assert 'author@example.com' not in result.get_data(as_text=True)

@@ -1,0 +1,38 @@
+{
+  "core/model_settings.py": {
+    "before": "8f804cf1412049bbffa51f4a6f5ca1b9d1ef4e0ef849e6c61d8ce15ee9b2e3f2",
+    "after": "fd23720e8965f64fda60f311349b1146e5ef257d7570bdc16718d3844048ee14"
+  },
+  "core/model_catalog.py": {
+    "before": "c5a26c8e3df8ce6925f2d61bf5896d00974c86671417a7c09e322ac260a79711",
+    "after": "9f89f4417cf84d035864f9433de8a9031753d323302e38d6a5e3857f5ac0fcea"
+  },
+  "static/model-settings.js": {
+    "before": "b3bd821e09081152ac26570a470f0da1f54e67fd1289dcfac73dbfac40fc026d",
+    "after": "f2225f17602922c11aa100561c496a9009b4734a964c825dd0445f65ef321d43"
+  },
+  "static/locales/ui.json": {
+    "before": "4aa7112c224e1a96e63b328aa02031599e55d2ab4f8c7be639b38a2d69289328",
+    "after": "bcea1815d0b6a5876d78fb35d78737128cbebd3189872d045c5207faffb8155c"
+  },
+  "templates/guide/zh-CN.html": {
+    "before": "f837c51ac0bca0aa0156d9ebd6073c73f6d5869da9deecc290ab51adf917d7d0",
+    "after": "53352bf2b43c996de2880e52089b16904c696447e4e953f3290d60492ee29268"
+  },
+  "templates/guide/ja.html": {
+    "before": "438f82788c4106bc8c1481d28b7bfdd00a179513c3efb9284b74d02dbcde5ed9",
+    "after": "eea390eaa84527bcb8a6d6669baacc1c05961dcc2f6f8b1297a8dac20d03359e"
+  },
+  "templates/guide/en.html": {
+    "before": "5d7255a8567803768cdf43c73d06f4bf079c7092ce8f664db59fbff5a4891da7",
+    "after": "0c5a4e94b1f3ec678e0d084e9d917bdaa9fee15715c6a203d881a5092ccd5922"
+  },
+  "CHANGELOG.md": {
+    "before": "cc9b1d0c7647e0c5fd83eebde5ac801e56646738b8dc12f130ca1a1d076792b2",
+    "after": "789c51d248113134f9c4d80a4c3bce137f1ed985f5079655e79cded6b847b8f3"
+  },
+  "docs/changes/CHG-20261118-001-gemini-model-refresh.md": {
+    "before": null,
+    "after": "512628b81d026f00a7338a1cdfec4795fd7edb65a5e998d7198531853352a9e8"
+  }
+}

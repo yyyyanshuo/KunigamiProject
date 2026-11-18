@@ -1,6 +1,7 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="{{ ui_language }}" data-ai-brand-line="{{ ui_t('ai_brand_line', brand=saki_brand) }}">
 <head>
+  {% include "ui_language_head.html" %}
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="manifest" href="/manifest.json">
@@ -10,6 +11,8 @@
     <link rel="apple-touch-icon" href="/static/logo.png">
     <title>朋友圈</title>
     <script src="/static/image-tags.js"></script>
+    <script src="/static/vision-prompts.js?v=20261118-1"></script>
+    <script src="/static/composer-viewport.js?v=20261118-1"></script>
     <script src="/static/ai-disclosure.js"></script>
     <script defer src="/static/voice-call-incoming.js"></script>
     <script>
@@ -21,7 +24,7 @@
         // 【核心】定义 COS URL 转换函数
         window.getCosUrl = function(path) {
             if (!path) return "";
-            if (path.startsWith("http")) return path;
+            if (path.startsWith("http") || path.startsWith("/")) return path;
             const baseUrl = window.GLOBAL_COS_BASE_URL;
             if (!baseUrl) return "/" + path;
             return baseUrl.endsWith("/") ? (baseUrl + path) : (baseUrl + "/" + path);
@@ -29,6 +32,8 @@
     </script>
     <!-- 【新增】主题加载脚本 -->
     <script src="/static/theme-loader.js"></script>
+    <script src="/static/moment-visibility.js?v=20261019"></script>
+    <link rel="stylesheet" href="/static/moment-visibility.css?v=20261019-2">
     <style>
         :root {
             --primary-color: #ffb6b9;
@@ -68,18 +73,18 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.02);
         }
 
+        .char-filter { position: relative; min-width: 0; }
         .header-title {
-            font-size: 18px;
-            font-weight: 700;
+            font: inherit; font-size: 18px; font-weight: 700;
+            color: var(--primary-dark); background: none; border: 0;
+            padding: 0; text-align: left; cursor: pointer;
+            display: flex; align-items: center; gap: 4px; min-width: 0;
+        }
+        #charFilterLabel {
             background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
-            background-clip: text;
-            -webkit-background-clip: text;
+            background-clip: text; -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            position: relative;
+            overflow-wrap: anywhere;
         }
 
         .header-title::after {
@@ -104,6 +109,8 @@
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
             z-index: 100;
             min-width: 140px;
+            max-width: calc(100vw - 32px);
+            text-align: left;
             margin-top: 8px;
             overflow: hidden;
             max-height: 300px;
@@ -202,7 +209,7 @@
         }
         .preview-mode-row { display: flex; gap: 3px; padding: 5px 5px 0; }
         .preview-mode-btn { flex: 1; min-width: 0; padding: 4px 1px; border: 1px solid var(--border-color); border-radius: 5px; background: #fff; color: var(--text-muted); font-size: 10px; white-space: nowrap; cursor: pointer; }
-        .preview-mode-btn.active { border-color: var(--primary-color); background: rgba(255, 182, 185, 0.14); color: var(--primary-dark); font-weight: 600; }
+        .preview-mode-btn.active { border-color: var(--primary-color); background: var(--primary-rgba-lighter); color: var(--primary-dark); font-weight: 600; }
         .preview-description { display: none; width: calc(100% - 10px); min-height: 42px; max-height: 90px; margin: 5px 5px 0; padding: 6px; box-sizing: border-box; border: 1px solid var(--border-color); border-radius: 5px; resize: vertical; font: inherit; font-size: 11px; }
         .preview-description.show { display: block; }
         .moment-image-bulk { display: none; align-items: center; gap: 6px; margin-bottom: 7px; font-size: 11px; color: var(--text-muted); }
@@ -387,8 +394,16 @@
             white-space: pre-wrap;
             word-break: break-word;
         }
-        .moment-ai-disclosure {
+        .moment-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 4px 12px;
             margin-top: 9px;
+        }
+        .moment-ai-disclosure {
+            margin-left: auto;
             color: var(--text-muted);
             font-size: 10px;
             line-height: 1.4;
@@ -677,7 +692,8 @@
 
         /* 模态弹窗 */
         .moment-modal-mask {
-            position: fixed; inset: 0; z-index: 20; display: none;
+            position: fixed; top: var(--composer-top, 0px); left: var(--composer-left, 0px);
+            width: var(--composer-width, 100%); height: var(--composer-height, 100dvh); z-index: 2000; display: none;
             align-items: center; justify-content: center;
             padding: 12px; box-sizing: border-box; overflow: hidden;
             background: rgba(0, 0, 0, 0.4);
@@ -687,7 +703,7 @@
             background: #fff; border-radius: var(--radius-lg);
             padding: 18px; width: 88%; max-width: 400px;
             max-height: calc(100vh - 24px);
-            max-height: calc(100dvh - 24px);
+            max-height: calc(var(--composer-height, 100dvh) - 24px);
             overflow-y: auto; overscroll-behavior: contain;
             -webkit-overflow-scrolling: touch; box-sizing: border-box;
             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
@@ -803,6 +819,17 @@
         }
 
         .moment-modal-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px; }
+        #momentModal .moment-modal-actions { position: sticky; bottom: -18px; z-index: 2; background: #fff; padding: 12px 0 max(18px, env(safe-area-inset-bottom)); margin-bottom: -18px; }
+        #momentModal .moment-vision-prompt { display: block; width: 100%; min-height: 72px; box-sizing: border-box; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; font: inherit; font-size: 16px; resize: vertical; }
+        #momentVisionPromptPanel { margin: 12px 0; }
+        #momentVisionPromptPanel[hidden] { display: none; }
+        #momentVisionPromptPanel label { display: block; font-size: 13px; margin-bottom: 7px; }
+        .vision-prompt-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .vision-prompt-tools select { width: 100%; min-width: 0; padding: 8px; font: inherit; }
+        .vision-prompt-tools button { border: 1px solid var(--border-color); background: #fff; padding: 7px; border-radius: 6px; }
+        .vision-prompt-tools [role="status"] { width: 100%; font-size: 12px; overflow-wrap: anywhere; }
+        .moment-visibility-mask { z-index: 2200; }
+
         .moment-cancel-btn {
             padding: 10px 20px; background: #f0f2f5; border: none; border-radius: 24px;
             font-size: 14px; font-weight: 600; cursor: pointer; color: var(--text-muted); transition: background 0.2s;
@@ -860,6 +887,7 @@
             100% { box-shadow: var(--shadow-sm); transform: scale(1); }
         }
     </style>
+  <link rel="stylesheet" href="/static/composer-surfaces.css?v=20261118-3">
 </head>
 <body>
     <!-- 【新增】主题加载屏幕 -->
@@ -872,8 +900,10 @@
     </div>
 
     <header class="header">
-        <div class="header-title" id="charFilterBtn">
-            <span id="charFilterLabel">朋友圈</span>
+        <div class="char-filter" id="charFilter">
+            <button type="button" class="header-title" id="charFilterBtn" aria-expanded="false" aria-controls="charFilterMenu">
+                <span id="charFilterLabel">朋友圈</span>
+            </button>
             <div class="char-filter-menu" id="charFilterMenu">
                 <div class="char-filter-item active" data-char-id="all">所有</div>
                 <div class="char-filter-item" data-char-id="user">我自己</div>
@@ -882,7 +912,7 @@
         </div>
         <div class="header-actions">
             <button type="button" class="moment-active-toggle" id="onlySelfToggle" style="display:none;" title="只看我发表的内容">只看自己</button>
-            <button type="button" class="moment-active-toggle" id="activeMomentsToggle" title="角色会定时自动发朋友圈">关闭主动朋友圈</button>
+            <button type="button" class="moment-active-toggle" id="activeMomentsToggle" title="角色会定时自动发朋友圈">主动朋友圈</button>
             <button class="moment-add-btn" id="openMomentModal" aria-label="发朋友圈">＋</button>
         </div>
     </header>
@@ -904,8 +934,8 @@
 
         <!-- 发送弹窗 -->
         <div class="moment-modal-mask" id="momentModalMask">
-            <div class="moment-modal" id="momentModal">
-                <div class="moment-modal-title">发朋友圈</div>
+            <div class="moment-modal" id="momentModal" role="dialog" aria-modal="true" aria-labelledby="momentComposeTitle" tabindex="-1">
+                <div class="moment-modal-title" id="momentComposeTitle">发朋友圈</div>
                 <div class="moment-modal-body">
                     <!-- 发帖方式切换 -->
                     <div style="display: flex; gap: 10px; margin-bottom: 15px;">
@@ -914,9 +944,9 @@
                     </div>
 
                     <!-- 我自己发区域 -->
-                    <div id="userPostSection">
+                    <fieldset id="userPostSection" style="border:0;min-width:0;padding:0;margin:0;">
                         <div class="moment-compose-trans-row" id="momentComposeTransRow" style="display:none;">
-                            <input type="text" class="moment-compose-trans-input" id="momentComposeTransText" placeholder="输入中文，翻译成日语后填入下方正文">
+                            <input type="text" class="moment-compose-trans-input" id="momentComposeTransText" placeholder="输入要翻译的内容，结果可编辑后发送">
                             <button type="button" class="moment-compose-trans-btn" id="momentComposeTransBtn">翻译</button>
                         </div>
                         <textarea class="moment-compose-text" id="momentComposeText" placeholder="分享此刻的想法…" maxlength="2000"></textarea>
@@ -931,14 +961,23 @@
                             <button type="button" data-mode="ai">AI 识图</button>
                             <button type="button" data-mode="manual">手动描述</button>
                         </div>
+                        <div id="momentVisionPromptPanel" hidden>
+                            <label for="momentVisionPrompt">识图附加提示词（本条朋友圈共用）</label>
+                            <textarea id="momentVisionPrompt" class="moment-vision-prompt" maxlength="2000" placeholder="例如：重点描述人物的衣着、表情和动作，用三句话总结。留空使用系统默认要求。"></textarea>
+                            <div id="momentPromptPresets" class="vision-prompt-tools"></div>
+                            <p style="font-size:12px;color:var(--text-muted);">只用于本条朋友圈中启用 AI 识图的图片，不作为正文发布。</p>
+                        </div>
                         <div id="uploadTokenWarning" style="font-size: 11px; color: #e57373; margin-bottom: 8px; display: none;">AI 识图会消耗较多 Token；描述仅供角色理解，不显示在正文中。</div>
                         
                         <div class="moment-char-count" id="momentCharCount">0/2000</div>
+                        <button type="button" id="momentVisibilityOpen" class="moment-visibility-open">
+                            <span>谁不可见</span><span id="momentVisibilitySummary">所有角色可见</span>
+                        </button>
                         <div class="moment-modal-actions">
                             <button type="button" class="moment-cancel-btn" id="momentModalCancel">取消</button>
                             <button type="button" class="moment-compose-btn" id="momentComposeBtn">发布</button>
                         </div>
-                    </div>
+                    </fieldset>
 
                     <!-- 让角色发区域 -->
                     <div id="aiPostSection" style="display:none;">
@@ -957,6 +996,22 @@
             </div>
             <!-- @ 提示菜单 -->
             <div id="atMentionMenu" class="at-mention-menu"></div>
+        </div>
+
+        <!-- 朋友圈可见范围 -->
+        <div id="momentVisibilityMask" class="moment-visibility-mask" hidden>
+            <div class="moment-visibility-dialog" role="dialog" aria-modal="true" aria-labelledby="momentVisibilityTitle" aria-describedby="momentVisibilityHint" tabindex="-1">
+                <div class="moment-visibility-header">
+                    <h2 id="momentVisibilityTitle" class="moment-visibility-title">谁不可见</h2>
+                    <p id="momentVisibilityHint" class="moment-visibility-hint"></p>
+                </div>
+                <div id="momentVisibilityList" class="moment-visibility-list"></div>
+                <p id="momentVisibilityStatus" class="moment-visibility-status" role="status" aria-live="polite"></p>
+                <div class="moment-visibility-actions">
+                    <button type="button" id="momentVisibilityCancel">取消</button>
+                    <button type="button" id="momentVisibilityApply" class="moment-visibility-apply">确定</button>
+                </div>
+            </div>
         </div>
 
         <!-- 编辑弹窗 -->
@@ -1000,7 +1055,7 @@
                     <!-- 用户亲自回复区域 -->
                     <div id="userReplySection" style="display:none;">
                         <div class="moment-compose-trans-row" id="userReplyTransRow" style="display:none; margin-bottom: 10px;">
-                            <input type="text" class="moment-compose-trans-input" id="userReplyTransInput" placeholder="输入中文，翻译成日语后填入下方" style="flex:1;">
+                            <input type="text" class="moment-compose-trans-input" id="userReplyTransInput" placeholder="输入要翻译的内容，结果可编辑后发送" style="flex:1;">
                             <button type="button" class="moment-compose-trans-btn" id="userReplyTransBtn">翻译</button>
                         </div>
                         <textarea class="moment-compose-text" id="userReplyTextarea" placeholder="我也说一句…" maxlength="500" style="height: 100px; margin-bottom: 5px;"></textarea>
@@ -1050,6 +1105,7 @@
             }
             
             const listEl = document.getElementById('momentsList');
+            const momentVisibility = SakiMomentVisibility.create();
             const USER_ID = 'user';
             const loadMoreBtn = document.getElementById('loadMoreBtn');
             let currentPage = 0;
@@ -1072,8 +1128,8 @@
                     .replace(/</g, '&lt;')
                     .replace(/>/g, '&gt;');
             }
-            // 朋友圈记录统一按北京时间展示。
-            const RECORD_TIMEZONE = 'Asia/Shanghai';
+            // Record IDs and media folders keep their original basis; display is user-local.
+            const RECORD_TIMEZONE = {{ user_timezone | default('Asia/Shanghai') | tojson }};
             function parseBeijingTime(ts) {
                 if (!ts) return new Date(NaN);
                 const normalized = String(ts).trim().replace(
@@ -1082,9 +1138,9 @@
                 );
                 return new Date(normalized);
             }
-            function recordDateKey(d) {
+            function recordDateKey(d, zone = RECORD_TIMEZONE) {
                 return new Intl.DateTimeFormat('en-CA', {
-                    timeZone: RECORD_TIMEZONE,
+                    timeZone: zone,
                     year: 'numeric', month: '2-digit', day: '2-digit'
                 }).format(d);
             }
@@ -1094,14 +1150,17 @@
                     const d = parseBeijingTime(ts);
                     if (Number.isNaN(d.getTime())) return ts;
                     const now = new Date();
-                    const yesterday = new Date(now.getTime() - 86400000);
-                    const timeText = new Intl.DateTimeFormat('zh-CN', {
+                    const todayKey = recordDateKey(now);
+                    const yesterday = new Date(todayKey + 'T12:00:00Z');
+                    yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+                    const yesterdayKey = yesterday.toISOString().slice(0, 10);
+                    const timeText = new Intl.DateTimeFormat(document.documentElement.lang, {
                         timeZone: RECORD_TIMEZONE,
                         hour: '2-digit', minute: '2-digit', hour12: false
                     }).format(d);
-                    if (recordDateKey(d) === recordDateKey(now)) return '今天 ' + timeText;
-                    if (recordDateKey(d) === recordDateKey(yesterday)) return '昨天 ' + timeText;
-                    const dateText = new Intl.DateTimeFormat('zh-CN', {
+                    if (recordDateKey(d) === recordDateKey(now)) return SakiI18n.t('今天 {time}', {time: timeText});
+                    if (recordDateKey(d) === yesterdayKey) return SakiI18n.t('昨天 {time}', {time: timeText});
+                    const dateText = new Intl.DateTimeFormat(document.documentElement.lang, {
                         timeZone: RECORD_TIMEZONE,
                         month: 'numeric', day: 'numeric'
                     }).format(d);
@@ -1109,39 +1168,63 @@
                 } catch (e) { return ts; }
             }
 
-            let aiLanguage = 'zh';
-            const TRANSLATION_CACHE_PREFIX = 'kt_mom_';
-            const translationCache = {};
-            const momentsHiddenTrans = new Set();
-            (function() {
-                try {
-                    const raw = localStorage.getItem('kt_mom_hidden');
-                    if (raw) { JSON.parse(raw).forEach(k => momentsHiddenTrans.add(k)); }
-                } catch(e) {}
-            })();
-            function _saveMomentsHidden() {
-                try { localStorage.setItem('kt_mom_hidden', JSON.stringify([...momentsHiddenTrans])); } catch(e) {}
-            }
+            let aiLanguage = window.AI_LANG || document.documentElement.lang;
+            const accountTranslationPrefix = window.SakiPrivacy?.translationCachePrefix || '';
+            const TRANSLATION_CACHE_PREFIX = accountTranslationPrefix
+                ? accountTranslationPrefix + 'moments_v2_' + document.documentElement.lang + '_' : '';
+            const translationCache = Object.create(null);
+            const pendingTranslations = new Map();
 
             function _loadTransCache() {
-                for (let i = 0; i < localStorage.length; i++) {
-                    const key = localStorage.key(i);
-                    if (key && key.startsWith(TRANSLATION_CACHE_PREFIX)) {
-                        translationCache[key.slice(TRANSLATION_CACHE_PREFIX.length)] = localStorage.getItem(key);
+                if (!TRANSLATION_CACHE_PREFIX) return;
+                try {
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const key = localStorage.key(i);
+                        if (!key || !key.startsWith(TRANSLATION_CACHE_PREFIX)) continue;
+                        try {
+                            const entry = JSON.parse(localStorage.getItem(key));
+                            if (entry && typeof entry.source === 'string' && typeof entry.result === 'string' && entry.result.trim()) {
+                                translationCache[key.slice(TRANSLATION_CACHE_PREFIX.length)] = entry;
+                            }
+                        } catch (_) {}
                     }
-                }
+                } catch (_) {}
             }
             _loadTransCache();
 
-            function _saveTransCache(entryKey, value) {
-                try { localStorage.setItem(TRANSLATION_CACHE_PREFIX + entryKey, value); } catch (e) {}
+            function _saveTransCache(entryKey, result, source) {
+                const entry = {result, source};
+                translationCache[entryKey] = entry;
+                if (!TRANSLATION_CACHE_PREFIX) return;
+                try { localStorage.setItem(TRANSLATION_CACHE_PREFIX + entryKey, JSON.stringify(entry)); } catch (_) {}
             }
 
             function _removeTransCache(entryKey) {
-                localStorage.removeItem(TRANSLATION_CACHE_PREFIX + entryKey);
+                delete translationCache[entryKey];
+                if (!TRANSLATION_CACHE_PREFIX) return;
+                try { localStorage.removeItem(TRANSLATION_CACHE_PREFIX + entryKey); } catch (_) {}
             }
 
-            function isJaMode() { return aiLanguage === 'ja'; }
+            function translationSource(moment, comment) {
+                // Comment indices can shift after deletions; bind each result to
+                // its actual author/time/text as well as the parent post.
+                return JSON.stringify([moment.content || '', ...(comment ? [
+                    comment.commenter_id, comment.timestamp, comment.reply_to, comment.content || ''
+                ] : [])]);
+            }
+
+            function _getTransCache(entryKey, source) {
+                const entry = translationCache[entryKey];
+                if (entry && entry.source !== source) _removeTransCache(entryKey);
+                return entry && entry.source === source ? entry.result : '';
+            }
+
+            function translationText(content) {
+                return window.KunigamiImageTags.strip(content || '').trim();
+            }
+
+            function canTranslate() { return true; } // Reading translations stay available for mixed-language content.
+            function needsSendTranslation() { return SakiI18n.needsSendTranslation(aiLanguage); }
 
             function renderGridImages(mObj) {
                 const content = mObj.content || '';
@@ -1157,12 +1240,12 @@
                 let html = '<div class="moment-photos ' + gridClass + '">';
                 matches.slice(0, 9).forEach((m, idx) => {
                     let path = m.path;
-                    if (path && !path.startsWith('http')) {
+                    if (path && !path.startsWith('http') && !path.startsWith('/')) {
                         if (!path.startsWith('users/')) {
                             if (!path.includes('/')) {
                                 try {
                                     const d = parseBeijingTime(mObj.timestamp);
-                                    const yyyymm = recordDateKey(d).slice(0, 7).replace('-', '');
+                                    const yyyymm = recordDateKey(d, 'Asia/Shanghai').slice(0, 7).replace('-', '');
                                     path = yyyymm + '/' + path;
                                 } catch (e) {}
                             }
@@ -1191,16 +1274,16 @@
                 try {
                     const r = await fetch('/api/user/profile_settings');
                     const data = await r.json();
-                    aiLanguage = data && data.ai_language ? data.ai_language : 'zh';
+                    aiLanguage = data && data.ai_language ? data.ai_language : document.documentElement.lang;
                 } catch (e) {
-                    aiLanguage = 'zh';
+                    aiLanguage = document.documentElement.lang;
                 }
                 const transRow = document.getElementById('momentComposeTransRow');
-                if (transRow) transRow.style.display = isJaMode() ? 'flex' : 'none';
+                if (transRow) transRow.style.display = needsSendTranslation() ? 'flex' : 'none';
             }
 
             async function addFurigana(text) {
-                if (!isJaMode() || !text) return text || '';
+                if (!window.SakiFuriganaEnabled || !text) return text || '';
                 try {
                     const r = await fetch('/api/furigana', {
                         method: 'POST',
@@ -1215,7 +1298,7 @@
             }
 
             async function decorateMomentsBatch(moments) {
-                if (!isJaMode() || !Array.isArray(moments)) return moments || [];
+                if (!window.SakiFuriganaEnabled || !Array.isArray(moments)) return moments || [];
                 return Promise.all(moments.map(async (m) => {
                     const copy = Object.assign({}, m);
                     
@@ -1225,7 +1308,7 @@
                     let imgTags = protectedImages.tags.map(tag => tag.raw);
                     text = protectedImages.text;
                     
-                    let furiText = await addFurigana(text);
+                    let furiText = copy.char_id !== USER_ID ? await addFurigana(text) : text;
                     
                     imgTags.forEach((tag, idx) => {
                         furiText = furiText.replace(`__IMG_${idx}__`, tag);
@@ -1234,7 +1317,7 @@
 
                     copy.comments = await Promise.all((copy.comments || []).map(async (c) => {
                         const cc = Object.assign({}, c);
-                        cc.display_content = await addFurigana(cc.content || '');
+                        cc.display_content = cc.commenter_id !== USER_ID ? await addFurigana(cc.content || '') : cc.content;
                         return cc;
                     }));
                     return copy;
@@ -1243,7 +1326,7 @@
 
             function renderMoments(moments, options) {
                 if (!moments || moments.length === 0) {
-                    listEl.innerHTML = '<p class="empty-state">暂无内容，敬请期待。</p>';
+                    listEl.innerHTML = SakiI18n.fragment('<p class="empty-state">暂无内容，敬请期待。</p>');
                     finished = true;
                     updateLoadMoreBtn();
                     return;
@@ -1251,7 +1334,7 @@
                 listEl.innerHTML = moments.map(m => {
                     const hasMyLike = (m.liker_ids || []).indexOf(USER_ID) >= 0;
                     const likeBtnClass = hasMyLike ? 'moment-like-btn is-liked' : 'moment-like-btn';
-                    const likeBtnText = hasMyLike ? '已赞' : '赞';
+                    const likeBtnText = SakiI18n.t(hasMyLike ? '已赞' : '赞');
                     const postKey = (m.char_id || '') + '|' + (m.timestamp || '');
                     const likersHtml = m.liker_remarks && m.liker_remarks.length
                         ? '<div class="moment-likes">' + m.liker_remarks.join('、') + '</div>'
@@ -1260,30 +1343,31 @@
                         ? '<div class="moment-comments">' + m.comments.map(c => {
                             const commentKey = postKey + '|c|' + String(c.comment_index);
                             const replyLabel = (c.reply_to_remark != null && c.reply_to_remark !== '')
-                                ? '<span class="comment-reply-label">回复 ' + escapeHtml(c.reply_to_remark) + '：</span>'
+                                ? '<span class="comment-reply-label">' + escapeHtml(SakiI18n.t('回复 {name}：', {name:c.reply_to_remark})) + '</span>'
                                 : '';
                             const canRegen = c.commenter_id && c.commenter_id !== USER_ID;
                             
                             // 评论区操作菜单
                             let menuItems = '';
-                            if (isJaMode()) {
-                                menuItems += '<button type="button" class="moment-menu-item comment-translate-btn" title="翻译评论" data-comment-index="' + escapeAttr(c.comment_index) + '" data-comment-key="' + escapeAttr(commentKey) + '">翻译</button>';
+                            if (canTranslate()) {
+                                menuItems += '<button type="button" class="moment-menu-item comment-translate-btn" title="' + escapeAttr(SakiI18n.t('翻译评论')) + '" data-comment-index="' + escapeAttr(c.comment_index) + '" data-comment-key="' + escapeAttr(commentKey) + '">' + escapeHtml(SakiI18n.t('翻译')) + '</button>';
                             }
                             if (canRegen) {
-                                menuItems += '<button type="button" class="moment-menu-item comment-regen-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">重新生成</button>';
-                                menuItems += '<button type="button" class="moment-menu-item comment-memory-regen-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">重新记忆</button>';
+                                menuItems += '<button type="button" class="moment-menu-item comment-regen-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">' + escapeHtml(SakiI18n.t('重新生成')) + '</button>';
+                                menuItems += '<button type="button" class="moment-menu-item comment-memory-regen-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">' + escapeHtml(SakiI18n.t('重新记忆')) + '</button>';
                             }
-                            menuItems += '<button type="button" class="moment-menu-item comment-reply-ai-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">回复</button>';
-                            menuItems += '<button type="button" class="moment-menu-item comment-edit-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">编辑</button>';
-                            menuItems += '<button type="button" class="moment-menu-item comment-delete-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">删除</button>';
+                            menuItems += '<button type="button" class="moment-menu-item comment-reply-ai-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">' + escapeHtml(SakiI18n.t('回复')) + '</button>';
+                            menuItems += '<button type="button" class="moment-menu-item comment-edit-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">' + escapeHtml(SakiI18n.t('编辑')) + '</button>';
+                            menuItems += '<button type="button" class="moment-menu-item comment-delete-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">' + escapeHtml(SakiI18n.t('删除')) + '</button>';
                             
                             const commentMenu = '<div class="moment-actions-menu">' +
                                 '<button type="button" class="moment-menu-btn" data-comment-index="' + escapeAttr(c.comment_index) + '">⋮</button>' +
                                 '<div class="moment-menu-dropdown">' + menuItems + '</div>' +
                                 '</div>';
                             
-                            const transResult = translationCache[commentKey]
-                                ? '<div class="comment-translation-result">' + escapeHtml(translationCache[commentKey]) + '</div>'
+                            const cachedComment = _getTransCache(commentKey, translationSource(m, c));
+                            const transResult = cachedComment
+                                ? '<div class="comment-translation-result">' + escapeHtml(cachedComment) + '</div>'
                                 : '';
                             return '<div class="comment-item">' +
                                 '<div class="comment-body">' +
@@ -1296,46 +1380,50 @@
                         }).join('') + '</div>'
                         : '';
                     const avatarHref = (m.char_id === USER_ID) ? '/profile' : ('/memory/' + escapeAttr(m.char_id));
-                    const postTransBtn = isJaMode()
-                        ? '<button type="button" class="moment-action-btn moment-translate-btn" title="翻译正文" data-post-key="' + escapeAttr(postKey) + '">文</button>'
+                    const cachedPost = _getTransCache(postKey, translationSource(m));
+                    const postTransResult = cachedPost
+                        ? '<div class="moment-translation-result">' + escapeHtml(cachedPost) + '</div>'
                         : '';
-                    const postTransResult = translationCache[postKey]
-                        ? '<div class="moment-translation-result">' + escapeHtml(translationCache[postKey]) + '</div>'
+                    const visibilityBadge = (m.blocked_character_ids || []).length
+                        ? '<button type="button" class="moment-visibility-badge"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><span>' + escapeHtml(SakiI18n.t('部分用户不可见')) + '</span></button>'
                         : '';
                     const aiDisclosureHtml = m.char_id !== USER_ID
-                        ? '<div class="moment-ai-disclosure" role="note">内容由 AI 生成</div>'
+                        ? SakiI18n.fragment('<div class="moment-ai-disclosure" role="note">内容由 AI 生成</div>')
+                        : '';
+                    const footerHtml = visibilityBadge || aiDisclosureHtml
+                        ? '<div class="moment-footer">' + visibilityBadge + aiDisclosureHtml + '</div>'
                         : '';
                     
                     // 朋友圈操作菜单
-                    let postMenuItems = '<button type="button" class="moment-menu-item btn-copy-moment">复制</button>';
+                    let postMenuItems = SakiI18n.fragment('<button type="button" class="moment-menu-item btn-copy-moment">复制</button>');
                     
                     // 点赞/取消点赞
                     if (hasMyLike) {
-                        postMenuItems += '<button type="button" class="moment-menu-item moment-unlike-btn" style="color: var(--primary-dark);">取消点赞</button>';
+                        postMenuItems += SakiI18n.fragment('<button type="button" class="moment-menu-item moment-unlike-btn" style="color: var(--primary-dark);">取消点赞</button>');
                     } else {
-                        postMenuItems += '<button type="button" class="moment-menu-item moment-like-btn">点赞</button>';
+                        postMenuItems += SakiI18n.fragment('<button type="button" class="moment-menu-item moment-like-btn">点赞</button>');
                     }
 
-                    if (isJaMode()) {
-                        postMenuItems += '<button type="button" class="moment-menu-item moment-translate-btn" data-post-key="' + escapeAttr(postKey) + '">翻译</button>';
+                    if (canTranslate()) {
+                        postMenuItems += '<button type="button" class="moment-menu-item moment-translate-btn" data-post-key="' + escapeAttr(postKey) + '">' + escapeHtml(SakiI18n.t('翻译')) + '</button>';
                     }
                     if (m.char_id !== USER_ID) {
-                        postMenuItems += '<button type="button" class="moment-menu-item moment-regen-btn">重新生成</button>';
-                        postMenuItems += '<button type="button" class="moment-menu-item moment-memory-regen-btn">重新记忆</button>';
+                        postMenuItems += SakiI18n.fragment('<button type="button" class="moment-menu-item moment-regen-btn">重新生成</button>');
+                        postMenuItems += SakiI18n.fragment('<button type="button" class="moment-menu-item moment-memory-regen-btn">重新记忆</button>');
                     }
-                    postMenuItems += '<button type="button" class="moment-menu-item post-reply-ai-btn">评论</button>';
-                    postMenuItems += '<button type="button" class="moment-menu-item moment-edit-btn">编辑</button>';
-                    postMenuItems += '<button type="button" class="moment-menu-item moment-delete-btn">删除</button>';
+                    postMenuItems += SakiI18n.fragment('<button type="button" class="moment-menu-item post-reply-ai-btn">评论</button>');
+                    postMenuItems += SakiI18n.fragment('<button type="button" class="moment-menu-item moment-edit-btn">编辑</button>');
+                    postMenuItems += SakiI18n.fragment('<button type="button" class="moment-menu-item moment-delete-btn">删除</button>');
                     
                     const postActionsMenu = '<div class="moment-actions-menu">' +
                         '<button type="button" class="moment-menu-btn">⋮</button>' +
                         '<div class="moment-menu-dropdown">' + postMenuItems + '</div>' +
                         '</div>';
                     
-                    const commentTransRow = isJaMode()
+                    const commentTransRow = needsSendTranslation()
                         ? '<div class="moment-comment-trans-row">' +
-                          '<input type="text" class="moment-comment-trans-input" placeholder="输入中文，翻译成日语后填入上方评论框">' +
-                          '<button type="button" class="moment-comment-trans-btn">翻译</button>' +
+                          SakiI18n.fragment('<input type="text" class="moment-comment-trans-input" placeholder="输入要翻译的内容，结果可编辑后发送">') +
+                          SakiI18n.fragment('<button type="button" class="moment-comment-trans-btn">翻译</button>') +
                           '</div>'
                         : '';
                     const momentAvatarUrl = window.getCosUrl ? window.getCosUrl(m.avatar || '') : (m.avatar || '');
@@ -1360,7 +1448,7 @@
                         postTransResult +
                         likersHtml +
                         commentsHtml +
-                        aiDisclosureHtml +
+                        footerHtml +
                         '</div></div>';
                 }).join('');
                 if (options && options.highlightFirst) {
@@ -1381,6 +1469,7 @@
                     }
                 }
                 updateCommentCharCounts();
+                updateTranslationButtons();
             }
 
             function findMomentFromCard(cardEl) {
@@ -1393,38 +1482,105 @@
             function buildMomentsContext(targetMoment) {
                 if (!targetMoment) return '';
                 const idx = (allMoments || []).findIndex(m => m.char_id === targetMoment.char_id && m.timestamp === targetMoment.timestamp);
-                const start = Math.max(0, idx - 20);
-                const prev = idx > 0 ? allMoments.slice(start, idx) : [];
+                // The feed is newest first; context must come from older posts.
+                const prev = idx >= 0 ? allMoments.slice(idx + 1, idx + 21).reverse() : [];
                 return prev.map(m => {
-                    const header = `[${m.remark || m.char_id}] ${m.content || ''}`;
-                    const comments = (m.comments || []).map(c => `  - [评论 ${c.remark || c.commenter_id}] ${c.content || ''}`).join('\n');
+                    const header = `[${m.remark || m.char_id}] ${translationText(m.content)}`;
+                    const comments = (m.comments || []).map(c => `  - [评论 ${c.remark || c.commenter_id}] ${translationText(c.content)}`).join('\n');
                     return comments ? (header + '\n' + comments) : header;
                 }).join('\n');
             }
 
-            async function requestTranslation(text, context, direction, charId) {
+            function buildCommentTranslationContext(moment, commentIndex) {
+                if (!moment) return '';
+                const comments = (moment.comments || []).filter(c => commentIndex == null || Number(c.comment_index) < Number(commentIndex));
+                return [buildMomentsContext(moment), '[本条朋友圈] ' + translationText(moment.content),
+                    ...comments.map(c => `[评论 ${c.remark || c.commenter_id}] ${translationText(c.content)}`)
+                ].filter(Boolean).join('\n');
+            }
+
+            function updateTranslationButtons() {
+                listEl.querySelectorAll('.moment-translate-btn, .comment-translate-btn').forEach(button => {
+                    const moment = findMomentFromCard(button.closest('.moment-card'));
+                    if (!moment) return;
+                    const commentIndex = button.getAttribute('data-comment-index');
+                    const comment = commentIndex === null ? null : (moment.comments || []).find(c => String(c.comment_index) === commentIndex);
+                    const key = button.getAttribute('data-comment-key') || button.getAttribute('data-post-key');
+                    const pending = pendingTranslations.get(key);
+                    button.disabled = Boolean(pending && pending.source === translationSource(moment, comment));
+                    button.textContent = SakiI18n.t(button.disabled ? '翻译中…' : '翻译');
+                });
+            }
+
+            async function toggleReadingTranslation(moment, commentIndex) {
+                const comment = commentIndex == null ? null : (moment.comments || []).find(c => Number(c.comment_index) === Number(commentIndex));
+                if (commentIndex != null && !comment) return;
+                const key = moment.char_id + '|' + moment.timestamp + (comment ? '|c|' + comment.comment_index : '');
+                const source = translationSource(moment, comment);
+                if (pendingTranslations.get(key)?.source === source) return;
+                if (_getTransCache(key, source)) {
+                    // Removing the result also persists the hidden state. The next
+                    // click deliberately requests a new translation.
+                    _removeTransCache(key);
+                    renderMoments(allMoments);
+                    return;
+                }
+                const text = translationText(comment ? comment.content : moment.content);
+                if (!text) { showToast(SakiI18n.t('没有可翻译的文字')); return; }
+                const pending = {source};
+                pendingTranslations.set(key, pending);
+                updateTranslationButtons();
+                try {
+                    const context = comment ? buildCommentTranslationContext(moment, commentIndex) : buildMomentsContext(moment);
+                    const result = await requestTranslation(text, context, 'read', comment?.commenter_id || moment.char_id);
+                    const current = allMoments.find(m => m.char_id === moment.char_id && m.timestamp === moment.timestamp);
+                    const currentComment = comment && current?.comments?.find(c => Number(c.comment_index) === Number(commentIndex));
+                    if (current && ((comment && !currentComment) || translationSource(current, currentComment) !== source)) return;
+                    if (pendingTranslations.get(key) !== pending) return;
+                    // Likes and pagination can briefly clear allMoments. Keep the
+                    // source-bound result; rendering validates it when data returns.
+                    _saveTransCache(key, result, source);
+                    if (current) renderMoments(allMoments);
+                } catch (error) {
+                    showToast(error.message || SakiI18n.t('翻译失败，请重试'));
+                } finally {
+                    if (pendingTranslations.get(key) === pending) pendingTranslations.delete(key);
+                    updateTranslationButtons();
+                }
+            }
+
+            async function requestTranslation(text, context, purpose, charId) {
                 const payload = {
                     text: text || '',
                     context: context || '',
-                    direction: direction || 'ja_to_zh',
-                    char_id: charId || null
+                    purpose, scene: 'moments',
+                    char_id: charId && charId !== USER_ID ? charId : null
                 };
-                const r = await fetch('/api/translate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await r.json();
-                return data && data.result ? data.result : (data.error || '翻译失败');
+                let r;
+                try {
+                    r = await fetch('/api/translate', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                    });
+                } catch (_) { throw new Error(SakiI18n.t('翻译失败，请重试')); }
+                const fallback = new Error(SakiI18n.t('翻译失败，请重试') + ` (HTTP ${r.status})`);
+                if (r.status === 401 || r.redirected) throw new Error(SakiI18n.t('请先登录'));
+                let data;
+                try { data = await r.json(); } catch (_) { throw fallback; }
+                if (!data || !r.ok || data.error || data.status === 'error') {
+                    const detail = typeof data?.message === 'string' ? data.message : data?.error;
+                    throw new Error(typeof detail === 'string' ? detail : fallback.message);
+                }
+                if (typeof data.result !== 'string' || !data.result.trim()) throw fallback;
+                return data.result.trim();
             }
 
             function updateLoadMoreBtn() {
                 if (!loadMoreBtn) return;
                 if (finished) {
-                    loadMoreBtn.textContent = '没有更多了';
+                    loadMoreBtn.textContent = SakiI18n.t('没有更多了');
                     loadMoreBtn.disabled = true;
                 } else {
-                    loadMoreBtn.textContent = loading ? '加载中…' : '加载更多';
+                    loadMoreBtn.textContent = loading ? SakiI18n.t('加载中…') : SakiI18n.t('加载更多');
                     loadMoreBtn.disabled = loading;
                 }
             }
@@ -1437,7 +1593,7 @@
                     currentPage = 0;
                     allMoments = [];
                     finished = false;
-                    listEl.innerHTML = '<p class="empty-state">加载中…</p>';
+                    listEl.innerHTML = SakiI18n.fragment('<p class="empty-state">加载中…</p>');
                 }
 
                 const nextPage = currentPage + 1;
@@ -1465,7 +1621,7 @@
                         renderMoments(allMoments, opts);
                     })
                     .catch(() => {
-                        listEl.innerHTML = '<p class="empty-state">加载失败，请稍后重试。</p>';
+                        listEl.innerHTML = SakiI18n.fragment('<p class="empty-state">加载失败，请稍后重试。</p>');
                     })
                     .finally(() => {
                         loading = false;
@@ -1483,7 +1639,7 @@
                 currentPage = 0;
                 allMoments = [];
                 finished = false;
-                listEl.innerHTML = '<p class="empty-state">加载中…</p>';
+                listEl.innerHTML = SakiI18n.fragment('<p class="empty-state">加载中…</p>');
 
                 function loadPage(page) {
                     fetch('/api/moments?page=' + page)
@@ -1509,7 +1665,7 @@
                             }
                         })
                         .catch(function() {
-                            listEl.innerHTML = '<p class="empty-state">加载失败，请稍后重试。</p>';
+                            listEl.innerHTML = SakiI18n.fragment('<p class="empty-state">加载失败，请稍后重试。</p>');
                         });
                 }
 
@@ -1547,6 +1703,12 @@
             }
 
             function attachMomentEvents() {
+                listEl.addEventListener('click', function(event) {
+                    const button = event.target.closest('.moment-visibility-badge');
+                    if (!button) return;
+                    const post = findMomentFromCard(button.closest('.moment-card'));
+                    if (post) momentVisibility.show(post.blocked_characters || []);
+                });
                 // 处理下拉菜单的展开/关闭
                 listEl.addEventListener('click', function(e) {
                     const menuBtn = e.target.closest('.moment-menu-btn');
@@ -1590,11 +1752,8 @@
                         Object.keys(translationCache).forEach(key => {
                             if (key.startsWith(postKey)) {
                                 _removeTransCache(key);
-                                delete translationCache[key];
-                                momentsHiddenTrans.delete(key);
                             }
                         });
-                        _saveMomentsHidden();
                         regenBtn.disabled = true;
                         fetch('/api/moments/regenerate', {
                             method: 'POST',
@@ -1612,35 +1771,7 @@
                         const card = postTranslateBtn.closest('.moment-card');
                         const moment = findMomentFromCard(card);
                         if (!moment) return;
-                        const postKey = postTranslateBtn.getAttribute('data-post-key');
-                        postTranslateBtn.disabled = true;
-
-                        // 当前正在显示 → 隐藏
-                        if (translationCache[postKey] && !momentsHiddenTrans.has(postKey)) {
-                            delete translationCache[postKey];
-                            _removeTransCache(postKey);
-                            momentsHiddenTrans.add(postKey);
-                            _saveMomentsHidden();
-                            renderMoments(allMoments, { scrollTo: { char_id: moment.char_id, timestamp: moment.timestamp } });
-                            postTranslateBtn.disabled = false;
-                            return;
-                        }
-
-                        // 之前被隐藏 → 强制重新翻译
-                        if (momentsHiddenTrans.has(postKey)) {
-                            momentsHiddenTrans.delete(postKey);
-                            _saveMomentsHidden();
-                            _removeTransCache(postKey);
-                        }
-
-                        requestTranslation(moment.content || '', buildMomentsContext(moment), 'ja_to_zh', moment.char_id)
-                            .then((res) => {
-                                translationCache[postKey] = res;
-                                _saveTransCache(postKey, res);
-                                renderMoments(allMoments, { scrollTo: { char_id: moment.char_id, timestamp: moment.timestamp } });
-                            })
-                            .catch(() => {})
-                            .finally(() => { postTranslateBtn.disabled = false; });
+                        toggleReadingTranslation(moment);
                         return;
                     }
                     const likeBtn = e.target.closest('.moment-like-btn');
@@ -1672,16 +1803,18 @@
                         if (!txt || !targetInput) return;
                         const moment = findMomentFromCard(card);
                         commentTransBtn.disabled = true;
-                        commentTransBtn.textContent = '翻译中…';
-                        requestTranslation(txt, moment ? buildMomentsContext(moment) : '', 'zh_to_ja', moment ? moment.char_id : null)
+                        commentTransBtn.textContent = SakiI18n.t('翻译中…');
+                        const draftBeforeTranslation = targetInput.value;
+                        requestTranslation(txt, buildCommentTranslationContext(moment), 'send', moment ? moment.char_id : null)
                             .then((res) => {
+                                if ((targetInput.value || targetInput.value !== draftBeforeTranslation) && !confirm(SakiI18n.t('用翻译结果替换当前草稿？'))) return;
                                 targetInput.value = res;
-                                if (transInput) transInput.value = '';
+                                if (transInput && transInput.value.trim() === txt) transInput.value = '';
                             })
-                            .catch(() => {})
+                            .catch(error => showToast(error.message || SakiI18n.t('翻译失败，请重试')))
                             .finally(() => {
                                 commentTransBtn.disabled = false;
-                                commentTransBtn.textContent = '翻译';
+                                commentTransBtn.textContent = SakiI18n.t('翻译');
                             });
                         return;
                     }
@@ -1700,7 +1833,7 @@
                         commentBtn.disabled = true;
                         commentBtn.classList.add('is-loading');
                         const originalText = commentBtn.textContent;
-                        commentBtn.innerHTML = '<span class="comment-sending-spinner"></span>发送中';
+                        commentBtn.innerHTML = SakiI18n.fragment('<span class="comment-sending-spinner"></span>发送中');
                         
                         fetch('/api/moments/comment', {
                             method: 'POST',
@@ -1726,39 +1859,7 @@
                         const card = commentTranslateBtn.closest('.moment-card');
                         const moment = findMomentFromCard(card);
                         if (!moment) return;
-                        const commentIndex = parseInt(commentTranslateBtn.getAttribute('data-comment-index'), 10);
-                        const comment = (moment.comments || []).find(c => Number(c.comment_index) === commentIndex);
-                        if (!comment) return;
-                        const key = commentTranslateBtn.getAttribute('data-comment-key');
-                        const context = (buildMomentsContext(moment) + '\n[本条朋友圈] ' + (moment.content || '')).trim();
-                        commentTranslateBtn.disabled = true;
-
-                        // 当前正在显示 → 隐藏
-                        if (translationCache[key] && !momentsHiddenTrans.has(key)) {
-                            delete translationCache[key];
-                            _removeTransCache(key);
-                            momentsHiddenTrans.add(key);
-                            _saveMomentsHidden();
-                            renderMoments(allMoments, { scrollTo: { char_id: moment.char_id, timestamp: moment.timestamp } });
-                            commentTranslateBtn.disabled = false;
-                            return;
-                        }
-
-                        // 之前被隐藏 → 强制重新翻译
-                        if (momentsHiddenTrans.has(key)) {
-                            momentsHiddenTrans.delete(key);
-                            _saveMomentsHidden();
-                            _removeTransCache(key);
-                        }
-
-                        requestTranslation(comment.content || '', context, 'ja_to_zh', moment.char_id)
-                            .then((res) => {
-                                translationCache[key] = res;
-                                _saveTransCache(key, res);
-                                renderMoments(allMoments, { scrollTo: { char_id: moment.char_id, timestamp: moment.timestamp } });
-                            })
-                            .catch(() => {})
-                            .finally(() => { commentTranslateBtn.disabled = false; });
+                        toggleReadingTranslation(moment, commentTranslateBtn.getAttribute('data-comment-index'));
                         return;
                     }
                     const commentRegenBtn = e.target.closest('.comment-regen-btn');
@@ -1772,9 +1873,6 @@
                         const commentKey = charId + '|' + timestamp + '|c|' + commentIndex;
                         if (translationCache[commentKey]) {
                             _removeTransCache(commentKey);
-                            delete translationCache[commentKey];
-                            momentsHiddenTrans.delete(commentKey);
-                            _saveMomentsHidden();
                         }
                         commentRegenBtn.disabled = true;
                         fetch('/api/moments/comment/regenerate', {
@@ -1797,7 +1895,7 @@
                         const charId = card.getAttribute('data-char-id');
                         const timestamp = card.getAttribute('data-timestamp');
                         postMemoryRegenBtn.disabled = true;
-                        postMemoryRegenBtn.textContent = '生成中…';
+                        postMemoryRegenBtn.textContent = SakiI18n.t('生成中…');
                         fetch('/api/moments/memory/regenerate', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -1806,15 +1904,15 @@
                             .then(r => r.json())
                             .then(data => {
                                 if (data.status === 'success') {
-                                    alert('记忆已重新生成');
+                                    alert(SakiI18n.t('记忆已重新生成'));
                                 } else {
-                                    alert('生成失败: ' + (data.error || '未知错误'));
+                                    alert(SakiI18n.t('生成失败: ') + (data.error || SakiI18n.t('未知错误')));
                                 }
                             })
-                            .catch(() => alert('请求失败'))
+                            .catch(() => alert(SakiI18n.t('请求失败')))
                             .finally(() => {
                                 postMemoryRegenBtn.disabled = false;
-                                postMemoryRegenBtn.textContent = '重新记忆';
+                                postMemoryRegenBtn.textContent = SakiI18n.t('重新记忆');
                             });
                         return;
                     }
@@ -1828,7 +1926,7 @@
                         const timestamp = card.getAttribute('data-timestamp');
                         const commentIndex = commentMemoryRegenBtn.getAttribute('data-comment-index');
                         commentMemoryRegenBtn.disabled = true;
-                        commentMemoryRegenBtn.textContent = '生成中…';
+                        commentMemoryRegenBtn.textContent = SakiI18n.t('生成中…');
                         fetch('/api/moments/memory/regenerate', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -1837,15 +1935,15 @@
                             .then(r => r.json())
                             .then(data => {
                                 if (data.status === 'success') {
-                                    alert('记忆已重新生成');
+                                    alert(SakiI18n.t('记忆已重新生成'));
                                 } else {
-                                    alert('生成失败: ' + (data.error || '未知错误'));
+                                    alert(SakiI18n.t('生成失败: ') + (data.error || SakiI18n.t('未知错误')));
                                 }
                             })
-                            .catch(() => alert('请求失败'))
+                            .catch(() => alert(SakiI18n.t('请求失败')))
                             .finally(() => {
                                 commentMemoryRegenBtn.disabled = false;
-                                commentMemoryRegenBtn.textContent = '重新记忆';
+                                commentMemoryRegenBtn.textContent = SakiI18n.t('重新记忆');
                             });
                         return;
                     }
@@ -1894,7 +1992,7 @@
                         const editModalTextarea = document.getElementById('editModalTextarea');
                         const editCharCount = document.getElementById('editCharCount');
                         
-                        editModalTitle.textContent = '编辑朋友圈';
+                        editModalTitle.textContent = SakiI18n.t('编辑朋友圈');
                         editModalTextarea.value = moment.content;
                         editModalTextarea.maxLength = 2000;
                         updateEditCharCount();
@@ -1910,7 +2008,7 @@
                     }
                     const momentDeleteBtn = e.target.closest('.moment-delete-btn');
                     if (momentDeleteBtn) {
-                        if (!confirm('确定要删除这条朋友圈吗？')) return;
+                        if (!confirm(SakiI18n.t('确定要删除这条朋友圈吗？'))) return;
                         const card = momentDeleteBtn.closest('.moment-card');
                         const charId = card.getAttribute('data-char-id');
                         const timestamp = card.getAttribute('data-timestamp');
@@ -1926,14 +2024,11 @@
                                 Object.keys(translationCache).forEach(key => {
                                     if (key.startsWith(postKey)) {
                                         _removeTransCache(key);
-                                        delete translationCache[key];
-                                        momentsHiddenTrans.delete(key);
                                     }
                                 });
-                                _saveMomentsHidden();
                                 loadNextPage(true);
                             })
-                            .catch(err => alert('删除失败: ' + err));
+                            .catch(err => alert(SakiI18n.t('删除失败: ') + err));
                         return;
                     }
                     const commentEditBtn = e.target.closest('.comment-edit-btn');
@@ -1950,7 +2045,7 @@
                         const editModalTextarea = document.getElementById('editModalTextarea');
                         const editCharCount = document.getElementById('editCharCount');
                         
-                        editModalTitle.textContent = '编辑评论';
+                        editModalTitle.textContent = SakiI18n.t('编辑评论');
                         editModalTextarea.value = comment.content;
                         editModalTextarea.maxLength = 500;
                         updateEditCharCount();
@@ -1967,7 +2062,7 @@
                     }
                     const commentDeleteBtn = e.target.closest('.comment-delete-btn');
                     if (commentDeleteBtn) {
-                        if (!confirm('确定要删除这条评论吗？')) return;
+                        if (!confirm(SakiI18n.t('确定要删除这条评论吗？'))) return;
                         const card = commentDeleteBtn.closest('.moment-card');
                         const charId = card.getAttribute('data-char-id');
                         const timestamp = card.getAttribute('data-timestamp');
@@ -1984,14 +2079,11 @@
                                 Object.keys(translationCache).forEach(key => {
                                     if (key.startsWith(postKey + '|c|')) {
                                         _removeTransCache(key);
-                                        delete translationCache[key];
-                                        momentsHiddenTrans.delete(key);
                                     }
                                 });
-                                _saveMomentsHidden();
                                 reloadAndScrollTo({ char_id: charId, timestamp: timestamp });
                             })
-                            .catch(err => alert('删除失败: ' + err));
+                            .catch(err => alert(SakiI18n.t('删除失败: ') + err));
                         return;
                     }
                     const copyBtn = e.target.closest('.btn-copy-moment');
@@ -2001,6 +2093,12 @@
                         if (!m) return;
                         // 格式为：【朋友圈】xxxx（角色/用户名）：xxxxxxx（朋友圈内容）。（xxxxx）（日期时间）
                         let text = `【朋友圈】${m.remark}：${m.content}。（${formatTime(m.timestamp)}）\n`;
+                        const blockedIds = [...new Set((m.blocked_character_ids || []).map(String))];
+                        if (blockedIds.length) {
+                            const blockedNames = new Map((m.blocked_characters || []).map(c => [String(c.id), c.name]));
+                            const names = blockedIds.map(id => blockedNames.get(id) || id);
+                            text += `【${SakiI18n.t('谁不可见')}】${names.join('、')}\n`;
+                        }
                         if (m.liker_remarks && m.liker_remarks.length) {
                              text += `【点赞】${m.liker_remarks.join('、')}\n`;
                         }
@@ -2013,8 +2111,8 @@
                         const disclosureText = window.KunigamiAiDisclosure.appendCopyFooter(text);
                         navigator.clipboard.writeText(disclosureText).then(() => {
                             const old = copyBtn.textContent;
-                            copyBtn.textContent = '已复制';
-                            showToast('复制成功！');
+                            copyBtn.textContent = SakiI18n.t('已复制');
+                            showToast(SakiI18n.t('复制成功！'));
                             setTimeout(() => copyBtn.textContent = old, 1500);
                         }).catch(err => {
                             // Fallback for non-secure contexts
@@ -2025,11 +2123,11 @@
                             try {
                                 document.execCommand('copy');
                                 const old = copyBtn.textContent;
-                                copyBtn.textContent = '已复制';
-                                showToast('复制成功！');
+                                copyBtn.textContent = SakiI18n.t('已复制');
+                                showToast(SakiI18n.t('复制成功！'));
                                 setTimeout(() => copyBtn.textContent = old, 1500);
                             } catch (err2) {
-                                alert('复制失败: ' + err2);
+                                alert(SakiI18n.t('复制失败: ') + err2);
                             }
                             document.body.removeChild(textArea);
                         });
@@ -2054,6 +2152,9 @@
                 const previewContainer = document.getElementById('momentUploadPreview');
                 const uploadWarn = document.getElementById('uploadTokenWarning');
                 const imageBulk = document.getElementById('momentImageBulk');
+                const visionPrompt = document.getElementById('momentVisionPrompt');
+                const promptPanel = document.getElementById('momentVisionPromptPanel');
+                const savedPrompts = window.SakiVisionPrompts?.attach(visionPrompt, document.getElementById('momentPromptPresets'));
                 let selectedFiles = [];
 
                 if (triggerBtn && imageInput) {
@@ -2079,7 +2180,7 @@
                         div.className = 'preview-item';
                         div.dataset.idx = idx;
                         reader.onload = (e) => {
-                            div.innerHTML = `
+                            div.innerHTML = SakiI18n.ui`
                                 <div class="preview-image-wrap">
                                     <img src="${e.target.result}" alt="待上传图片">
                                     <div class="preview-delete" data-idx="${idx}">×</div>
@@ -2088,7 +2189,7 @@
                                     <button type="button" class="preview-mode-btn ${entry.mode === 'ai' ? 'active' : ''}" data-idx="${idx}" data-mode="ai" title="AI 识图">AI</button>
                                     <button type="button" class="preview-mode-btn ${entry.mode === 'manual' ? 'active' : ''}" data-idx="${idx}" data-mode="manual" title="手动描述">手动</button>
                                 </div>
-                                <textarea class="preview-description ${entry.mode === 'manual' ? 'show' : ''}" data-idx="${idx}" maxlength="500" placeholder="描述这张图片…"></textarea>
+                                <textarea class="preview-description ${entry.mode === 'manual' ? 'show' : ''}" data-idx="${idx}" placeholder="描述这张图片…"></textarea>
                             `;
                             const textarea = div.querySelector('.preview-description');
                             if (textarea) textarea.value = entry.description || '';
@@ -2105,6 +2206,7 @@
                     }
                     if (uploadWarn) uploadWarn.style.display = selectedFiles.length > 0 ? 'block' : 'none';
                     if (imageBulk) imageBulk.style.display = selectedFiles.length > 0 ? 'flex' : 'none';
+                    promptPanel.hidden = !selectedFiles.some(entry => entry.mode === 'ai');
                 }
 
                 previewContainer.addEventListener('click', (e) => {
@@ -2168,7 +2270,7 @@
                             fetch('/api/moments/characters')
                                 .then(r => r.json())
                                 .then(remarks => {
-                                    let html = '<option value="">(选择一个角色)</option>';
+                                    let html = SakiI18n.fragment('<option value="">(选择一个角色)</option>');
                                     for (const cid in remarks) {
                                         html += `<option value="${cid}">${remarks[cid]}</option>`;
                                     }
@@ -2211,13 +2313,20 @@
                     });
                 }
 
+                let composeTranslationSession = 0;
                 function openModal() {
+                    composeTranslationSession++;
+                    if (composeTransBtn) {
+                        composeTransBtn.disabled = false;
+                        composeTransBtn.textContent = SakiI18n.t('翻译');
+                    }
                     mask.style.display = 'flex';
+                    savedPrompts?.load();
                     // 默认显示我自己发
                     if (showUserPostBtn) showUserPostBtn.click();
                     // 检查翻译框
                     if (momentComposeTransRow) {
-                        if (window.AI_LANG === 'ja') {
+                        if (needsSendTranslation()) {
                             momentComposeTransRow.style.display = 'flex';
                         } else {
                             momentComposeTransRow.style.display = 'none';
@@ -2227,10 +2336,12 @@
                     updateCharCount();
                 }
                 function closeModal() {
+                    if (composeBtn.disabled) return;
+                    composeTranslationSession++;
                     mask.style.display = 'none';
                     composeBtn.disabled = false;
                     composeBtn.classList.remove('is-loading');
-                    composeBtn.innerHTML = '发布';
+                    composeBtn.innerHTML = SakiI18n.t('发布');
                     const instructionEl = document.getElementById('forceMomentInstruction');
                     if (instructionEl) { instructionEl.value = ''; }
                 }
@@ -2241,7 +2352,7 @@
                         const forceCharacterSelect = document.getElementById('forceMomentCharacterSelect');
                         const char_id = forceCharacterSelect.value;
                         if (!char_id) {
-                            alert("请选择要催发动态的角色");
+                            alert(SakiI18n.t("请选择要催发动态的角色"));
                             return;
                         }
 
@@ -2250,7 +2361,7 @@
 
                         forceMomentModalSubmit.disabled = true;
                         const oldText = forceMomentModalSubmit.innerHTML;
-                        forceMomentModalSubmit.innerHTML = '<span class="moment-compose-spinner"></span>生成中…';
+                        forceMomentModalSubmit.innerHTML = SakiI18n.fragment('<span class="moment-compose-spinner"></span>生成中…');
 
                         fetch('/api/moments/force_active', {
                                 method: 'POST',
@@ -2271,10 +2382,10 @@
                                         highlightFirst: true
                                     });
                                 } else {
-                                    alert("生成失败: " + (data.error || "未知原因"));
+                                    alert(SakiI18n.t("生成失败: ") + (data.error || SakiI18n.t("未知原因")));
                                 }
                             })
-                            .catch(err => alert("网络错误: " + err))
+                            .catch(err => alert(SakiI18n.t("网络错误: ") + err))
                             .finally(() => {
                                 forceMomentModalSubmit.disabled = false;
                                 forceMomentModalSubmit.innerHTML = oldText;
@@ -2284,6 +2395,8 @@
 
                 openBtn.addEventListener('click', openModal);
                 cancelBtn.addEventListener('click', function() {
+                    if (composeBtn.disabled) return;
+                    visionPrompt.value = ''; savedPrompts?.reset();
                     composeText.value = '';
                     selectedFiles = [];
                     renderUploadPreview();
@@ -2310,16 +2423,24 @@
                         const txt = (composeTransText.value || '').trim();
                         if (!txt) return;
                         composeTransBtn.disabled = true;
-                        composeTransBtn.textContent = '翻译中…';
-                        requestTranslation(txt, '', 'zh_to_ja', null)
+                        composeTransBtn.textContent = SakiI18n.t('翻译中…');
+                        const translationSession = composeTranslationSession;
+                        const draftBeforeTranslation = composeText.value;
+                        requestTranslation(txt, '', 'send', null)
                             .then((res) => {
+                                if (translationSession !== composeTranslationSession) return;
+                                if ((composeText.value || composeText.value !== draftBeforeTranslation) && !confirm(SakiI18n.t('用翻译结果替换当前草稿？'))) return;
                                 composeText.value = res;
-                                composeTransText.value = '';
+                                composeText.dispatchEvent(new Event('input'));
+                                if (composeTransText.value.trim() === txt) composeTransText.value = '';
                             })
-                            .catch(() => {})
+                            .catch(error => {
+                                if (translationSession === composeTranslationSession) showToast(error.message || SakiI18n.t('翻译失败，请重试'));
+                            })
                             .finally(() => {
+                                if (translationSession !== composeTranslationSession) return;
                                 composeTransBtn.disabled = false;
-                                composeTransBtn.textContent = '翻译';
+                                composeTransBtn.textContent = SakiI18n.t('翻译');
                             });
                     });
                 }
@@ -2327,20 +2448,33 @@
                 composeBtn.addEventListener('click', function() {
                     const content = (composeText.value || '').trim();
                     if (!content && selectedFiles.length === 0) return;
+                    if (selectedFiles.some(entry => entry.mode === 'ai') && Array.from(visionPrompt.value.trim()).length > 2000) {
+                        alert(SakiI18n.t('总结要求不得超过2000字')); visionPrompt.focus(); return;
+                    }
+                    const overLimit = selectedFiles.findIndex(entry => entry.mode === 'manual' && Array.from(entry.description.trim()).length > 4000);
+                    if (overLimit >= 0) {
+                        alert(SakiI18n.t('图片描述不得超过4000字'));
+                        previewContainer.querySelector(`.preview-description[data-idx="${overLimit}"]`)?.focus();
+                        return;
+                    }
                     const missingDescription = selectedFiles.findIndex(entry => entry.mode === 'manual' && !entry.description.trim());
                     if (missingDescription >= 0) {
-                        alert(`请填写第 ${missingDescription + 1} 张图片的描述`);
+                        alert(SakiI18n.ui`请填写第 ${missingDescription + 1} 张图片的描述`);
                         const input = previewContainer.querySelector(`.preview-description[data-idx="${missingDescription}"]`);
                         if (input) input.focus();
                         return;
                     }
                     
                     composeBtn.disabled = true;
+                    userPostSection.disabled = true;
                     composeBtn.classList.add('is-loading');
-                    composeBtn.innerHTML = '<span class="moment-compose-spinner"></span>发布中…';
+                    composeBtn.innerHTML = SakiI18n.fragment('<span class="moment-compose-spinner"></span>发布中…');
                     
                     const formData = new FormData();
                     formData.append('content', content);
+                    formData.append('vision_prompt', visionPrompt.value.trim());
+                    formData.append('blocked_character_ids', JSON.stringify(momentVisibility.getSelected()));
+                    document.getElementById('momentVisibilityOpen').disabled = true;
                     selectedFiles.forEach(entry => {
                         formData.append('images', entry.file);
                     });
@@ -2365,13 +2499,16 @@
                         })
                         .then(() => {
                             composeText.value = '';
+                            momentVisibility.reset();
                             selectedFiles = [];
+                            visionPrompt.value = ''; savedPrompts?.reset();
                             renderUploadPreview();
                             if (charCountEl) {
                                 charCountEl.textContent = '0/2000';
                                 charCountEl.classList.remove('is-full');
                             }
                             composeText.classList.remove('is-full');
+                            composeBtn.disabled = false;
                             closeModal();
                             loadNextPage(true, { highlightFirst: true });
                         })
@@ -2380,12 +2517,14 @@
                                 selectedFiles[err.imageIndex].mode = 'manual';
                                 renderUploadPreview();
                             }
-                            alert('发布失败: ' + (err.message || err));
+                            alert(SakiI18n.t('发布失败: ') + (err.message || err));
                         })
                         .finally(() => {
+                            document.getElementById('momentVisibilityOpen').disabled = false;
+                            userPostSection.disabled = false;
                             composeBtn.disabled = false;
                             composeBtn.classList.remove('is-loading');
-                            composeBtn.innerHTML = '发布';
+                            composeBtn.innerHTML = SakiI18n.t('发布');
                         });
                 });
                 
@@ -2421,7 +2560,7 @@
                     editModalMask.style.display = 'none';
                     editModalSubmit.disabled = false;
                     editModalSubmit.classList.remove('is-loading');
-                    editModalSubmit.innerHTML = '保存';
+                    editModalSubmit.innerHTML = SakiI18n.t('保存');
                 }
                 
                 editModalCancel.addEventListener('click', function() {
@@ -2441,11 +2580,11 @@
                     const originalContent = (editModalMask.dataset.originalContent || '').trim();
                     
                     if (!newContent) {
-                        alert('内容不能为空');
+                        alert(SakiI18n.t('内容不能为空'));
                         return;
                     }
                     if (newContent === originalContent) {
-                        alert('内容未修改');
+                        alert(SakiI18n.t('内容未修改'));
                         return;
                     }
                     
@@ -2455,7 +2594,7 @@
                     
                     editModalSubmit.disabled = true;
                     editModalSubmit.classList.add('is-loading');
-                    editModalSubmit.innerHTML = '<span class="moment-compose-spinner"></span>保存中…';
+                    editModalSubmit.innerHTML = SakiI18n.fragment('<span class="moment-compose-spinner"></span>保存中…');
                     
                     if (editType === 'moment') {
                         // 编辑朋友圈
@@ -2470,12 +2609,12 @@
                                 reloadAndScrollTo({ char_id: charId, timestamp: timestamp });
                             })
                             .catch(err => {
-                                alert('保存失败: ' + err);
+                                alert(SakiI18n.t('保存失败: ') + err);
                             })
                             .finally(() => {
                                 editModalSubmit.disabled = false;
                                 editModalSubmit.classList.remove('is-loading');
-                                editModalSubmit.innerHTML = '保存';
+                                editModalSubmit.innerHTML = SakiI18n.t('保存');
                             });
                     } else if (editType === 'comment') {
                         // 编辑评论
@@ -2491,12 +2630,12 @@
                                 reloadAndScrollTo({ char_id: charId, timestamp: timestamp });
                             })
                             .catch(err => {
-                                alert('保存失败: ' + err);
+                                alert(SakiI18n.t('保存失败: ') + err);
                             })
                             .finally(() => {
                                 editModalSubmit.disabled = false;
                                 editModalSubmit.classList.remove('is-loading');
-                                editModalSubmit.innerHTML = '保存';
+                                editModalSubmit.innerHTML = SakiI18n.t('保存');
                             });
                     }
                 });
@@ -2526,15 +2665,39 @@
                 const userReplyTransInput = document.getElementById('userReplyTransInput');
                 const userReplyTransBtn = document.getElementById('userReplyTransBtn');
 
+                async function parseMomentReplyResponse(response) {
+                    let fallback = '服务暂时不可用，请稍后重试。';
+                    if (response.status === 401 || response.redirected) fallback = '请先登录';
+                    else if ([408, 504, 524].includes(response.status)) fallback = '请求超时，请稍后重试。';
+                    else if (response.status === 404) fallback = '内容不存在或已被删除。';
+                    const failure = new Error(SakiI18n.t(fallback) + ` (HTTP ${response.status})`);
+                    const contentType = response.headers.get('Content-Type') || '';
+                    if (response.redirected || !contentType.toLowerCase().includes('application/json')) throw failure;
+                    let data;
+                    try {
+                        data = await response.json();
+                    } catch (_) {
+                        throw failure;
+                    }
+                    if (!data || typeof data !== 'object' || Array.isArray(data)) throw failure;
+                    if (!response.ok || data.error || data.status === 'error') {
+                        throw new Error(data.message || data.error || failure.message);
+                    }
+                    return data;
+                }
+
                 // 新增：回复弹窗动态打开方法
                 window.openReplyModal = function(charId, timestamp, commentIndex) {
                     if (!replyModalMask) return;
+                    replyModalMask.dataset.translationSession = String(Number(replyModalMask.dataset.translationSession || 0) + 1);
                     replyModalMask.dataset.charId = charId;
                     replyModalMask.dataset.timestamp = timestamp;
-                    replyModalMask.dataset.commentIndex = commentIndex || '';
+                    replyModalMask.dataset.commentIndex = commentIndex == null ? '' : String(commentIndex);
                     
+                    const visibilityPost = (allMoments || []).find(m => String(m.char_id) === String(charId) && String(m.timestamp) === String(timestamp));
+                    const blockedCharacters = new Set(visibilityPost?.blocked_character_ids || []);
                     let targetAuthor = charId;
-                    if (commentIndex) {
+                    if (replyModalMask.dataset.commentIndex !== '') {
                         const m = (allMoments || []).find(m => String(m.char_id) === String(charId) && String(m.timestamp) === String(timestamp));
                         if (m && m.comments) {
                             const comment = m.comments.find(c => String(c.comment_index) === String(commentIndex));
@@ -2545,23 +2708,24 @@
                     }
                     
                     if (replyCharacterSelect) {
-                        replyCharacterSelect.innerHTML = '<option value="">(加载关系图中...)</option>';
+                        replyCharacterSelect.innerHTML = SakiI18n.fragment('<option value="">(加载关系图中...)</option>');
                         fetch('/api/moments/related_characters?target_id=' + encodeURIComponent(targetAuthor))
-                            .then(r => r.json())
+                            .then(parseMomentReplyResponse)
                             .then(remarks => {
-                                let html = '<option value="">(选择一个角色)</option>';
+                                let html = SakiI18n.fragment('<option value="">(选择一个角色)</option>');
                                 let hasChars = false;
                                 for (const cid in remarks) {
-                                    html += `<option value="${cid}">${escapeHtml(remarks[cid])}</option>`;
+                                    const blocked = blockedCharacters.has(cid);
+                                    html += `<option value="${escapeAttr(cid)}"${blocked ? ' disabled' : ''}>${escapeHtml(remarks[cid])}${blocked ? ' · ' + escapeHtml(SakiI18n.t('对此条不可见')) : ''}</option>`;
                                     hasChars = true;
                                 }
                                 if (!hasChars) {
-                                    html = '<option value="">(无相关关系人)</option>';
+                                    html = SakiI18n.fragment('<option value="">(无相关关系人)</option>');
                                 }
                                 replyCharacterSelect.innerHTML = html;
                             })
                             .catch(() => {
-                                replyCharacterSelect.innerHTML = '<option value="">(加载失败)</option>';
+                                replyCharacterSelect.innerHTML = SakiI18n.fragment('<option value="">(加载失败)</option>');
                             });
                     }
                     replyModalMask.style.display = 'flex';
@@ -2569,11 +2733,12 @@
 
                 if (replyModalMask && replyCharacterSelect) {
                     function closeReplyModal() {
+                        replyModalMask.dataset.translationSession = String(Number(replyModalMask.dataset.translationSession || 0) + 1);
                         replyModalMask.style.display = 'none';
                         replyCharacterSelect.value = '';
                         userReplyTextarea.value = '';
                         if (userReplyCharCount) userReplyCharCount.innerText = '0/500';
-                        userReplyTransInput.value = '';
+                        if (userReplyTransInput) userReplyTransInput.value = '';
                         replyModalMask.dataset.charId = '';
                         replyModalMask.dataset.timestamp = '';
                         replyModalMask.dataset.commentIndex = '';
@@ -2604,14 +2769,18 @@
                         showUserReplyBtn.style.color = 'var(--text-main)';
                     });
                     showUserReplyBtn.addEventListener('click', () => {
+                        if (userReplyTransBtn.dataset.translationSession !== replyModalMask.dataset.translationSession) {
+                            userReplyTransBtn.disabled = false;
+                            userReplyTransBtn.textContent = SakiI18n.t('翻译');
+                        }
                         aiReplySection.style.display = 'none';
                         userReplySection.style.display = 'block';
                         showUserReplyBtn.style.background = 'var(--primary-color)';
                         showUserReplyBtn.style.color = 'white';
                         showAiReplyBtn.style.background = '#f0f2f5';
                         showAiReplyBtn.style.color = 'var(--text-main)';
-                        // 仅当 AI 设置为日语模式时才显示翻译框
-                        if (window.AI_LANG === 'ja') {
+                        // 用户语言与默认对话语言不同时显示发送翻译框
+                        if (needsSendTranslation()) {
                             userReplyTransRow.style.display = 'flex';
                         } else {
                             userReplyTransRow.style.display = 'none';
@@ -2639,27 +2808,31 @@
 
                             const charId = replyModalMask.dataset.charId;
                             const timestamp = replyModalMask.dataset.timestamp;
+                            const commentIndex = replyModalMask.dataset.commentIndex;
+                            const translationSession = replyModalMask.dataset.translationSession;
                             const m = (allMoments || []).find(m => String(m.char_id) === String(charId) && String(m.timestamp) === String(timestamp));
 
                             userReplyTransBtn.disabled = true;
-                            userReplyTransBtn.innerText = "...";
-                            
-                            requestTranslation(text, m ? buildMomentsContext(m) : '', 'zh_to_ja', charId)
+                            userReplyTransBtn.textContent = SakiI18n.t('翻译中…');
+                            userReplyTransBtn.dataset.translationSession = translationSession;
+                            const draftBeforeTranslation = userReplyTextarea.value;
+                            // Include the comment being replied to, when present.
+                            const context = buildCommentTranslationContext(m, commentIndex === '' ? null : Number(commentIndex) + 1);
+                            requestTranslation(text, context, 'send', charId)
                             .then(res => {
-                                if (res) {
-                                    userReplyTextarea.value = res;
-                                    userReplyTransInput.value = '';
-                                    // 翻译后手动触发 input 事件以更新字数
-                                    userReplyTextarea.dispatchEvent(new Event('input'));
-                                }
+                                if (translationSession !== replyModalMask.dataset.translationSession) return;
+                                if ((userReplyTextarea.value || userReplyTextarea.value !== draftBeforeTranslation) && !confirm(SakiI18n.t('用翻译结果替换当前草稿？'))) return;
+                                userReplyTextarea.value = res;
+                                if (userReplyTransInput.value.trim() === text) userReplyTransInput.value = '';
+                                userReplyTextarea.dispatchEvent(new Event('input'));
                             })
-                            .catch(err => {
-                                console.error("Translation failed:", err);
-                                alert("翻译失败，请重试");
+                            .catch(error => {
+                                if (translationSession === replyModalMask.dataset.translationSession) showToast(error.message || SakiI18n.t('翻译失败，请重试'));
                             })
                             .finally(() => {
+                                if (translationSession !== replyModalMask.dataset.translationSession) return;
                                 userReplyTransBtn.disabled = false;
-                                userReplyTransBtn.innerText = "翻译";
+                                userReplyTransBtn.innerText = SakiI18n.t("翻译");
                             });
                         });
                     }
@@ -2668,17 +2841,22 @@
                     replyModalSubmit.addEventListener('click', () => {
                         const replying_char_id = replyCharacterSelect.value;
                         if (!replying_char_id) {
-                            alert("请选择用于回复的角色");
+                            alert(SakiI18n.t("请选择用于回复的角色"));
                             return;
                         }
 
                         const charId = replyModalMask.dataset.charId;
                         const timestamp = replyModalMask.dataset.timestamp;
                         const commentIndex = replyModalMask.dataset.commentIndex;
+                        const post = (allMoments || []).find(m => String(m.char_id) === String(charId) && String(m.timestamp) === String(timestamp));
+                        if ((post?.blocked_character_ids || []).includes(replying_char_id)) {
+                            alert(SakiI18n.t('该角色对此条朋友圈不可见'));
+                            return;
+                        }
 
                         replyModalSubmit.disabled = true;
                         const oldText = replyModalSubmit.innerHTML;
-                        replyModalSubmit.innerHTML = '<span class="moment-compose-spinner"></span>生成中…';
+                        replyModalSubmit.innerHTML = SakiI18n.fragment('<span class="moment-compose-spinner"></span>生成中…');
 
                         let fetchUrl = '';
                         let requestBody = { char_id: charId, timestamp: timestamp };
@@ -2697,16 +2875,12 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(requestBody)
                         })
-                        .then(r => r.json())
-                        .then(data => {
-                            if (data.error) {
-                                alert("生成失败: " + data.error);
-                            } else {
-                                closeReplyModal();
-                                reloadAndScrollTo({ char_id: charId, timestamp: timestamp });
-                            }
+                        .then(parseMomentReplyResponse)
+                        .then(() => {
+                            closeReplyModal();
+                            reloadAndScrollTo({ char_id: charId, timestamp: timestamp });
                         })
-                        .catch(err => alert("网络错误: " + err))
+                        .catch(err => alert(SakiI18n.t("生成失败: ") + err.message))
                         .finally(() => {
                             replyModalSubmit.disabled = false;
                             replyModalSubmit.innerHTML = oldText;
@@ -2717,7 +2891,7 @@
                     userReplySubmit.addEventListener('click', () => {
                         const content = userReplyTextarea.value.trim();
                         if (!content) {
-                            alert("回复内容不能为空");
+                            alert(SakiI18n.t("回复内容不能为空"));
                             return;
                         }
 
@@ -2727,7 +2901,7 @@
 
                         userReplySubmit.disabled = true;
                         const oldText = userReplySubmit.innerHTML;
-                        userReplySubmit.innerHTML = '<span class="moment-compose-spinner"></span>发送中…';
+                        userReplySubmit.innerHTML = SakiI18n.fragment('<span class="moment-compose-spinner"></span>发送中…');
 
                         let fetchUrl = '';
                         let requestBody = { char_id: charId, timestamp: timestamp, content: content };
@@ -2746,16 +2920,12 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(requestBody)
                         })
-                        .then(r => r.json())
-                        .then(data => {
-                            if (data.error) {
-                                alert("发送失败: " + data.error);
-                            } else {
-                                closeReplyModal();
-                                reloadAndScrollTo({ char_id: charId, timestamp: timestamp });
-                            }
+                        .then(parseMomentReplyResponse)
+                        .then(() => {
+                            closeReplyModal();
+                            reloadAndScrollTo({ char_id: charId, timestamp: timestamp });
                         })
-                        .catch(err => alert("网络错误: " + err))
+                        .catch(err => alert(SakiI18n.t("发送失败: ") + err.message))
                         .finally(() => {
                             userReplySubmit.disabled = false;
                             userReplySubmit.innerHTML = oldText;
@@ -2872,6 +3042,7 @@
             }
 
             function initCharFilter() {
+                const filterRoot = document.getElementById('charFilter');
                 const filterBtn = document.getElementById('charFilterBtn');
                 const filterMenu = document.getElementById('charFilterMenu');
                 const label = document.getElementById('charFilterLabel');
@@ -2880,15 +3051,17 @@
                 // 切换菜单显示
                 filterBtn.addEventListener('click', function(e) {
                     if (e.target.closest('.char-filter-menu')) return;
-                    filterMenu.classList.toggle('show');
-                    filterBtn.classList.toggle('is-open');
+                    const open = filterMenu.classList.toggle('show');
+                    filterBtn.classList.toggle('is-open', open);
+                    filterBtn.setAttribute('aria-expanded', String(open));
                 });
 
                 // 点击外部关闭菜单
                 document.addEventListener('click', function(e) {
-                    if (!filterBtn.contains(e.target)) {
+                    if (!filterRoot.contains(e.target)) {
                         filterMenu.classList.remove('show');
                         filterBtn.classList.remove('is-open');
+                    filterBtn.setAttribute('aria-expanded', 'false');
                     }
                 });
 
@@ -2905,9 +3078,9 @@
                     item.classList.add('active');
                     
                     if (charId === 'all') {
-                        label.innerText = '朋友圈';
+                        label.innerText = SakiI18n.t('朋友圈');
                     } else {
-                        label.innerText = name + '的朋友圈';
+                        label.innerText = name + SakiI18n.t('的朋友圈');
                     }
 
                     // 重新加载数据
@@ -2921,6 +3094,7 @@
                     
                     filterMenu.classList.remove('show');
                     filterBtn.classList.remove('is-open');
+                    filterBtn.setAttribute('aria-expanded', 'false');
                 });
 
                 // 注入角色列表
@@ -2944,9 +3118,9 @@
                 if (!toggleBtn) return;
 
                 function updateToggle(enabled) {
-                    toggleBtn.textContent = enabled ? '关闭主动朋友圈' : '开启主动朋友圈';
+                    toggleBtn.textContent = SakiI18n.t('主动朋友圈短标签');
                     toggleBtn.classList.toggle('is-off', !enabled);
-                    toggleBtn.title = enabled ? '角色会定时自动发朋友圈，点击关闭' : '点击开启后角色会定时自动发朋友圈';
+                    toggleBtn.title = enabled ? SakiI18n.t('角色会定时自动发朋友圈，点击关闭') : SakiI18n.t('点击开启后角色会定时自动发朋友圈');
                 }
 
                 fetch('/api/moments/active_enabled')
@@ -2997,7 +3171,7 @@
                     fetch('/api/moments/characters')
                         .then(r => r.json())
                         .then(remarks => {
-                            let html = '<option value="">(选择一个角色)</option>';
+                            let html = SakiI18n.fragment('<option value="">(选择一个角色)</option>');
                             for (const cid in remarks) {
                                 html += `<option value="${cid}">${escapeHtml(remarks[cid])}</option>`;
                             }
@@ -3014,13 +3188,13 @@
                 forceModalSubmit.addEventListener('click', function() {
                     const char_id = forceCharacterSelect.value;
                     if (!char_id) {
-                        alert("请选择要催发动态的角色");
+                        alert(SakiI18n.t("请选择要催发动态的角色"));
                         return;
                     }
 
                     forceModalSubmit.disabled = true;
                     const oldText = forceModalSubmit.innerHTML;
-                    forceModalSubmit.innerHTML = '<span class="moment-compose-spinner"></span>生成中…';
+                    forceModalSubmit.innerHTML = SakiI18n.fragment('<span class="moment-compose-spinner"></span>生成中…');
 
                     fetch('/api/moments/force_active', {
                         method: 'POST',
@@ -3030,13 +3204,13 @@
                     .then(r => r.json())
                     .then(data => {
                         if (data.error) {
-                            alert("生成失败: " + data.error);
+                            alert(SakiI18n.t("生成失败: ") + data.error);
                         } else {
                             closeForceModal();
                             loadNextPage(true); // reload
                         }
                     })
-                    .catch(err => alert("网络错误: " + err))
+                    .catch(err => alert(SakiI18n.t("网络错误: ") + err))
                     .finally(() => {
                         forceModalSubmit.disabled = false;
                         forceModalSubmit.innerHTML = oldText;

@@ -1,6 +1,7 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="{{ ui_language }}" data-ai-brand-line="{{ ui_t('ai_brand_line', brand=saki_brand) }}">
 <head>
+  {% include "ui_language_head.html" %}
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
@@ -26,12 +27,14 @@
             --primary-dark: #f09598;
             --bg-color: #f5f7fa;
             --card-bg: #ffffff;
-            --text-main: #2c3e50;
-            --text-muted: #8ca0b3;
-            --border-color: #edf1f5;
-            --shadow-sm: 0 4px 15px rgba(0, 0, 0, 0.03);
-            --radius-md: 12px;
-            --radius-lg: 20px;
+            --text-main: #253041;
+            --text-muted: #8a97a8;
+            --border-color: #eef1f5;
+            --divider-color: #f2f4f7;
+            --shadow-sm: 0 2px 10px rgba(15, 23, 42, 0.04);
+            --shadow-md: 0 12px 32px rgba(15, 23, 42, 0.10);
+            --radius-md: 14px;
+            --radius-lg: 22px;
         }
 
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -39,57 +42,80 @@
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Helvetica Neue", sans-serif;
             background: var(--card-bg); /* 消息列表底色使用白色更通透 */
-            margin: 0; 
+            margin: 0;
             padding: 0;
             color: var(--text-main);
+            -webkit-font-smoothing: antialiased;
+            text-rendering: optimizeLegibility;
         }
 
         /* 顶部导航（毛玻璃效果） */
         .header {
-            background: rgba(255, 255, 255, 0.85);
-            backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            background: rgba(255, 255, 255, 0.82);
+            backdrop-filter: blur(14px) saturate(1.5); -webkit-backdrop-filter: blur(14px) saturate(1.5);
             padding: 12px 18px;
-            border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+            padding-top: calc(12px + env(safe-area-inset-top));
+            border-bottom: 1px solid rgba(15, 23, 42, 0.05);
             position: sticky; top: 0; z-index: 10;
-            display: flex; justify-content: space-between; align-items: center;
+            display: flex; justify-content: space-between; align-items: center; gap: 12px;
         }
-        
+
         .header-title {
-            font-size: 18px; font-weight: 700; color: var(--text-main);
+            font-size: 19px; font-weight: 700; color: var(--text-main);
+            letter-spacing: 0.01em;
+            flex-shrink: 0;
         }
+        .header-actions { min-width: 0; }
+        #contactSearchBar:not([hidden]) { display: flex; align-items: center; gap: 10px; width: 100%; }
+        #contactSearchInput {
+            flex: 1; min-width: 0; height: 32px; padding: 0 12px;
+            border: 1px solid var(--border-color); border-radius: 16px;
+            background: var(--bg-color); color: var(--text-main); font: inherit;
+        }
+        #contactSearchInput:focus { outline: 2px solid var(--primary-color); }
+        #contactSearchCancel { border: 0; background: transparent; color: var(--text-main); font: inherit; cursor: pointer; }
+        .contact-list-empty { text-align: center; padding: 28px; color: var(--text-muted); font-size: 13px; }
 
         /* 顶部加号按钮 */
 	        .header-add-btn {
 	            display: flex; align-items: center; justify-content: center;
-	            width: 30px; height: 30px; border-radius: 50%;
-	            background: var(--primary-light); color: var(--primary-dark);
+	            width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+	            background: var(--primary-rgba-light); color: var(--primary-dark);
 	            cursor: pointer; transition: all 0.2s;
 	        }
-	        .header-add-btn:active { transform: scale(0.9); background: var(--primary-color); color: #fff; }
+	        .header-add-btn:active { transform: scale(0.88); background: var(--primary-color); color: #fff; }
 	        .header-add-btn svg { width: 16px; height: 16px; stroke-width: 2.5px; }
 	        .header-toggle-btn {
-	            height: 30px; padding: 0 10px; border-radius: 16px; border: 1px solid var(--border-color);
-	            background: #fff; color: var(--primary-dark); font-size: 12px; font-weight: 700;
+	            height: 32px; padding: 0 13px; border-radius: 999px; border: 1px solid var(--border-color);
+	            background: #fff; color: var(--primary-dark); font-size: 12px; font-weight: 600;
+	            letter-spacing: 0.01em;
 	            cursor: pointer; white-space: nowrap; box-shadow: var(--shadow-sm);
+	            transition: all 0.2s;
+	            max-width: 38vw; min-width: 0; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1;
 	        }
-	        .header-toggle-btn.off { color: #94a3b8; background: #f8fafc; }
+	        .header-toggle-btn:active { transform: scale(0.95); }
+	        .header-toggle-btn.off { color: #9aa5b4; background: #f7f8fa; box-shadow: none; }
 
         /* 消息列表区 */
         .contact-list { padding-bottom: 100px; }
 
         .contact-item {
             display: flex; align-items: center;
-            background: var(--card-bg); padding: 14px 20px;
-            border-bottom: 1px solid var(--border-color);
-            cursor: pointer; transition: all 0.2s;
+            background: var(--card-bg); padding: 15px 20px;
+            border-bottom: 1px solid var(--divider-color);
+            cursor: pointer; transition: background 0.2s;
             position: relative;
+        }
+        .contact-item:last-child { border-bottom: none; }
+        @media (hover: hover) {
+            .contact-item:hover { background: #fafbfc; }
         }
         .contact-item:active { background: var(--bg-color); }
 
         /* 置顶样式 */
-        .contact-item.pinned { background: #fdfdfd; }
+        .contact-item.pinned { background: #fafbfc; }
         .contact-item.pinned::before {
-            content: ''; position: absolute; left: 0; top: 18%; bottom: 18%; width: 3px;
+            content: ''; position: absolute; left: 0; top: 20%; bottom: 20%; width: 3px;
             background: linear-gradient(to bottom, var(--primary-color), var(--primary-dark));
             border-top-right-radius: 3px; border-bottom-right-radius: 3px;
         }
@@ -104,138 +130,144 @@
 
         .info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
 
-        .top-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        .top-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
         .name-wrap { display: flex; align-items: center; gap: 7px; min-width: 0; flex: 1; }
-        .name { min-width: 0; font-size: 15px; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .name { min-width: 0; font-size: 15.5px; font-weight: 600; color: var(--text-main); letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .top-row { gap: 10px; }
-        #btnMarkAllRead { border: 0; padding: 0; flex-shrink: 0; }
+        #btnMarkAllRead, #btnContactSearch { border: 0; padding: 0; flex-shrink: 0; }
         #btnMarkAllRead:disabled { opacity: .35; cursor: default; }
-        #contactsFeedback { margin: 0; padding: 8px 18px; font-size: 12px; color: var(--text-muted); }
-        .time { font-size: 12px; color: #a0aec0; flex-shrink: 0; font-weight: 500; }
+        #contactsFeedback { margin: 0; padding: 10px 20px; font-size: 12px; color: var(--text-muted); }
+        .time { font-size: 11.5px; color: #b3bcc9; flex-shrink: 0; font-weight: 500; letter-spacing: 0.02em; }
 
         .bottom-row { display: flex; justify-content: space-between; align-items: center; }
         .msg-preview {
-            font-size: 14px; color: var(--text-muted);
+            font-size: 13.5px; color: var(--text-muted);
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-            padding-right: 8px;
+            padding-right: 8px; line-height: 1.45;
         }
 
         /* 未读红点 */
         .unread-badge {
             background-color: #ff3b30; color: white;
-            border-radius: 999px; padding: 0 5px; min-width: 16px; height: 16px;
+            border-radius: 999px; padding: 0 5px; min-width: 17px; height: 17px;
             display: inline-flex; align-items: center; justify-content: center;
-            font-size: 10px; font-weight: 700; flex-shrink: 0;
-            box-shadow: 0 2px 4px rgba(255, 59, 48, 0.3);
+            font-size: 10.5px; font-weight: 700; flex-shrink: 0;
+            box-shadow: 0 2px 6px rgba(255, 59, 48, 0.28);
         }
 
         /* --- 下拉菜单美化 --- */
         #plusMenu {
-            display: none; position: absolute; top: 38px; right: 0;
-            background: var(--card-bg); box-shadow: 0 10px 30px rgba(0,0,0,0.12);
-            border-radius: var(--radius-md); min-width: 150px; z-index: 100;
+            display: none; position: absolute; top: 40px; right: 0;
+            background: var(--card-bg); box-shadow: var(--shadow-md);
+            border-radius: var(--radius-md); min-width: 158px; z-index: 100;
             overflow: hidden; border: 1px solid var(--border-color);
+            padding: 4px 0;
             transform-origin: top right; animation: menu-pop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
         }
         @keyframes menu-pop {
-            0% { opacity: 0; transform: scale(0.9); }
+            0% { opacity: 0; transform: scale(0.92); }
             100% { opacity: 1; transform: scale(1); }
         }
 
         #plusMenu div {
-            padding: 11px 16px; border-bottom: 1px solid #f8f9fa;
-            cursor: pointer; font-size: 14px; font-weight: 500; color: var(--text-main);
-            white-space: nowrap; transition: all 0.2s; display: flex; align-items: center; gap: 6px;
+            padding: 12px 16px; border-bottom: 1px solid #f6f7f9;
+            cursor: pointer; font-size: 13.5px; font-weight: 500; color: var(--text-main);
+            white-space: nowrap; transition: all 0.15s; display: flex; align-items: center; gap: 8px;
         }
         #plusMenu div:hover, #plusMenu div:active { background-color: var(--primary-rgba-light); color: var(--primary-dark); }
         #plusMenu div:last-child { border-bottom: none; }
 
         /* --- 弹窗美化 (Modals) --- */
         .modal-overlay {
-            display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4);
-            backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px);
+            display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.42);
+            backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
             z-index: 1000; align-items: center; justify-content: center;
             animation: fade-in 0.2s ease-out;
         }
         .modal-card {
-            background: var(--card-bg); padding: 24px; border-radius: var(--radius-lg);
-            width: 85%; max-width: 360px; box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+            background: var(--card-bg); padding: 26px 22px 22px; border-radius: var(--radius-lg);
+            width: 85%; max-width: 360px; box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18);
             animation: slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1);
         }
         @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes slide-up { from { transform: translateY(20px) scale(0.95); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
+        @keyframes slide-up { from { transform: translateY(20px) scale(0.96); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
 
-        .modal-title { margin: 0 0 20px 0; color: var(--text-main); text-align: center; font-size: 18px; font-weight: 700; }
-        
+        .modal-title { margin: 0 0 22px 0; color: var(--text-main); text-align: center; font-size: 17px; font-weight: 700; letter-spacing: 0.01em; }
+
         .input-group { margin-bottom: 16px; }
-        .input-label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; font-weight: 500; }
+        .input-label { display: block; font-size: 12.5px; color: var(--text-muted); margin-bottom: 7px; font-weight: 500; }
         .input-field {
-            width: 100%; padding: 12px 14px; border: 1px solid transparent;
-            background: #f0f2f5; border-radius: var(--radius-md); font-size: 14px; color: var(--text-main);
+            width: 100%; padding: 13px 15px; border: 1px solid transparent;
+            background: #f4f6f8; border-radius: 12px; font-size: 14px; color: var(--text-main);
             transition: all 0.2s; outline: none; box-sizing: border-box; font-family: inherit;
         }
         .input-field:focus { background: #fff; border-color: var(--primary-color); box-shadow: 0 0 0 3px var(--primary-rgba-lighter); }
 
         #char-selection-list {
             max-height: 180px; overflow-y: auto; border: 1px solid var(--border-color);
-            border-radius: var(--radius-md); padding: 8px; background: #fafafa;
+            border-radius: 12px; padding: 6px; background: #f8f9fb;
         }
 
-        .modal-actions { display: flex; justify-content: space-between; gap: 12px; margin-top: 24px; }
+        .modal-actions { display: flex; justify-content: space-between; gap: 12px; margin-top: 26px; }
         .btn-cancel {
-            flex: 1; padding: 12px; border: none; background: #f0f2f5; color: var(--text-muted);
-            border-radius: 24px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s;
+            flex: 1; padding: 13px; border: none; background: #f2f4f7; color: var(--text-muted);
+            border-radius: 999px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s;
         }
-        .btn-cancel:hover { background: #e4e6eb; color: var(--text-main); }
+        .btn-cancel:hover { background: #e7eaef; color: var(--text-main); }
         .btn-submit {
-            flex: 1; padding: 12px; border: none; background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color: #fff;
-            border-radius: 24px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s;
-            box-shadow: 0 4px 12px var(--primary-rgba-dark);
+            flex: 1; padding: 13px; border: none; background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color: #fff;
+            border-radius: 999px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s;
+            box-shadow: 0 6px 14px var(--primary-rgba-dark);
         }
         .btn-submit:active { transform: scale(0.96); box-shadow: 0 2px 6px var(--primary-rgba-dark); }
 
         /* --- 多选模式 --- */
-        .header-actions .header-add-wrap { display: flex; align-items: center; gap: 8px; }
+        .header-actions .header-add-wrap { display: flex; align-items: center; gap: 10px; }
+        @media (max-width: 400px) {
+            .header { padding-inline: 12px; gap: 6px; }
+            .header-actions .header-add-wrap { gap: 6px; }
+        }
         .header-actions.select-mode .header-add-wrap { display: none; }
-        .contact-item .select-checkbox { display: none; margin-right: 12px; flex-shrink: 0; width: 22px; height: 22px; cursor: pointer; border-radius: 50%; -webkit-appearance: none; appearance: none; border: 2px solid #ccc; background: #fff; box-sizing: border-box; position: relative; }
-        .contact-item .select-checkbox:checked { background: var(--primary-color); border-color: var(--primary-color); }
+        .contact-item .select-checkbox { display: none; margin-right: 12px; flex-shrink: 0; width: 22px; height: 22px; cursor: pointer; border-radius: 50%; -webkit-appearance: none; appearance: none; border: 2px solid #d3d9e0; background: #fff; box-sizing: border-box; position: relative; transition: all 0.15s; }
+        .contact-item .select-checkbox:checked { background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); border-color: var(--primary-dark); }
         .contact-item .select-checkbox:checked::after { content: ''; position: absolute; left: 5px; top: 2px; width: 6px; height: 11px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
         .select-mode .contact-item .select-checkbox { display: block; }
         .select-mode .contact-item { cursor: pointer; }
         .select-mode .contact-item:active { background: var(--primary-rgba-light); }
         .multi-select-bar {
             display: none; position: fixed; bottom: 0; left: 0; right: 0;
-            background: rgba(255,255,255,0.98); backdrop-filter: blur(10px);
+            background: rgba(255,255,255,0.96); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
             border-top: 1px solid var(--border-color);
-            padding: 10px 12px 10px 20px;
-            padding-bottom: calc(10px + env(safe-area-inset-bottom));
-            align-items: center; gap: 10px; z-index: 999;
-            box-shadow: 0 -2px 10px rgba(0,0,0,0.06);
+            padding: 12px 10px 12px 14px;
+            padding-bottom: calc(12px + env(safe-area-inset-bottom));
+            align-items: center; gap: 8px; z-index: 999;
+            box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.07);
         }
         .multi-select-bar.active { display: flex; }
         .multi-select-bar .select-all-wrap {
-            display: flex; align-items: center; gap: 8px; cursor: pointer; flex-shrink: 0;
-            font-size: 14px; font-weight: 600; color: var(--primary-dark);
+            display: flex; align-items: center; gap: 6px; cursor: pointer; flex-shrink: 0;
+            font-size: 13px; font-weight: 600; color: var(--primary-dark); white-space: nowrap;
         }
         .multi-select-bar .select-all-checkbox {
             width: 22px; height: 22px; cursor: pointer; border-radius: 50%;
-            -webkit-appearance: none; appearance: none; border: 2px solid #ccc; background: #fff; box-sizing: border-box; position: relative; flex-shrink: 0;
+            -webkit-appearance: none; appearance: none; border: 2px solid #d3d9e0; background: #fff; box-sizing: border-box; position: relative; flex-shrink: 0; transition: all 0.15s;
         }
-        .multi-select-bar .select-all-checkbox:checked { background: var(--primary-color); border-color: var(--primary-color); }
+        .multi-select-bar .select-all-checkbox:checked { background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); border-color: var(--primary-dark); }
         .multi-select-bar .select-all-checkbox:checked::after { content: ''; position: absolute; left: 5px; top: 2px; width: 6px; height: 11px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
-        .multi-select-bar .btn-third { flex: 1; min-width: 0; padding: 10px 8px; border-radius: 20px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; }
+        .multi-select-bar .btn-third { flex: 1; min-width: 0; padding: 10px 2px; border-radius: 999px; font-size: 12.5px; font-weight: 600; border: none; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
         .multi-select-bar .action-dropdown-wrap { position: relative; flex: 1; min-width: 0; }
         .multi-select-bar .btn-action {
-            width: 100%; padding: 10px 8px; border-radius: 20px; font-size: 13px; font-weight: 600;
+            width: 100%; padding: 10px 2px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
             background: var(--primary-rgba-light); color: var(--primary-dark); border: none;
             cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+            white-space: nowrap;
         }
         .multi-select-bar .btn-action:active { transform: scale(0.96); }
-        .multi-select-bar .btn-cancel-bar { flex: 1; min-width: 0; padding: 10px 8px; border-radius: 20px; background: #f0f2f5; color: var(--text-muted); border: none; font-weight: 600; cursor: pointer; font-size: 13px; }
-        .multi-select-bar .btn-save-bar { flex: 1; min-width: 0; padding: 10px 8px; border-radius: 20px; background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color: #fff; border: none; font-weight: 600; cursor: pointer; font-size: 13px; }
-        #actionDropdown { display: none; position: absolute; bottom: 100%; left: 0; margin-bottom: 6px; background: #fff; box-shadow: 0 6px 20px rgba(0,0,0,0.15); border-radius: 12px; min-width: 180px; max-height: 60vh; overflow-y: auto; z-index: 1000; border: 1px solid var(--border-color); }
+        .multi-select-bar .btn-cancel-bar { flex: 1; min-width: 0; padding: 10px 2px; border-radius: 999px; background: #f2f4f7; color: var(--text-muted); border: none; font-weight: 600; cursor: pointer; font-size: 12.5px; white-space: nowrap; }
+        .multi-select-bar .btn-save-bar { flex: 1; min-width: 0; padding: 10px 2px; border-radius: 999px; background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color: #fff; border: none; font-weight: 600; cursor: pointer; font-size: 12.5px; box-shadow: 0 4px 10px var(--primary-rgba-dark); white-space: nowrap; }
+        #actionDropdown { display: none; position: absolute; bottom: 100%; left: 0; margin-bottom: 8px; background: #fff; box-shadow: var(--shadow-md); border-radius: 14px; min-width: 180px; max-height: 60vh; overflow-y: auto; z-index: 1000; border: 1px solid var(--border-color); padding: 4px 0; }
         #actionDropdown.show { display: block; }
-        #actionDropdown div { padding: 12px 16px; cursor: pointer; font-size: 14px; color: var(--text-main); border-bottom: 1px solid #f5f5f5; }
+        #actionDropdown div { padding: 12px 16px; cursor: pointer; font-size: 13.5px; color: var(--text-main); border-bottom: 1px solid #f6f7f9; transition: all 0.15s; }
         #actionDropdown div:last-child { border-bottom: none; }
         #actionDropdown div:hover, #actionDropdown div:active { background: var(--primary-rgba-light); color: var(--primary-dark); }
         #actionDropdown div.disabled { color: #bbb; cursor: not-allowed; }
@@ -258,7 +290,12 @@
     <div class="header-actions" style="position:relative;">
         <!-- 多选/加号（进入多选后整块隐藏） -->
 	        <div class="header-add-wrap">
-	            <button type="button" class="header-toggle-btn" id="globalBedtimeDiaryBtn" onclick="toggleGlobalBedtimeDiary()" title="全局睡前总结">关闭睡前总结</button>
+	            <button type="button" class="header-toggle-btn" id="globalBedtimeDiaryBtn" onclick="toggleGlobalBedtimeDiary()" title="全局睡前总结">睡前总结</button>
+                <button type="button" class="header-add-btn" id="btnContactSearch" title="搜索联系人或群聊" aria-label="搜索联系人或群聊" aria-controls="contactSearchBar" aria-expanded="false" onclick="setContactSearchOpen(true)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" aria-hidden="true">
+                        <circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m16 16 5 5"></path>
+                    </svg>
+                </button>
 	            <div class="header-add-btn" id="btnMultiselect" onclick="toggleSelectMode()" title="多选">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" id="iconMultiselect">
                     <rect x="3" y="3" width="7" height="7"></rect>
@@ -287,6 +324,10 @@
             <div onclick="openAddGroupModal()"><span style="font-size:14px;">👥</span> 新建群聊</div>
         </div>
     </div>
+    <div id="contactSearchBar" role="search" hidden>
+        <input id="contactSearchInput" type="search" placeholder="搜索联系人或群聊，如 千切；玲王" aria-label="搜索联系人或群聊" aria-controls="list" autocomplete="off">
+        <button type="button" id="contactSearchCancel" onclick="setContactSearchOpen(false)">取消</button>
+    </div>
 </div>
 
 <p id="contactsFeedback" role="status" aria-live="polite" hidden></p>
@@ -311,7 +352,8 @@
 
         <div class="input-group" style="margin-bottom: 24px;">
             <label class="input-label">角色姓名</label>
-            <input type="text" id="new-char-name" class="input-field" placeholder="例如: 蜂乐回">
+            <input aria-describedby="character-name-hint" type="text" id="new-char-name" class="input-field" placeholder="例如: 蜂乐回">
+            <small id="character-name-hint">角色名和备注名最多可用 10 个全角字符，两个半角字符算一个。</small>
         </div>
 
         <div class="modal-actions">
@@ -336,7 +378,8 @@
 
         <div class="input-group">
             <label class="input-label">群名称</label>
-            <input type="text" id="new-group-name" class="input-field" placeholder="例如: 洁&蜂乐">
+            <input aria-describedby="group-name-hint" type="text" id="new-group-name" class="input-field" placeholder="例如: 洁&蜂乐">
+            <small id="group-name-hint">群聊名最多可用 15 个全角字符，两个半角字符算一个。</small>
         </div>
 
         <div class="input-group" style="margin-bottom: 24px;">
@@ -434,7 +477,9 @@
 	    function renderGlobalBedtimeDiaryButton() {
 	        const btn = document.getElementById('globalBedtimeDiaryBtn');
 	        if (!btn) return;
-	        btn.textContent = globalBedtimeDiaryEnabled ? '关闭睡前总结' : '开启睡前总结';
+	        btn.textContent = SakiI18n.t('睡前总结短标签');
+                btn.title = globalBedtimeDiaryEnabled ? SakiI18n.t('关闭睡前总结') : SakiI18n.t('开启睡前总结');
+                btn.setAttribute('aria-pressed', String(globalBedtimeDiaryEnabled));
 	        btn.classList.toggle('off', !globalBedtimeDiaryEnabled);
 	    }
 
@@ -464,7 +509,7 @@
 	            globalBedtimeDiaryEnabled = next;
 	            renderGlobalBedtimeDiaryButton();
 	        } catch (e) {
-	            alert('保存失败，请稍后重试');
+	            alert(SakiI18n.t('保存失败，请稍后重试'));
 	        }
 	    }
 
@@ -519,8 +564,8 @@
         const checkboxes = document.querySelectorAll('.char-checkbox:checked');
         const members = Array.from(checkboxes).map(cb => cb.value);
 
-        if (!id || !name) return alert("请填写ID和名称");
-        if (members.length < 2) return alert("请至少选择2个成员");
+        if (!id || !name) return alert(SakiI18n.t("请填写ID和名称"));
+        if (members.length < 2) return alert(SakiI18n.t("请至少选择2个成员"));
 
         try {
             const res = await fetchWithAuthGuard('/api/groups/add', {
@@ -531,13 +576,13 @@
             if (handleApiUnauthorized(res)) return;
             const result = await res.json();
             if (res.ok) {
-                alert("群聊创建成功！");
+                alert(SakiI18n.t("群聊创建成功！"));
                 document.getElementById('addGroupModal').style.display = 'none';
                 loadContacts(); // 刷新列表
             } else {
-                alert("失败: " + result.error);
+                alert(SakiI18n.t("失败: ") + result.error);
             }
-        } catch(e) { alert("网络错误"); }
+        } catch(e) { alert(SakiI18n.t("网络错误")); }
     }
 
     // --- 列表渲染逻辑 (修改) ---
@@ -625,7 +670,7 @@
             contactsRefreshDelay = Math.min(60000, contactsRefreshDelay * 2);
             console.error('联系人加载失败', e);
             showContactsFeedback('刷新失败，稍后自动重试');
-            if (!latestContactsData.length) document.getElementById('list').innerHTML = '<div style="text-align:center; padding:20px;">加载失败，请稍后重试</div>';
+            if (!latestContactsData.length) document.getElementById('list').innerHTML = SakiI18n.fragment('<div style="text-align:center; padding:20px;">加载失败，请稍后重试</div>');
           } finally {
             clearTimeout(timeout);
             contactsRequest = null;
@@ -680,22 +725,88 @@
     let savedContactsSnapshot = null; // 进入多选时保存，取消时恢复
     let pendingOps = [];              // 待保存的操作，点保存时才请求接口
     const listEl = document.getElementById('list');
+    const contactSearchInput = document.getElementById('contactSearchInput');
+    let scrollBeforeSearch = 0;
+
+    function setContactSearchOpen(open) {
+        const button = document.getElementById('btnContactSearch');
+        if (open) scrollBeforeSearch = window.scrollY;
+        document.getElementById('contactSearchBar').hidden = !open;
+        document.getElementById('headerTitle').hidden = open;
+        button.closest('.header-actions').hidden = open;
+        button.setAttribute('aria-expanded', String(open));
+        if (open) {
+            document.getElementById('plusMenu').style.display = 'none';
+            contactSearchInput.focus();
+            window.scrollTo(0, 0);
+        } else {
+            contactSearchInput.value = '';
+            if (allContactsData.length) renderList(allContactsData);
+            button.focus({preventScroll: true});
+            window.scrollTo(0, scrollBeforeSearch);
+        }
+    }
+
+    contactSearchInput.addEventListener('input', () => {
+        if (allContactsData.length) renderList(allContactsData);
+        window.scrollTo(0, 0);
+    });
+    contactSearchInput.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && !event.isComposing) {
+            event.preventDefault();
+            setContactSearchOpen(false);
+        }
+    });
+
+    function normalizeContactSearch(value) {
+        return String(value ?? '').normalize('NFKC').trim().toLowerCase();
+    }
+
+    function searchContacts(contacts, query) {
+        // NFKC folds the full-width semicolon into the ASCII semicolon.
+        const terms = [...new Set(query.split(';').map(term => term.trim()).filter(Boolean))];
+        if (!terms.length) return contacts;
+        const matchesName = (contact, term) => [contact.name, contact.remark].some(
+            name => normalizeContactSearch(name).includes(term)
+        );
+        const matchingMemberIds = terms.map(term => new Set(contacts
+            .filter(contact => contact.type !== 'group' && matchesName(contact, term))
+            .map(contact => contact.id)));
+
+        if (terms.length > 1) {
+            return contacts.filter(contact => contact.type === 'group' &&
+                Array.isArray(contact.members) &&
+                matchingMemberIds.every(ids => contact.members.some(id => ids.has(id))));
+        }
+
+        const [matchingCharacterIds] = matchingMemberIds;
+        return contacts.filter(contact => {
+            if (contact.type !== 'group') return matchingCharacterIds.has(contact.id);
+            return matchesName(contact, terms[0]) || (Array.isArray(contact.members) &&
+                contact.members.some(id => matchingCharacterIds.has(id)));
+        });
+    }
 
     function renderList(contacts) {
         if (!Array.isArray(contacts)) contacts = [];
-        if(contacts.length === 0) {
-            listEl.innerHTML = '<div style="text-align:center; padding:28px; color:#ccc; font-size:13px;">暂无联系人</div>';
+        const matches = searchContacts(contacts, normalizeContactSearch(contactSearchInput.value));
+        if (!matches.length) {
+            const empty = document.createElement('div');
+            empty.className = 'contact-list-empty';
+            empty.setAttribute('role', 'status');
+            empty.textContent = contacts.length ? SakiI18n.t('未找到匹配的联系人或群聊') : SakiI18n.t('暂无联系人');
+            listEl.replaceChildren(empty);
             return;
         }
 
         let html = '';
-        contacts.forEach(c => {
+        matches.forEach(c => {
             const pinnedClass = c.pinned ? 'pinned' : '';
             const type = c.type === 'group' ? 'group' : 'char';
             let jumpUrl = type === 'group' ? `/chat/group/${c.id}` : `/chat/${c.id}`;
             let unreadHtml = '';
             if (c.unread && c.unread > 0) {
-                unreadHtml = `<span class="unread-badge" aria-label="${Number(c.unread)}条未读">${c.unread > 99 ? '99+' : Number(c.unread)}</span>`;
+                unreadHtml = SakiI18n.ui`<span class="unread-badge" aria-label="${Number(c.unread)}条未读">${c.unread > 99 ? '99+' : Number(c.unread)}</span>`;
             }
             const escapedRemark = (c.remark || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
             const escapedMsg = (c.last_msg || '暂无消息').replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -764,7 +875,7 @@
     function updateSelectCount() {
         const n = getSelected().length;
         const t = document.getElementById('headerTitle');
-        if (selectMode && t) t.textContent = n > 0 ? `已选 ${n} 项` : '多选';
+        if (selectMode && t) t.textContent = n > 0 ? SakiI18n.ui`已选 ${n} 项` : SakiI18n.t('多选');
     }
 
     function updateSelectAllLabel() {
@@ -772,7 +883,7 @@
         const checked = listEl.querySelectorAll('.contact-item .select-checkbox:checked').length;
         const label = document.getElementById('selectAllLabel');
         const allCb = document.getElementById('selectAllCheckbox');
-        if (label) label.textContent = checked >= total && total > 0 ? '取消全选' : '全选';
+        if (label) label.textContent = checked >= total && total > 0 ? SakiI18n.t('取消全选') : SakiI18n.t('全选');
         if (allCb) allCb.checked = total > 0 && checked >= total;
     }
 
@@ -811,11 +922,11 @@
         if (selectMode) {
             savedContactsSnapshot = JSON.parse(JSON.stringify(allContactsData));
             pendingOps = [];
-            title.textContent = '多选';
+            title.textContent = SakiI18n.t('多选');
             updateSelectCount();
             updateSelectAllLabel();
         } else {
-            title.textContent = '消息';
+            title.textContent = SakiI18n.t('消息');
         }
         const allCb = document.getElementById('selectAllCheckbox'); if (allCb) allCb.checked = false;
         hideActionDropdown();
@@ -831,7 +942,7 @@
         listEl.parentElement && listEl.parentElement.classList.remove('select-mode');
         document.getElementById('multiSelectBar').classList.remove('active');
         var tb = document.querySelector('.tab-bar'); if (tb) tb.style.display = 'flex';
-        document.getElementById('headerTitle').textContent = '消息';
+        document.getElementById('headerTitle').textContent = SakiI18n.t('消息');
         hideActionDropdown();
     }
 
@@ -848,7 +959,7 @@
         readActionError = '';
         let markedRead = false;
         const deleteCount = pendingOps.filter(op => op.action === 'delete').reduce((sum, op) => sum + op.items.length, 0);
-        if (deleteCount > 0 && !confirm(`本次操作包含删除 ${deleteCount} 项，确定保存吗？角色的聊天、记忆、朋友圈互动和地图位置也会一并清理，删除后无法恢复。`)) return;
+        if (deleteCount > 0 && !confirm(SakiI18n.ui`本次操作包含删除 ${deleteCount} 项，确定保存吗？角色的聊天、记忆、朋友圈互动和地图位置也会一并清理，删除后无法恢复。`)) return;
         const momentsIndexFailedIds = new Set();
         for (const op of pendingOps) {
             if (op.action === 'mark_read') {
@@ -913,7 +1024,7 @@
             }
         }
         if (momentsIndexFailedIds.size > 0) {
-            alert(`有 ${momentsIndexFailedIds.size} 个联系人的性格指数保存失败，请稍后重试。`);
+            alert(SakiI18n.ui`有 ${momentsIndexFailedIds.size} 个联系人的性格指数保存失败，请稍后重试。`);
             return;
         }
         exitSelectMode();
@@ -967,7 +1078,7 @@
 
     function runBatchAction(action) {
         const sel = getSelected();
-        if (sel.length === 0) { alert('请先选择至少一项'); return; }
+        if (sel.length === 0) { alert(SakiI18n.t('请先选择至少一项')); return; }
         const chars = sel.filter(x => x.type === 'char');
         const groups = sel.filter(x => x.type === 'group');
 
@@ -981,7 +1092,7 @@
         }
 
         if (action === 'delete') {
-            if (!confirm(`确定要删除选中的 ${sel.length} 项吗？点保存后生效，点取消可恢复。`)) return;
+            if (!confirm(SakiI18n.ui`确定要删除选中的 ${sel.length} 项吗？点保存后生效，点取消可恢复。`)) return;
             pendingOps.push({ action: 'delete', items: sel });
             applyOpLocally({ action: 'delete', items: sel });
             return;
@@ -997,31 +1108,31 @@
             return;
         }
         if (action === 'light_sleep_on' || action === 'light_sleep_off') {
-            if (chars.length === 0) { alert('请选择单聊联系人后再操作。'); return; }
-            if (!confirm(`将对选中的 ${chars.length} 个单聊${action === 'light_sleep_on' ? '开启' : '关闭'}浅睡眠（点保存后生效）。`)) return;
+            if (chars.length === 0) { alert(SakiI18n.t('请选择单聊联系人后再操作。')); return; }
+            if (!confirm(SakiI18n.ui`将对选中的 ${chars.length} 个单聊${action === 'light_sleep_on' ? SakiI18n.t('开启') : SakiI18n.t('关闭')}浅睡眠（点保存后生效）。`)) return;
             const val = action === 'light_sleep_on';
             pendingOps.push({ action: 'light_sleep', value: val, items: chars });
             applyOpLocally({ action: 'light_sleep', value: val, items: chars });
             return;
         }
 	        if (action === 'deep_sleep_on' || action === 'deep_sleep_off') {
-	            if (chars.length === 0) { alert('请选择单聊联系人后再操作。'); return; }
-	            if (!confirm(`将对选中的 ${chars.length} 个单聊${action === 'deep_sleep_on' ? '开启' : '关闭'}深睡眠（点保存后生效）。`)) return;
+	            if (chars.length === 0) { alert(SakiI18n.t('请选择单聊联系人后再操作。')); return; }
+	            if (!confirm(SakiI18n.ui`将对选中的 ${chars.length} 个单聊${action === 'deep_sleep_on' ? SakiI18n.t('开启') : SakiI18n.t('关闭')}深睡眠（点保存后生效）。`)) return;
 	            const val = action === 'deep_sleep_on';
 	            pendingOps.push({ action: 'deep_sleep', value: val, items: chars });
 	            applyOpLocally({ action: 'deep_sleep', value: val, items: chars });
 	            return;
 	        }
 	        if (action === 'bedtime_diary_on' || action === 'bedtime_diary_off') {
-	            if (chars.length === 0) { alert('请选择单聊联系人后再操作。'); return; }
-	            if (!confirm(`将对选中的 ${chars.length} 个单聊${action === 'bedtime_diary_on' ? '开启' : '关闭'}睡前总结（点保存后生效）。`)) return;
+	            if (chars.length === 0) { alert(SakiI18n.t('请选择单聊联系人后再操作。')); return; }
+	            if (!confirm(SakiI18n.ui`将对选中的 ${chars.length} 个单聊${action === 'bedtime_diary_on' ? SakiI18n.t('开启') : SakiI18n.t('关闭')}睡前总结（点保存后生效）。`)) return;
 	            const val = action === 'bedtime_diary_on';
 	            pendingOps.push({ action: 'bedtime_diary', value: val, items: chars });
 	            applyOpLocally({ action: 'bedtime_diary', value: val, items: chars });
 	            return;
 	        }
         if (action === 'moments_index') {
-            if (chars.length === 0) { alert('请选择单聊联系人后再操作。'); return; }
+            if (chars.length === 0) { alert(SakiI18n.t('请选择单聊联系人后再操作。')); return; }
             document.getElementById('moments_index_input').value = '1';
             document.getElementById('momentsIndexModal').style.display = 'flex';
             document.getElementById('moments_index_input').focus();
@@ -1029,7 +1140,7 @@
             return;
         }
         if (action === 'deep_sleep_time') {
-            if (chars.length === 0) { alert('请选择单聊联系人后再操作。'); return; }
+            if (chars.length === 0) { alert(SakiI18n.t('请选择单聊联系人后再操作。')); return; }
             document.getElementById('ds_start_input').value = '';
             document.getElementById('ds_end_input').value = '';
             document.getElementById('deepSleepTimeModal').style.display = 'flex';
@@ -1037,8 +1148,8 @@
             return;
         }
         if (action === 'active_mode_on' || action === 'active_mode_off') {
-            if (groups.length === 0) { alert('请选择群聊后再操作。'); return; }
-            if (!confirm(`将对选中的 ${groups.length} 个群聊${action === 'active_mode_on' ? '开启' : '关闭'}主动消息（点保存后生效）。`)) return;
+            if (groups.length === 0) { alert(SakiI18n.t('请选择群聊后再操作。')); return; }
+            if (!confirm(SakiI18n.ui`将对选中的 ${groups.length} 个群聊${action === 'active_mode_on' ? SakiI18n.t('开启') : SakiI18n.t('关闭')}主动消息（点保存后生效）。`)) return;
             const val = action === 'active_mode_on';
             pendingOps.push({ action: 'active_mode', value: val, items: groups });
             applyOpLocally({ action: 'active_mode', value: val, items: groups });
@@ -1062,13 +1173,13 @@
         const input = document.getElementById('moments_index_input');
         const value = Number(input.value);
         if (!Number.isFinite(value) || !input.checkValidity()) {
-            alert('请输入 0.1～10 之间、步长为 0.1 的性格指数。');
+            alert(SakiI18n.t('请输入 0.1～10 之间、步长为 0.1 的性格指数。'));
             input.focus();
             return;
         }
         pendingOps.push({ action: 'moments_index', value, items: items });
         closeMomentsIndexModal();
-        alert(`已为 ${items.length} 个单聊联系人设置性格指数 ${value}，点击“保存”后生效。`);
+        alert(SakiI18n.ui`已为 ${items.length} 个单聊联系人设置性格指数 ${value}，点击“保存”后生效。`);
     }
 
     function applyDeepSleepTime() {
@@ -1076,7 +1187,7 @@
         if (!ids || !ids.length) return;
         const start = document.getElementById('ds_start_input').value.trim();
         const end = document.getElementById('ds_end_input').value.trim();
-        if (!start || !end) { alert('请填写入睡时间和起床时间（HH:MM）'); return; }
+        if (!start || !end) { alert(SakiI18n.t('请填写入睡时间和起床时间（HH:MM）')); return; }
         const items = ids.map(id => ({ id, type: 'char' }));
         pendingOps.push({ action: 'deep_sleep_time', value: { ds_start: start, ds_end: end }, items: items });
         applyOpLocally({ action: 'deep_sleep_time', value: { ds_start: start, ds_end: end }, items: items });
@@ -1118,10 +1229,10 @@
         const id = inputId.value.trim();
         const name = inputName.value.trim();
 
-        if (!id || !name) return alert("请填写完整信息");
+        if (!id || !name) return alert(SakiI18n.t("请填写完整信息"));
 
         // 简单的前端校验
-        if (!/^[a-zA-Z0-9_]+$/.test(id)) return alert("ID 只能包含字母、数字或下划线");
+        if (!/^[a-zA-Z0-9_]+$/.test(id)) return alert(SakiI18n.t("ID 只能包含字母、数字或下划线"));
 
         try {
             const res = await fetchWithAuthGuard('/api/characters/add', {
@@ -1134,14 +1245,14 @@
             const result = await res.json();
 
             if (res.ok) {
-                alert("创建成功！");
+                alert(SakiI18n.t("创建成功！"));
                 closeAddModal();
                 loadContacts(); // 刷新列表
             } else {
-                alert("创建失败: " + result.error);
+                alert(SakiI18n.t("创建失败: ") + result.error);
             }
         } catch (e) {
-            alert("网络错误");
+            alert(SakiI18n.t("网络错误"));
         }
     }
 </script>

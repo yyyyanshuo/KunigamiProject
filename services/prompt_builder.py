@@ -1,3 +1,4 @@
+from core.runtime import DATA_ROOT
 import os
 import re
 import json
@@ -20,6 +21,7 @@ from core.time_utils import (
     get_character_timezone,
     get_zone,
     parse_beijing_timestamp,
+    format_prompt_time,
     utc_now,
 )
 from core.utils import (
@@ -30,7 +32,7 @@ from core.utils import (
     normalize_map_state,
 )
 from services.voice_messages import voice_message_for_ai
-from services.voice_calls import voice_call_for_ai
+from services.voice_calls import voice_call_for_ai, parse_voice_call_tag
 from services.schedule import UNDATED_SCHEDULE_KEY, normalize_schedule_data
 from services.persona_locks import LOCK_OPEN, PERSONA_LOCK_MODEL_INSTRUCTION
 
@@ -51,54 +53,11 @@ def _upcoming_schedule_lines(schedule, today, days=7):
 
 
 def get_ai_language(target_id=None, group_id=None, user_id=None):
-    if user_id is None:
-        from core.context import get_current_user_id
-        user_id = get_current_user_id()
-    default_lang = "zh"
-
-    try:
-        if group_id:
-            groups_cfg = _get_groups_config_file(user_id=user_id)
-            if os.path.exists(groups_cfg):
-                with open(groups_cfg, "r", encoding="utf-8") as f:
-                    all_groups = json.load(f)
-                group_lang = all_groups.get(group_id, {}).get("language")
-                if group_lang:
-                    return group_lang
-
-        if target_id:
-            cfg_file = _get_characters_config_file(user_id=user_id)
-            if os.path.exists(cfg_file):
-                with open(cfg_file, "r", encoding="utf-8") as f:
-                    all_config = json.load(f)
-                char_lang = all_config.get(target_id, {}).get("language")
-                if char_lang:
-                    return char_lang
-
-            if not group_id:
-                groups_cfg = _get_groups_config_file(user_id=user_id)
-                if os.path.exists(groups_cfg):
-                    with open(groups_cfg, "r", encoding="utf-8") as f:
-                        all_groups = json.load(f)
-                    group_lang = all_groups.get(target_id, {}).get("language")
-                    if group_lang:
-                        return group_lang
-    except Exception as e:
-        print(f"[get_ai_language] Error reading config for {target_id}: {e}")
-
-    if user_id:
-        path = os.path.join(USERS_ROOT, str(user_id), "configs", "user_settings.json")
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                lang = data.get("ai_language")
-                if lang:
-                    return lang
-            except Exception:
-                pass
-    data = _load_user_settings()
-    return data.get("ai_language", default_lang)
+    """Compatibility entry point for role output; user translation uses its own policy."""
+    from core.languages import role_output_language, group_language, _config
+    if target_id and not group_id and target_id in _config('groups.json', user_id):
+        return group_language(target_id, user_id)
+    return role_output_language(target_id, group_id, user_id)
 
 
 def get_char_name(char_id, user_id=None):
@@ -149,6 +108,17 @@ def _get_char_chat_mode(char_id, user_id=None):
     except:
         pass
     return "online"
+
+
+def _get_chat_mode(char_id, group_id=None, user_id=None):
+    if group_id is None:
+        return _get_char_chat_mode(char_id, user_id=user_id)
+    try:
+        with open(_get_groups_config_file(user_id=user_id), encoding="utf-8") as f:
+            mode = json.load(f).get(group_id, {}).get("group_chat_mode")
+        return "offline" if mode == "offline" else "online"
+    except (OSError, ValueError, TypeError, AttributeError):
+        return "online"
 
 
 def get_user_age(user_id=None):
@@ -241,7 +211,7 @@ def build_agent_current_state_section(char_id, prompts_dir, target_char_id=None,
         "moments_index": info.get("moments_index", 1),
         "intimacy": info.get("intimacy", 60),
         "voice_emotion": info.get("voice_emotion") or "平静",
-        "chat_mode": info.get("chat_mode") or "online",
+        "chat_mode": _get_chat_mode(char_id, group_id=group_id, user_id=user_id),
         "light_sleep": bool(info.get("light_sleep", True)),
         "deep_sleep": bool(info.get("deep_sleep", False)),
         "sleep_window": f"{info.get('ds_start', '23:00')}-{info.get('ds_end', '07:00')}",
@@ -864,7 +834,7 @@ def extract_long_memory_with_timeline_ts(char_id, recent_messages=None, user_lat
             ts_23_59 = datetime.combine(
                 last_date, dt_time(23, 59), tzinfo=BEIJING_TZ
             ).astimezone(character_zone)
-            result.append((content, last_date, ts_23_59))
+            result.append((content, ts_23_59.date(), ts_23_59))
             print(f"[DEBUG] extract_long_memory: 添加事件 - {ts_23_59.strftime('%Y-%m-%d %H:%M')}")
 
     print(f"[DEBUG] extract_long_memory: 最终返回 {len(result)} 条事件")
@@ -893,21 +863,20 @@ def extract_medium_memory_with_timeline_ts(char_id, user_id=None) -> list:
 
     _, timezone_name, _ = _get_character_time_info(char_id, user_id=user_id)
     character_zone = get_zone(timezone_name)
-    now = beijing_now()
-    for i in range(7, 0, -1):
-        day_date = (now - timedelta(days=i)).date()
-        day_key = day_date.strftime("%Y-%m-%d")
-
-        if day_key in med_mem:
-            content = str(med_mem[day_key]).strip()
-            print(f"[DEBUG] extract_medium_memory: 找到 {day_key} 的记忆 - {content[:50]}")
-            if content:
-                ts_23_59 = datetime.combine(
-                    day_date, dt_time(23, 59), tzinfo=BEIJING_TZ
-                ).astimezone(character_zone)
-                result.append((content, day_date, ts_23_59))
-        else:
-            print(f"[DEBUG] extract_medium_memory: {day_key} 没有记忆")
+    from services.memory_store import load_json_object
+    zones = load_json_object(medium_mem_path + ".timezones.json")
+    today = beijing_now().date()
+    for day_key, value in med_mem.items():
+        try:
+            day_date = datetime.strptime(day_key, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if not today - timedelta(days=7) <= day_date < today:
+            continue
+        content = str(value).strip()
+        if content:
+            stamp = datetime.combine(day_date, dt_time(23, 59), tzinfo=get_zone(zones.get(day_key, "Asia/Shanghai"))).astimezone(character_zone)
+            result.append((content, stamp.date(), stamp))
 
     print(f"[DEBUG] extract_medium_memory: 最终返回 {len(result)} 条事件")
     return result
@@ -934,51 +903,24 @@ def extract_short_memory_with_timeline_ts(char_id, user_id=None) -> list:
     character_zone = get_zone(timezone_name)
     current_utc = utc_now()
     cutoff_utc = current_utc - timedelta(hours=24)
-    now_beijing = current_utc.astimezone(BEIJING_TZ)
-    dates_to_load = [
-        (now_beijing - timedelta(days=1)).strftime("%Y-%m-%d"),
-        now_beijing.strftime("%Y-%m-%d"),
-    ]
-
-    for date_key in dates_to_load:
-        day_data = short_mem.get(date_key)
-        if not day_data:
-            continue
-
-        events = []
-        if isinstance(day_data, list):
-            events = day_data
-        elif isinstance(day_data, dict):
-            events = day_data.get("events", [])
-
-        if events:
-            date_obj = datetime.strptime(date_key, "%Y-%m-%d").date()
-            for e in events:
-                time_part = e.get("time", "")
-                event_text = e.get("event", "")
-
-                if not event_text:
-                    continue
-
-                if time_part:
-                    try:
-                        h, m = map(int, time_part.split(':'))
-                        beijing_ts = datetime.combine(
-                            date_obj,
-                            dt_time(h, m),
-                            tzinfo=BEIJING_TZ,
-                        )
-                    except Exception:
-                        continue
-                else:
-                    continue
-
-                event_utc = beijing_ts.astimezone(get_zone("UTC"))
-                if not (cutoff_utc < event_utc <= current_utc + timedelta(minutes=2)):
-                    continue
-
+    from services.memory_store import memory_event_instant
+    for date_key, day_data in short_mem.items():
+        events = day_data if isinstance(day_data, list) else day_data.get("events", [])
+        zone = day_data.get("timezone", "Asia/Shanghai") if isinstance(day_data, dict) else "Asia/Shanghai"
+        for event in events:
+            if not event.get("event"):
+                continue
+            try:
+                instant = memory_event_instant(date_key, event, zone)
+            except (ValueError, TypeError):
+                continue
+            if instant is None:
+                continue
+            event_utc = instant.astimezone(get_zone("UTC"))
+            if cutoff_utc < event_utc <= current_utc + timedelta(minutes=2):
                 local_ts = event_utc.astimezone(character_zone)
-                result.append((event_text, local_ts.date(), local_ts))
+                result.append((event["event"], local_ts.date(), local_ts))
+    result.sort(key=lambda item: item[2].timestamp())
 
     print(f"[DEBUG] extract_short_memory: 最终返回 {len(result)} 条独立事件")
     return result
@@ -990,12 +932,13 @@ def extract_recent_messages_with_labels(
     group_id=None,
     user_id=None,
     exclude_bedtime_diaries=False,
+    exclude_call_id=None,
 ) -> list:
     from core.utils import get_paths as _get_paths
     import os as _os
 
     if group_id:
-        db_path = _os.path.join(get_group_dir(group_id), "chat.db")
+        db_path = _os.path.join(get_group_dir(group_id, user_id=user_id), "chat.db")
     else:
         db_path, _ = _get_paths(char_id, user_id=user_id)
 
@@ -1036,6 +979,8 @@ def extract_recent_messages_with_labels(
                 role = row["role"]
                 content = voice_message_for_ai(str(row["content"] or ""))
                 if not group_id:
+                    if exclude_call_id and parse_voice_call_tag(content) == exclude_call_id:
+                        continue
                     content = voice_call_for_ai(user_id, content)
                 ts_str = row["timestamp"]
 
@@ -1048,7 +993,7 @@ def extract_recent_messages_with_labels(
                     print(f"[DEBUG] extract_recent_messages: [{i}] 时间戳解析失败 - {e}")
                     msg_dt = utc_now().astimezone(character_zone)
 
-                time_label = msg_dt.strftime("%H:%M")
+                time_label = format_prompt_time(msg_dt, "%H:%M")
 
                 if group_id:
                     if role == "user":
@@ -1079,11 +1024,13 @@ def build_timeline_section(timeline_events) -> str:
     if not timeline_events:
         return ""
 
-    sorted_events = sorted(timeline_events, key=lambda x: x[2])
+    # datetime comparisons in the same ZoneInfo ignore fold. Compare instants
+    # so 01:45 before the fall-back remains before the later 01:15.
+    sorted_events = sorted(timeline_events, key=lambda x: parse_beijing_timestamp(x[2]).timestamp())
 
     lines = []
     for layer_type, content, ts_dt in sorted_events:
-        ts_str = ts_dt.strftime("%Y-%m-%d %H:%M")
+        ts_str = format_prompt_time(ts_dt)
         layer_label = ""
 
         if layer_type == "long_memory":
@@ -1121,6 +1068,7 @@ def build_system_prompt_v2(
     exclude_bedtime_diaries_from_timeline=False,
     read_only=False,
     include_content_actions=None,
+    exclude_call_id=None,
 ):
     if user_id is None:
         from core.context import get_current_user_id
@@ -1191,7 +1139,7 @@ def build_system_prompt_v2(
                 if os.path.exists(potential_file):
                     user_persona_file = potential_file
             if not user_persona_file:
-                global_dir = os.path.join(BASE_DIR, "configs")
+                global_dir = os.path.join(DATA_ROOT, "configs")
                 potential_file = os.path.join(global_dir, "global_user_persona.md")
                 if os.path.exists(potential_file):
                     user_persona_file = potential_file
@@ -1304,11 +1252,12 @@ def build_system_prompt_v2(
     lang = get_ai_language(char_id, group_id=group_id, user_id=user_id)
 
     if include_global_format and include_general_agent_rules and not call_mode:
-        chat_mode = _get_char_chat_mode(char_id, user_id=user_id)
+        chat_mode = _get_chat_mode(char_id, group_id=group_id, user_id=user_id)
         content = get_global_system_rules(
             lang,
             chat_mode=chat_mode,
             include_proactive_voice_call=group_id is None,
+            include_private_chat_rules=group_id is None,
         )
         content = _filter_locked_index_rules(content, char_id, user_id=user_id)
         if content:
@@ -1318,7 +1267,7 @@ def build_system_prompt_v2(
             desc_list = "、".join(_get_sticker_allowed_descriptions())
             prompt_parts.append(
                 "【Sticker / 表情】\n"
-                "在分段回复中若要发送表情，请**仅使用**以下描述之一，格式为 [表情]描述：\n"
+                "在分段回复中若要发送表情，请**仅使用**以下描述之一，格式为 [STICKER]描述：\n"
                 f"{desc_list}\n"
                 "系统会按「表情名称包含该描述」匹配表情库。"
             )
@@ -1326,7 +1275,23 @@ def build_system_prompt_v2(
             media_instruction = (
                 "\n\n【Media Capability / 媒体能力】\n"
                 "你可以通过以下标签触发多媒体功能（必须严格遵守格式）：\n"
-                "1. 生图：当你觉得自己应该发一张自己的自拍、分享生活照、展示当前环境或物品时，在回复中加入 `[GENERATE_IMAGE: 英文描述语]`。描述语应包含你的外貌特征和当前动作场景。\n"
+                "1. 生图：发送自拍、生活照、环境或物品图时，用 `[GENERATE_IMAGE: 英文描述语]`。"
+                "无论聊天使用哪种语言，标签内都用英文写一段详细、独立、准确的图像提示词。"
+                "假设生图模型完全不认识你，也不认识其他出镜人物。它只收到标签里的英文，读不到角色设定或聊天记录。"
+                "每次都把还原人物和场景所需的信息写进标签，别让模型靠角色名、“和平时一样”或上文猜画面。\n"
+                "   - 画风：以角色的原始设定为准。动漫、漫画、游戏角色要点明与原作相符的二次元插画风格，"
+                "例如动画赛璐璐上色或漫画墨线。自拍和生活照也沿用原作画风。真人角色默认采用符合设定的写实摄影风格。用户明确指定其他画风时按其要求。\n"
+                "   - 人物：对每个出镜人物，写清设定中已知且在镜头里可见的发型、发色、瞳色、五官、肤色、体型和肌肉线条。"
+                "纹身、疤痕等标志按设定写明已知的形状、位置和左右侧，例如 a short scar at the outer end of the left eyebrow。"
+                "如果角色的容貌、身材或气质出众，必须写出出众之处。按设定和景别选具体细节，例如眉骨和鼻梁勾出的立体侧脸、"
+                "小脸与舒展肩线形成的头肩比、修长的四肢，或抬臂时显出的肌肉线条。只选符合这个人物的特征，不擅自增改。\n"
+                "   - 动作与神情：交代服装、配饰、姿势、动作和表情，把抽象词落到可见的细节上。"
+                "例如写“委屈”，可写眉头微蹙、嘴角下压，视线从镜头移开。写“帅气”要指出具体的五官、比例或体态。\n"
+                "   - 镜头与画面：写清环境、光线、镜头角度和构图。明确镜头相对主体的位置和朝向、景别（如面部特写、半身或全身）、"
+                "主体在画面中的位置、朝向与姿势。多人入镜时交代各自的位置和动作。纯环境或物品图只描写实际入镜的主体。\n"
+                "   - 自拍：必须采用自拍者手机摄像头的第一人称视角，直接描述这部手机拍到的成片。"
+                "例如手机在一臂远、略高于眼睛的位置，镜头微微俯拍，人物抬眼望向镜头，脸在画面左侧。"
+                "不要切换到旁观者的第三人称视角去拍角色举着手机自拍。\n"
                 "2. 搜图：当你提到现实存在的物品、景点、动漫角色或其他通用概念时，加入 `[SEARCH_IMG: 关键词]`。\n"
                 "注意：每次回复最多只使用一个媒体标签。"
             )
@@ -1395,6 +1360,8 @@ def build_system_prompt_v2(
         else:
             agent_rules = GLOBAL_SYSTEM_RULES_ZH_AGENT_BRIEF
         agent_rules = _filter_locked_index_rules(agent_rules, char_id, user_id=user_id)
+        if group_id is not None:
+            agent_rules = "\n".join(line for line in agent_rules.splitlines() if "[SET_CHAT_MODE:" not in line)
         if agent_rules:
             prompt_parts.append(f"【Agent Actions / 智能体动作】\n{agent_rules}")
 
@@ -1409,19 +1376,19 @@ def build_system_prompt_v2(
         long_mem_events = extract_long_memory_with_timeline_ts(char_id, recent_messages=recent_messages, user_latest_input=user_latest_input, user_id=user_id)
         print(f"[DEBUG v2] extract_long_memory_with_timeline_ts() 返回 {len(long_mem_events)} 条事件")
         for i, (content, _, ts) in enumerate(long_mem_events):
-            print(f"  [{i}] {ts.strftime('%Y-%m-%d %H:%M')} - 长期记忆: {content[:100]}")
+            print(f"  [{i}] {ts.strftime('%Y-%m-%d %H:%M')} - 长期记忆")
             timeline_events.append(("long_memory", content, ts))
 
     med_mem_events = extract_medium_memory_with_timeline_ts(char_id, user_id=user_id)
     print(f"[DEBUG v2] extract_medium_memory_with_timeline_ts() 返回 {len(med_mem_events)} 条事件")
     for i, (content, _, ts) in enumerate(med_mem_events):
-        print(f"  [{i}] {ts.strftime('%Y-%m-%d %H:%M')} - 中期记忆: {content[:100]}")
+        print(f"  [{i}] {ts.strftime('%Y-%m-%d %H:%M')} - 中期记忆")
         timeline_events.append(("medium_memory", content, ts))
 
     short_mem_events = extract_short_memory_with_timeline_ts(char_id, user_id=user_id)
     print(f"[DEBUG v2] extract_short_memory_with_timeline_ts() 返回 {len(short_mem_events)} 条事件")
     for i, (content, _, ts) in enumerate(short_mem_events):
-        print(f"  [{i}] {ts.strftime('%Y-%m-%d %H:%M')} - 短期记忆: {content[:100]}")
+        print(f"  [{i}] {ts.strftime('%Y-%m-%d %H:%M')} - 短期记忆")
         timeline_events.append(("short_memory", content, ts))
 
     if include_recent_messages:
@@ -1431,10 +1398,11 @@ def build_system_prompt_v2(
             group_id=group_id,
             user_id=user_id,
             exclude_bedtime_diaries=exclude_bedtime_diaries_from_timeline,
+            **({"exclude_call_id": exclude_call_id} if exclude_call_id else {}),
         )
         print(f"[DEBUG v2] extract_recent_messages_with_labels() 返回 {len(msg_events)} 条事件")
         for i, (_, content, ts) in enumerate(msg_events):
-            print(f"  [{i}] {ts.strftime('%Y-%m-%d %H:%M')} - 消息: {content[:100]}")
+            print(f"  [{i}] {ts.strftime('%Y-%m-%d %H:%M')} - 消息")
             timeline_events.append(("message", content, ts))
 
     print(f"[DEBUG v2] 时间线总计: {len(timeline_events)} 条事件")
@@ -1445,6 +1413,8 @@ def build_system_prompt_v2(
         prompt_parts.append(
             "【Memory Time Rule / 记忆时间规则】\n"
             "- 时间线中的日期和时间均已换算为角色当前所在地的当地时间。\n"
+            "- 换算采用每条记录发生日期的时区规则（含夏令时），无需再次换算；标注 UTC 偏移的重复钟点代表不同实际时刻。\n"
+            "- 中长期记忆的时间标签只是归档日/周末的排序锚点，不代表所有事件都发生在那个时刻。\n"
             "- 中期记忆是历史概括，短期记忆是最近24小时的详细事件；"
             "两者可能描述同一经历，不代表事件发生了两次。\n"
             "- 若记忆层之间存在细节差异，以最近原始消息和短期记忆为准。"
@@ -1465,7 +1435,7 @@ def build_system_prompt_v2(
         period = "深夜 (late night)"
 
     time_info = (
-        f"現在は {now.strftime('%Y-%m-%d %H:%M')} （{period}）です。\n"
+        f"現在は {format_prompt_time(now)} （{period}）です。\n"
         f"- 角色当前时区：{character_timezone}\n"
         "- 提醒：上述当前时间仅代表你所在地域的当地时间，并不代表用户所在地域的时间。\n"
         "- “今天、昨天、明天”和日程日期均以角色当地日期理解。"
@@ -1648,12 +1618,14 @@ def build_system_prompt_v2(
             f"在保留角色语气、口癖和性格特征的前提下，自然地转化为{lang_display}表达。"
         )
 
-    if not call_mode and include_general_agent_rules:
+    if not call_mode and include_general_agent_rules and group_id is None:
         chat_mode = _get_char_chat_mode(char_id, user_id=user_id)
         mode_context = get_mode_context(lang, chat_mode=chat_mode)
         if mode_context:
             prompt_parts.append(f"【Mode Context / 模式上下文】\n{mode_context}")
 
+    from core.languages import character_language, language_instruction
+    prompt_parts.append("Only for persona, memory and relationship update payloads: write newly generated field values in " + json.dumps(character_language(char_id, user_id), ensure_ascii=False) + ". This exception does not change the conversation reply language. Keep keys, IDs, names and protected blocks unchanged.")
     return "\n\n".join(prompt_parts)
 
 
@@ -1689,7 +1661,7 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
     today_str = now.strftime("%Y-%m-%d")
 
     BASE_DIR_ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    CONFIG_DIR = os.path.join(BASE_DIR_, "configs")
+    CONFIG_DIR = os.path.join(DATA_ROOT, "configs")
     _, prompts_dir = get_paths(char_id, user_id=user_id)
 
     current_user_name = _get_username_for_user(user_id)
@@ -1814,64 +1786,29 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
 
     if include_long_memory:
         try:
-            path = os.path.join(prompts_dir, "4_memory_long.json")
-            if os.path.exists(path):
-                with open(path, "r", encoding="utf-8-sig") as f:
-                    long_mem = json.load(f)
-                    if long_mem:
-                        selected = select_relevant_long_memory(long_mem, recent_messages, user_latest_input=user_latest_input, char_id=char_id)
-                        if selected:
-                            mem_list = [f"- {k}: {v}" for k, v in selected]
-                            prompt_parts.append(f"【Long-term Memory / 長期記憶】\n" + "\n".join(mem_list))
+            events = extract_long_memory_with_timeline_ts(char_id, recent_messages, user_latest_input, user_id=user_id)
+            if events:
+                mem_list = [f"- [{format_prompt_time(stamp)}] {text}" for text, _, stamp in events]
+                prompt_parts.append(f"【Long-term Memory / 長期記憶】\n" + "\n".join(mem_list))
         except Exception:
             pass
 
     try:
-        path = os.path.join(prompts_dir, "5_memory_medium.json")
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8-sig") as f:
-                med_mem = json.load(f)
-                summary_texts = []
-                for i in range(7, 0, -1):
-                    day_key = (now - timedelta(days=i)).strftime("%Y-%m-%d")
-                    if day_key in med_mem:
-                        summary_texts.append(str(med_mem[day_key]))
-                if summary_texts:
-                    combined = " ".join(summary_texts)
-                    max_len = 200
-                    if len(combined) > max_len:
-                        combined = combined[:max_len] + "..."
-                    prompt_parts.append(f"【Medium-term Memory / 最近一週間の出来事】\n{combined}")
+        events = extract_medium_memory_with_timeline_ts(char_id, user_id=user_id)
+        if events:
+            combined = " ".join(f"[{format_prompt_time(stamp)}] {text}" for text, _, stamp in sorted(events, key=lambda item: item[2].timestamp()))
+            max_len = 200
+            if len(combined) > max_len:
+                combined = combined[:max_len] + "..."
+            prompt_parts.append(f"【Medium-term Memory / 最近一週間の出来事】\n{combined}")
     except Exception:
         pass
 
     try:
-        path = os.path.join(prompts_dir, "6_memory_short.json")
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8-sig") as f:
-                short_mem = json.load(f)
-
-                dates_to_load = [today_str]
-
-                if now.hour < 4:
-                    yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
-                    dates_to_load.insert(0, yesterday_str)
-
-                combined_events_str = ""
-                for date_key in dates_to_load:
-                    day_data = short_mem.get(date_key)
-                    today_events = []
-                    if isinstance(day_data, list):
-                        today_events = day_data
-                    elif isinstance(day_data, dict):
-                        today_events = day_data.get("events", [])
-
-                    if today_events:
-                        combined_events_str += f"\n--- {date_key} ---\n"
-                        combined_events_str += "\n".join([f"- [{e.get('time')}] {e.get('event')}" for e in today_events])
-
-                if combined_events_str:
-                    prompt_parts.append(f"【Short-term Memory / 最近の出来事】{combined_events_str}")
+        events = extract_short_memory_with_timeline_ts(char_id, user_id=user_id)
+        if events:
+            lines = "\n".join(f"- [{format_prompt_time(stamp)}] {text}" for text, _, stamp in events)
+            prompt_parts.append(f"【Short-term Memory / 最近の出来事】\n{lines}")
     except Exception:
         pass
 
@@ -1920,7 +1857,7 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
             desc_list = "、".join(_get_sticker_allowed_descriptions())
             prompt_parts.append(
                 "【Sticker / 表情】\n"
-                "在分段回复中若要发送表情，请**仅使用**以下描述之一，格式为 [表情]描述：\n"
+                "在分段回复中若要发送表情，请**仅使用**以下描述之一，格式为 [STICKER]描述：\n"
                 f"{desc_list}\n"
                 "系统会按「表情名称包含该描述」匹配表情库并随机展示一张（同一描述可对应多张图）。勿使用列表外的词，否则将原文显示。"
             )
@@ -1951,7 +1888,7 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
     else:
         period = "深夜 (late night)"
 
-    current_date_str = now.strftime('%Y-%m-%d %H:%M %A')
+    current_date_str = format_prompt_time(now, '%Y-%m-%d %H:%M %A')
 
     prompt_parts.append(f"【Current Date / 現在の日付】\n今日は: {current_date_str} ({period})\n(以下の会話履歴には時間 [HH:MM] のみが含まれています。现在の日付に基づいて理解してください)")
 
@@ -1984,6 +1921,8 @@ def build_system_prompt(char_id, include_global_format=True, recent_messages=Non
             "While maintaining the character's personality, tone, and traits, express yourself naturally in this language."
         )
         prompt_parts.append(lang_instruction)
+    from core.languages import character_language, language_instruction
+    prompt_parts.append("Only for persona, memory and relationship update payloads: write newly generated field values in " + json.dumps(character_language(char_id, user_id), ensure_ascii=False) + ". This exception does not change the conversation reply language. Keep keys, IDs, names and protected blocks unchanged.")
     return "\n\n".join(prompt_parts)
 
 

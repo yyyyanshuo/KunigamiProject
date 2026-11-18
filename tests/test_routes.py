@@ -12,20 +12,21 @@ BLUEPRINT_ROUTES = {
     "admin": [
         "/admin/dashboard",
         "/api/admin/stats",
+        "/api/admin/users",
         "/api/admin/refresh_stickers",
         "/api/admin/impersonate",
         "/api/admin/impersonation/status",
         "/api/admin/impersonation/exit",
     ],
     "auth": [
-        "/login", "/register", "/forgot_password", "/logout",
-        "/api/register", "/api/login",
+        "/login", "/forgot_password", "/logout",
+        "/api/login",
         "/api/forgot_password/send_code", "/api/forgot_password/reset",
         "/api/accounts/recent", "/api/accounts/switch",
         "/api/account/delete", "/api/subscribe", "/api/vapid_public_key",
     ],
     "views": [
-        "/", "/profile", "/guide", "/sakura",
+        "/", "/profile", "/guide",
         "/manifest.json", "/sw.js", "/api/app/announcement",
     ],
     "chat": [
@@ -50,6 +51,7 @@ BLUEPRINT_ROUTES = {
         "/api/<char_id>/relationships/save_all",
         "/api/<char_id>/save_relationship_reverse",
         "/api/<char_id>/save_prompt",
+        "/api/<char_id>/memory/edits",
         "/api/<char_id>/search",
         "/api/<char_id>/config",
         "/api/<char_id>/update_meta",
@@ -119,6 +121,7 @@ BLUEPRINT_ROUTES = {
         "/api/music/playlist/add",
         "/api/music/recommend",
         "/api/vision/upload",
+        "/api/vision/prompts",
         "/api/furigana",
         "/api/voice_clone",
         "/api/<char_id>/tts",
@@ -136,6 +139,7 @@ BLUEPRINT_ROUTES = {
         "/api/moments/memory/regenerate",
         "/api/moments/force_active",
         "/api/moments/post/ai_comment",
+        "/api/moments/comment/ai_reply",
         "/api/moments/comment/user_reply",
         "/api/moments/post",
         "/api/moments/regenerate",
@@ -210,6 +214,22 @@ class TestRouteRegistration:
                     missing.append(f"{bp_name}:{route}")
         assert len(missing) == 0, f"Missing routes:\n" + "\n".join(missing)
 
+    def test_sakura_direct_chat_removed(self, monkeypatch):
+        import services.ai_client as ai_client
+
+        def unexpected_model_call(*args, **kwargs):
+            raise AssertionError("Removed public chat must not call a model")
+
+        monkeypatch.setattr(ai_client, "call_gemini", unexpected_model_call)
+        assert not self._rule_exists("/sakura")
+        assert not self._rule_exists("/api/sakura/chat")
+        assert "views.sakura_chat_view" not in self.app.view_functions
+        assert "views.sakura_chat_api" not in self.app.view_functions
+        client = self.app.test_client()
+        assert client.get("/sakura").status_code == 404
+        # The generic character-chat URL still matches; it must require login.
+        assert client.post("/api/sakura/chat", json={"message": "hi"}).status_code == 401
+
     def test_blueprint_count(self):
         assert len(self.app.blueprints) >= 8, f"Expected >= 8, got {len(self.app.blueprints)}"
 
@@ -255,7 +275,7 @@ class TestRouteRegistration:
 
     def test_total_route_count(self):
         count = sum(1 for _ in self.app.url_map.iter_rules())
-        assert count == 246, f"Expected 246 routes, got {count}"
+        assert count == 254, f"Expected 254 routes, got {count}"
 
 
 class TestRouteEndpoints:
@@ -281,7 +301,7 @@ class TestRouteEndpoints:
 
     # Auth pages
     def test_login_page(self): self._get("/login")
-    def test_register_page(self): self._get("/register")
+    def test_register_page_removed(self): self._get("/register", expected_codes=(404,))
     def test_forgot_password_page(self): self._get("/forgot_password")
 
     # Main pages (redirect to login when no session)
@@ -290,6 +310,7 @@ class TestRouteEndpoints:
     def test_profile_redirects(self):
         resp = self._get("/profile", expected_codes=(200, 302))
     def test_guide_is_public(self):
+        self.client.post("/api/ui/language", json={"user_language": "zh-CN"})
         resp = self._get("/guide", expected_codes=(200,))
         assert "使用文档" in resp.get_data(as_text=True)
 
@@ -297,7 +318,7 @@ class TestRouteEndpoints:
     def test_login_empty(self):
         self._post("/api/login", {}, expected_codes=(400, 401))
     def test_register_empty(self):
-        self._post("/api/register", {}, expected_codes=(400, 401))
+        self._post("/api/register", {}, expected_codes=(404,))
 
     # Static files
     def test_manifest(self): self._get("/manifest.json")
@@ -305,8 +326,10 @@ class TestRouteEndpoints:
 
     # GET endpoints that should return data even without auth
     def test_vapid_public_key(self):
+        from core.runtime import LOCAL_TEST
         resp = self.client.get("/api/vapid_public_key")
-        assert resp.status_code in (200, 401), f"Expected 200 or 401, got {resp.status_code}"
+        expected = (503,) if LOCAL_TEST else (200, 401)
+        assert resp.status_code in expected, f"Expected {expected}, got {resp.status_code}"
 
     # POST endpoints that require auth should return 401/302
     def test_chat_requires_auth(self):

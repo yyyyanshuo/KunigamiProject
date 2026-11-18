@@ -28,6 +28,7 @@
     if (path.startsWith('http') ||
         path.startsWith('data:') ||
         path.startsWith('/static/') ||
+        path.startsWith('/api/media/cos/') ||
         path.startsWith('/char_assets/') ||
         path.startsWith('/user_avatar') ||
         path.startsWith('/sticker_uploads/')) {
@@ -47,7 +48,7 @@
         }
     }
     // 2. 如果路径包含 characters/ 或 groups/ 但不包含 users/，补齐当前用户前缀
-    else if ((path.includes('characters/') || path.includes('groups/')) && !path.startsWith('users/')) {
+    else if ((path.includes('characters/') || path.includes('groups/')) && !path.replace(/^\//, '').startsWith('users/')) {
         const userPrefix = window.GLOBAL_USER_PREFIX || localStorage.getItem('user_path_prefix');
         if (userPrefix) {
             const cleanCharPath = path.startsWith('/') ? path.substring(1) : path;

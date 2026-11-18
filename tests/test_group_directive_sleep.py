@@ -1,6 +1,7 @@
 import json
 import sqlite3
 from datetime import datetime
+from unittest.mock import Mock
 
 import pytest
 
@@ -77,6 +78,88 @@ def test_group_and_single_chat_availability_use_different_mode_levels():
     assert is_character_available_for_chat(sleeping_offline_character) is True
     assert is_character_available_for_group_chat(sleeping_offline_character, "online") is False
     assert is_character_available_for_group_chat(sleeping_offline_character, "offline") is True
+
+
+@pytest.mark.parametrize("directive_type", ["user", "group"])
+@pytest.mark.parametrize("chat_mode", ["online", "offline"])
+@pytest.mark.parametrize("group_mode", ["online", "offline"])
+@pytest.mark.parametrize("sleep_timing", ["before_redirect", "during_generation", "awake"])
+def test_moments_redirect_requires_awake_initiator(
+    tmp_path, monkeypatch, directive_type, chat_mode, group_mode, sleep_timing
+):
+    db_path, model_calls = _prepare_directive_runtime(
+        tmp_path,
+        monkeypatch,
+        group_mode=group_mode,
+        initiator_info={"deep_sleep": sleep_timing == "before_redirect", "chat_mode": chat_mode},
+        target_info={"deep_sleep": True},
+    )
+    characters = app_module.get_characters_config_for_current_user()
+    ensure_group = Mock(wraps=app_module.ensure_directive_chat)
+    single_paths = Mock(return_value=(str(db_path), str(tmp_path)))
+    single_sync = Mock()
+    group_sync = Mock(return_value=(True, None))
+    monkeypatch.setattr(app_module, "ensure_directive_chat", ensure_group)
+    monkeypatch.setattr(app_module, "get_paths", single_paths)
+    monkeypatch.setattr(app_module, "sync_memory_before_single_chat", single_sync)
+    monkeypatch.setattr(app_module, "sync_memory_before_group_chat", group_sync)
+
+    def generate(messages, char_id=None, **kwargs):
+        model_calls.append(char_id)
+        if sleep_timing == "during_generation":
+            characters["initiator"]["deep_sleep"] = True
+        return "继续聊 [DIRECT_END]"
+
+    monkeypatch.setattr(app_module, "call_openrouter", generate)
+    app_module._execute_directive(
+        {"type": directive_type, "source_scene": "moments", "member_ids": ["target"]},
+        "initiator",
+        "朋友圈或评论中的话题",
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        stored_roles = [row[0] for row in conn.execute("SELECT role FROM messages ORDER BY id")]
+    if sleep_timing == "before_redirect":
+        assert model_calls == []
+        ensure_group.assert_not_called()
+        single_paths.assert_not_called()
+        single_sync.assert_not_called()
+        group_sync.assert_not_called()
+    elif sleep_timing == "during_generation":
+        assert model_calls == ["initiator"]
+        group_sync.assert_not_called()
+    else:
+        assert model_calls[0] == "initiator"
+        assert stored_roles[0] == ("assistant" if directive_type == "user" else "initiator")
+    if sleep_timing != "awake":
+        assert stored_roles == []
+
+
+@pytest.mark.parametrize("directive_type", ["user", "group"])
+@pytest.mark.parametrize("chat_mode", ["online", "offline"])
+def test_legacy_moments_executor_also_blocks_sleeping_initiator(
+    tmp_path, monkeypatch, directive_type, chat_mode
+):
+    from blueprints import moments
+
+    db_path, model_calls = _prepare_directive_runtime(
+        tmp_path,
+        monkeypatch,
+        group_mode="offline",
+        initiator_info={"deep_sleep": True, "chat_mode": chat_mode},
+        target_info={"deep_sleep": False},
+    )
+    ensure_group = Mock()
+    single_paths = Mock()
+    monkeypatch.setattr(app_module, "ensure_directive_chat", ensure_group)
+    monkeypatch.setattr(moments, "get_paths", single_paths)
+    moments._execute_directive({"type": directive_type, "member_ids": ["target"]}, "initiator", "评论")
+
+    assert model_calls == []
+    ensure_group.assert_not_called()
+    single_paths.assert_not_called()
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 0
 
 
 @pytest.mark.parametrize(
@@ -179,11 +262,15 @@ def test_two_person_directive_alternates_speakers_without_self_talk(
 
 
 def test_directive_created_group_defaults_online_and_reused_group_keeps_offline(tmp_path, monkeypatch):
-    groups_file = tmp_path / "groups.json"
+    from core import utils, user_resources
+    users_root = tmp_path / 'users'
+    monkeypatch.setattr(user_resources, 'USERS_ROOT', str(users_root))
+    monkeypatch.setattr(app_module, 'get_current_user_id', lambda: 7)
+    monkeypatch.setattr(utils, 'get_current_user_id', lambda: 7)
+    groups_file = users_root / '7/configs/groups.json'
     _write_json(groups_file, {})
-    groups_root = tmp_path / "groups"
+    _write_json(users_root / '7/configs/characters.json', {'initiator': {}, 'target': {}})
     monkeypatch.setattr(app_module, "_get_groups_config_file", lambda: str(groups_file))
-    monkeypatch.setattr(app_module, "get_group_dir", lambda gid: str(groups_root / gid))
     monkeypatch.setattr(app_module, "get_char_name", lambda cid: cid)
 
     directive = {"member_ids": ["target"], "include_user": False}

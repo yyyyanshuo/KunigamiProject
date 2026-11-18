@@ -24,6 +24,8 @@ def _prepare_character(tmp_path, monkeypatch, *, timezone_name="Asia/Tokyo"):
     users_root = tmp_path / "users"
     config_dir = users_root / "12" / "configs"
     prompts_dir = users_root / "12" / "characters" / "hero" / "prompts"
+    import core.user_resources
+    monkeypatch.setattr(core.user_resources, "USERS_ROOT", str(users_root))
     monkeypatch.setattr(core_utils, "USERS_ROOT", str(users_root))
     monkeypatch.setattr(prompt_builder, "USERS_ROOT", str(users_root))
     _write(
@@ -43,18 +45,18 @@ def _prepare_character(tmp_path, monkeypatch, *, timezone_name="Asia/Tokyo"):
     return config_dir, prompts_dir
 
 
-def test_time_defaults_preserve_legacy_sleep_basis_and_japanese_timezone():
+def test_time_defaults_preserve_sleep_basis_without_inferring_zone_from_language():
     legacy = {"language": "ja"}
     assert ensure_character_time_defaults(legacy, existing_character=True)
-    assert legacy["timezone"] == "Asia/Tokyo"
+    assert legacy["timezone"] == BEIJING_TZ_NAME
     assert legacy["ds_time_basis"] == "user"
     assert legacy["ds_timezone_at_set"] == BEIJING_TZ_NAME
 
     new_character = {"language": "ja"}
     assert ensure_character_time_defaults(new_character, existing_character=False)
-    assert new_character["timezone"] == "Asia/Tokyo"
+    assert new_character["timezone"] == BEIJING_TZ_NAME
     assert new_character["ds_time_basis"] == "character"
-    assert new_character["ds_timezone_at_set"] == "Asia/Tokyo"
+    assert new_character["ds_timezone_at_set"] == BEIJING_TZ_NAME
 
 
 def test_character_sleep_preview_converts_to_beijing_and_user_time():
@@ -99,6 +101,8 @@ def test_dst_nonexistent_and_ambiguous_wall_times_are_deterministic():
 def test_location_move_updates_character_timezone_and_returns_change(tmp_path, monkeypatch):
     users_root = tmp_path / "users"
     config_dir = users_root / "9" / "configs"
+    import core.user_resources
+    monkeypatch.setattr(core.user_resources, "USERS_ROOT", str(users_root))
     monkeypatch.setattr(core_utils, "USERS_ROOT", str(users_root))
     _write(
         config_dir / "characters.json",
@@ -178,6 +182,8 @@ def test_map_normalization_does_not_override_direct_manual_timezone(
 ):
     users_root = tmp_path / "users"
     config_dir = users_root / "10" / "configs"
+    import core.user_resources
+    monkeypatch.setattr(core.user_resources, "USERS_ROOT", str(users_root))
     monkeypatch.setattr(core_utils, "USERS_ROOT", str(users_root))
     _write(
         config_dir / "characters.json",

@@ -1,7 +1,8 @@
 (function(global) {
   'use strict';
 
-  var PREFIX = '[图片]';
+  var PREFIX = '[IMAGE]';
+  var PREFIXES = [PREFIX, '[图片]', '[画像]'];
 
   function parseParenthesized(text, start) {
     if (start >= text.length || text[start] !== '(') return null;
@@ -20,8 +21,9 @@
   function parseAt(text, start) {
     text = String(text || '');
     start = Number(start || 0);
-    if (text.slice(start, start + PREFIX.length) !== PREFIX) return null;
-    var pathGroup = parseParenthesized(text, start + PREFIX.length);
+    var prefix = PREFIXES.find(function(p) { return text.slice(start, start + p.length) === p; });
+    if (!prefix) return null;
+    var pathGroup = parseParenthesized(text, start + prefix.length);
     if (!pathGroup) return null;
     var descriptionGroup = parseParenthesized(text, pathGroup.end);
     if (!descriptionGroup) return null;
@@ -39,14 +41,15 @@
     var result = [];
     var cursor = 0;
     while (cursor < text.length) {
-      var start = text.indexOf(PREFIX, cursor);
+      var starts = PREFIXES.map(function(p) { return text.indexOf(p, cursor); }).filter(function(n) { return n >= 0; });
+      var start = starts.length ? Math.min.apply(null, starts) : -1;
       if (start < 0) break;
       var tag = parseAt(text, start);
       if (tag) {
         result.push(tag);
         cursor = tag.end;
       } else {
-        cursor = start + PREFIX.length;
+        cursor = start + 1;
       }
     }
     return result;

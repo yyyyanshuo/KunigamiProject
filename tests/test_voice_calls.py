@@ -77,9 +77,10 @@ def test_voice_call_tag_round_trip():
     assert voice_calls.parse_voice_call_tag("[voice_call](../../bad)") is None
 
 
-def test_consume_character_call_tag():
+@pytest.mark.parametrize("action", ["[CALL_USER]", "[VOICE_CALL]", "[Voice_Call]"])
+def test_consume_character_call_tag(action):
     cleaned, requested = voice_calls.consume_call_user_tag(
-        "等我一下/[CALL_USER]/我想听听你的声音"
+        f"等我一下/{action}/我想听听你的声音"
     )
     assert requested is True
     assert "CALL_USER" not in cleaned
@@ -88,6 +89,13 @@ def test_consume_character_call_tag():
     cleaned, requested = voice_calls.consume_call_user_tag("只是普通聊天")
     assert requested is False
     assert cleaned == "只是普通聊天"
+
+
+def test_voice_call_alias_requires_a_separate_segment():
+    assert voice_calls.consume_call_user_tag("[VOICE_CALL]") == ("", True)
+    assert voice_calls.consume_call_user_tag("等我一下\n[VOICE_CALL]") == ("等我一下", True)
+    for text in (f"[VOICE_CALL]({CALL_ID})", "标签写作 [VOICE_CALL]", "[VOICE](你好)(轻声)"):
+        assert voice_calls.consume_call_user_tag(text) == (text, False)
 
 
 def test_call_state_machine_and_turn_idempotency(tmp_path, monkeypatch):

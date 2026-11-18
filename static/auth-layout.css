@@ -1,0 +1,83 @@
+/* Shared, viewport-centered layout for login, registration and password reset. */
+html {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body.auth-page {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.auth-page .login-card {
+  box-sizing: border-box;
+  flex-shrink: 0;
+  width: calc(100% - 32px);
+  max-width: 382px;
+}
+
+.auth-page .verify-group input {
+  min-width: 0;
+}
+
+.auth-instructions {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #666;
+}
+
+@media (max-height: 740px) {
+  .auth-page .login-card { padding: 20px; }
+  .auth-page .logo { width: 56px; height: 56px; margin-bottom: 12px; }
+  .auth-page h2 { margin-bottom: 12px; }
+  .auth-page .login-card > input { padding: 10px; margin-bottom: 10px; }
+  .auth-page .input-group { margin-bottom: 10px; }
+  .auth-page .input-group input { padding: 10px; }
+  .auth-page .hint-msg { margin-bottom: 8px; }
+}
+
+@media (max-height: 600px) {
+  .auth-page .login-card { padding: 16px; }
+  .auth-page .logo { width: 36px; height: 36px; margin-bottom: 6px; }
+  .auth-page h2 { margin-bottom: 8px; }
+  .auth-page .login-card > input,
+  .auth-page .input-group input { padding: 9px; }
+  .auth-page .legal-consent { font-size: 11px; line-height: 1.45; margin-bottom: 10px; }
+  .auth-page .auth-instructions { font-size: 12px; line-height: 1.5; margin: 8px 0; }
+}
+
+/* Short landscape screens use two columns instead of clipping the form. */
+@media (max-height: 520px) and (min-width: 560px) {
+  .auth-page .login-card {
+    max-width: 680px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 12px;
+    padding: 12px 16px;
+  }
+  .auth-page .login-card > * { grid-column: 1 / -1; margin: 0; }
+  .auth-page .logo { display: none; }
+  .auth-page h2 { font-size: 16px; }
+  .auth-page .login-card > input { grid-column: auto; margin: 0; padding: 8px; }
+  .auth-page .login-card > #email { grid-column: 1 / -1; }
+  .auth-page .input-group input { padding: 8px; }
+  .auth-page .verify-group,
+  .auth-page .verify-group + .input-group { grid-column: auto; }
+  .auth-page .auth-instructions,
+  .auth-page .legal-consent { margin: 0; }
+  .auth-page .legal-consent { grid-column: 1; align-self: center; text-align: left; }
+  .auth-page #registerBtn { grid-column: 2; }
+  .auth-page .login-card > button { padding: 8px 12px; }
+}

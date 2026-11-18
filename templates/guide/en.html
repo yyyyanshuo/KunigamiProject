@@ -1,0 +1,435 @@
+{% set ui = {
+  'title': 'User guide', 'heading': 'From your first hello to a shared world',
+  'intro': 'Set up Saki, meet your characters, and explore conversations, memories, and everyday life together. Read in order or jump to what you need.',
+  'contents': 'Contents', 'search': 'Search the user guide', 'placeholder': 'Search: images, password, models, memory…',
+  'clear': 'Clear search', 'empty': 'No matches. Try a shorter keyword.',
+  'top': 'Back to top', 'login': 'Log in', 'profile': 'Profile',
+  'language': 'Guide and interface language', 'updated': 'Updated November 6, 2026',
+  'public': 'No login required.', 'skip': 'Skip to content'
+} %}
+{% set sections = [
+  ('account', 'Get an account, log in, and reset your password'), ('profile-settings', 'Set up your profile'),
+  ('notifications', 'Receive notifications'), ('models', 'Configure providers and models'),
+  ('characters', 'Create and configure a character'), ('chat', 'Chat with a character'),
+  ('groups', 'Create and use group chats'), ('calls', 'Voice calls'),
+  ('memory', 'How character memory works'), ('character-state', 'Character states'),
+  ('chat-records', 'Select and export messages'), ('batch-chats', 'Manage multiple chats'),
+  ('moments', 'Moments'), ('world-map', 'World map'), ('appearance', 'Themes and backgrounds'),
+  ('voice', 'Set up private ElevenLabs voices'), ('square', 'Character Square'), ('forum', 'Forums'),
+  ('errors', 'Errors and circuit breaker'), ('pwa-install', 'Install Saki as a PWA'),
+  ('account-safety', 'Account and usage safety')
+] %}
+{% macro content() %}
+<section class="doc-section" id="account">
+  <h2>1. Get an account, log in, and reset your password</h2>
+  <h3>Request an account</h3>
+  <ol>
+    <li>Email the administrator at <a href="mailto:yyyyanshuo@foxmail.com">yyyyanshuo@foxmail.com</a>. Include an email address you can access and the nickname you would like to use.</li>
+    <li>Follow the administrator’s instructions to pay the <strong>CNY 9.90</strong> account setup fee.</li>
+    <li>Once your account is ready, the administrator will send you your login details and initial password. <a href="/login">Log in to Saki</a> with your account email and that password, then change your password on your Profile.</li>
+    <li>Read the <a href="/terms">terms</a> and <a href="/privacy">privacy policy</a>, then acknowledge them on your Profile. Saki currently serves users aged 18 and over.</li>
+  </ol>
+  <p class="notice">Use a real email address you can access and keep your password safe. Your notification email and account email serve different purposes: password recovery requires your account email.</p>
+  <h3>Log in</h3>
+  <p>Open <a href="/login">the login page</a> and enter your account email and password. The login and password recovery pages each have a “User guide” button that opens this guide in a new tab.</p>
+  <h3 id="password-recovery">Reset a forgotten password</h3>
+  <ol>
+    <li>Select “Reset password” on the login page to open <a href="/forgot_password">password recovery</a>.</li>
+    <li>Enter your account email and request a verification code. Check both your inbox and spam folder.</li>
+    <li>Enter the six-digit code from the email and a new password. Codes are valid for 10 minutes. After requesting another code, use the newest one.</li>
+    <li>Submit the form. Once the reset succeeds, return to the login page and sign in with your new password. Existing sessions will need to authenticate again.</li>
+  </ol>
+  <p>The send button has an approximately 60-second resend countdown. Request a new code if yours expires. Contact support if emails still do not arrive or you cannot access your original mailbox. Delivery depends on the email service and receiving mailbox.</p>
+</section>
+
+<section class="doc-section" id="profile-settings">
+  <h2>2. Set up your profile</h2>
+  <ol>
+    <li>Set your avatar and display name on your <strong>Profile</strong>.</li>
+    <li>Open <strong>Account and notifications</strong> to set your age, nudge suffix, default conversation language, and other preferences.</li>
+    <li>Open <strong>Global user persona → Edit</strong>, describe your own persona, and save.</li>
+  </ol>
+  <p>Your <strong>default conversation language</strong> is used for character conversations and your own Moments posts. Think of it as the language of your fictional world. Built-in translation can turn a draft into the conversation language before you edit and send it. A character or group’s own language setting takes priority.</p>
+  <p>Your <strong>user language</strong> controls the interface and the translations you read. Change it with the page language selector. It can differ from your world’s language: for example, use an English interface, set Japanese as the default conversation language, and translate English drafts into Japanese before sending.</p>
+  <p>Changes to different preferences are preserved when saved from separate settings screens.</p>
+</section>
+
+<section class="doc-section" id="notifications">
+  <h2>3. Receive notifications</h2>
+  <ol>
+    <li><strong>Email notifications:</strong> go to <strong>Profile → Account and notifications</strong> and enter the address you want to use in “Notification email”.</li>
+    <li><strong>Browser notifications:</strong> go to <strong>Profile → Browser notifications</strong> and select “Enable notifications”. Firefox is recommended; permission setup may fail in some other browsers.</li>
+  </ol>
+  <div class="notice"><strong>Multiple accounts on one device:</strong> log in to each account you want notifications for and enable notifications separately for each one. The device can receive notifications for all accounts you have explicitly enabled.</div>
+</section>
+
+<section class="doc-section" id="models">
+  <h2>4. Configure providers and models</h2>
+  <p>Open <strong>Profile → Routes and models → Configure</strong>, then follow these steps.</p>
+  <ol>
+    <li><strong>Choose a provider:</strong> Gemini, ChatGPT, Claude, Grok, or Custom. For Custom, also enter a connection name, an HTTPS API address, and the API format supported by your provider.</li>
+    <li><strong>Enter the API key:</strong> use the key for that provider. Keys from different services are not interchangeable. Custom connections need a key issued for that endpoint. Saved keys are not shown in full.</li>
+    <li><strong>Assign models:</strong> choose models separately for chat, translation, image understanding, personas, calls, Moments, memory, image generation, and forums. If a model is missing from the list, add its exact ID as supported by the provider.</li>
+    <li>Set a daily image generation limit if needed, then select <strong>Save configuration</strong>. Key and model changes take effect after saving.</li>
+  </ol>
+  <h3>Choosing models: a Gemini example</h3>
+  <p>Within a generation, think of <strong>Pro → Flash → Flash-Lite</strong> as moving toward speed and lower cost. Pro emphasizes complex tasks and detail. This is a selection guideline: compare actual capabilities across generations rather than ranking models by the Pro or Flash label alone.</p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Task</th><th>Suggested tier</th><th>How to choose</th></tr></thead>
+    <tbody>
+      <tr><td>Chat</td><td><strong>Flash</strong></td><td>The default is <code>gemini-3.8-flash</code>, balancing characterization and response efficiency.</td></tr>
+      <tr><td>Voice calls</td><td>Pro / Flash</td><td>Use Pro for character fidelity or Flash for faster replies. This selects the reply model; voice settings control the sound.</td></tr>
+      <tr><td>Translation</td><td><strong>Flash-Lite</strong></td><td>A lightweight model such as <code>gemini-3.5-flash-lite</code> suits everyday translation. Use a stronger tier for complex context.</td></tr>
+      <tr><td>Moments</td><td><span class="recommend circle">Flash preferred</span> / Pro</td><td>Flash is usually sufficient. Choose Pro when nuanced characterization matters more.</td></tr>
+      <tr><td>Image understanding</td><td>A stronger Pro / Flash</td><td>Compare vision capabilities. A newer Flash can outperform an earlier Pro. Saki currently favors <code>gemini-3.8-flash</code>; “3.8 Flash &gt; 3.1 Pro” is not a universal ranking.</td></tr>
+      <tr><td>Memory</td><td><span class="recommend">Flash preferred</span></td><td>The default is <code>gemini-3-flash-preview</code> (Gemini 3.0 Flash, a preview model). You can choose another available Flash model.</td></tr>
+      <tr><td>Personas</td><td><strong>A recent Pro</strong></td><td>Prioritize complex settings and synthesis of source material, for example the currently available <code>gemini-3.1-pro-preview</code>.</td></tr>
+      <tr><td>Image generation</td><td><strong>A quality-focused image model</strong></td><td>The default image model is <code>gemini-nano-banana-2.1</code> (Nano Banana 2.1). Set the daily image limit below.</td></tr>
+      <tr><td>Forums</td><td><strong>A recent Flash</strong></td><td>Balance long-form output and speed, for example with <code>gemini-3.8-flash</code>.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="notice">Saki groups Gemini 4 by use: <code>gemini-4-hydrogen</code> under Flash, and <code>gemini-4-carbon</code> and <code>gemini-4-argon</code> under Pro. These are Saki groups, not Google model suffixes. Chat and calls default to <code>gemini-3.8-flash</code>; memory defaults to <code>gemini-3-flash-preview</code>. Saved choices are preserved. To apply a new default, select “Restore recommendation” for the task and save. Google has announced retirement of 2.5 Pro / Flash on December 1, 2026. See the <a href="https://ai.google.dev/gemini-api/docs/models" target="_blank" rel="noopener noreferrer">official model list</a> and <a href="https://ai.google.dev/gemini-api/docs/deprecations" target="_blank" rel="noopener noreferrer">model lifecycle information</a> for availability and retirement dates.</p>
+  <p>Apply the same task-based approach to other providers: emphasize capability for chat and personas, speed for translation, and balance for memory and forums. Image understanding requires image input support; image generation needs a dedicated capability. Square trial chats and speech recognition use separately configured platform services and do not switch with your personal chat model.</p>
+</section>
+
+<section class="doc-section" id="characters">
+  <h2>5. Create and configure a character</h2>
+  <p>Character names and nicknames can use up to 10 full-width characters. Two half-width letters or digits count as one full-width character. You can keep an existing longer name.</p>
+  <ol>
+    <li>On <strong>Contacts</strong>, select the plus button at the top right and create a contact.</li>
+    <li>Enter an ID and name. IDs accept English letters, digits, and underscores only.</li>
+    <li>Open the character’s chat and use the settings control at the top right to open <strong>Character memory</strong>.</li>
+    <li>Under <strong>Character profile → Basic information → Edit profile</strong>, configure the avatar, display nickname, age, nudge suffix, conversation language, and pin setting.</li>
+    <li>Under <strong>Core settings → Character persona</strong>, write the persona yourself or enter the character’s name and franchise to generate it with AI. You can also copy the AI prompt, use it with your own AI, and paste the result back.</li>
+    <li>Under <strong>Core settings → Relationship graph</strong>, edit relationships. “My perspective” means this character’s views of others; “Others’ perspectives” means other characters’ views of this character. Use cards, JSON, or AI generation. Alternatively, copy the prompt to your own AI and replace the JSON editor’s contents with the returned JSON. Remember to add <strong>the character’s view of you</strong> in the card editor.</li>
+    <li>Optional: add a schedule under <strong>Dynamic memory → Upcoming schedule</strong>. Add entries individually or replace the whole schedule using source mode in Advanced tools. You can also copy another character’s schedule or sync this schedule to others.</li>
+  </ol>
+  <h3 id="persona-lock">🔒 Protect core persona details from AI edits</h3>
+  <p>Wrap core settings in <code>[[LOCK]]</code> and <code>[[/LOCK]]</code>, each on its own line:</p>
+  <pre><code>[[LOCK]]
+# Canonical core settings
+- Official identity, appearance, history, and established personality
+[[/LOCK]]
+
+# Additional settings that can evolve
+- Habits developed with the user</code></pre>
+  <p>Characters and models read the protected content, and later AI edits or rewrites must preserve the text inside it. <strong>This does not restrict you:</strong> the editor is still plain text. You can change anything inside the block, move or remove the tags, or redefine the protected area. Your saved version becomes the new reference.</p>
+  <p>Tags must be paired, on separate lines, and never nested. AI persona generation protects established official or canonical facts while leaving speculation, creative additions, and interaction preferences outside. Characters read the content during ordinary chat without proactively explaining the tags.</p>
+</section>
+
+<section class="doc-section" id="chat">
+  <h2>6. Chat with a character</h2>
+  <p>The chat name is centered in the top toolbar, with the character’s status directly below it in private chats. On narrow screens, a long name can extend behind the memory button. The buttons stay tappable and the toolbar keeps its height. Tap the top-left arrow to go back or the magnifying glass beside it to search. The back button and the right-hand controls sit equally far from the screen edges. The translucent gray circle between the arrow and the magnifying glass counts unread messages in your other private and group chats. New messages in the open chat are excluded. About every three seconds, the chat checks for messages and refreshes the count and character status. When the count reaches zero, the circle disappears and the search button stays in place. You can browse older messages and still see these updates without losing your place. If the unread count is temporarily unavailable, the circle is hidden until a refresh returns the latest count. While you press a toolbar button, a light gray background appears. The back arrow and unread count share a pill-shaped background. The other buttons use circles of the same height.</p>
+  <ol>
+    <li>Type in the message box and send.</li>
+    <li>When your <strong>user language</strong> differs from the <strong>character’s conversation language</strong>, a translation box appears above the composer. If the character has no language set, the default conversation language applies. Translate a draft to fill the message box, then edit it if needed before sending. Sending the translation unchanged also attaches your original text beneath the message bubble.</li>
+    <li>Select the voice button to the left of the composer, then hold “Hold to talk” to record. Allow microphone access when prompted. Slide upward during recording to cancel.</li>
+    <li>Select the plus button to the right to open photos, stickers, quick phrases, transfers, voice calls, and websites.</li>
+    <li>Double-click or double-tap the character’s avatar to nudge them.</li>
+    <li>Use a character message’s action menu to regenerate speech for the eligible last message, play audio, translate, edit, delete, or copy. Translation is available when the user language differs from the effective conversation language.</li>
+    <li>Accept or return a transfer sent by a character. Transfers are fictional chat interactions.</li>
+  </ol>
+  <h3>The expanded composer</h3>
+  <ul>
+    <li><strong>Image:</strong> use AI image recognition or write your own description, enter description instructions, and send text with your image. See <a href="#chat-images">Send an image with text</a>.</li>
+    <li><strong>Stickers:</strong> use the heart tab for stickers you added yourself, supplying a description when adding one. Use the plus tab to add packs, upload your own packs for public sharing, or search for stickers.</li>
+    <li><strong>Quick phrases:</strong> save frequent instructions or short phrases. Selecting one appends it to the composer; review it before sending.</li>
+    <li><strong>Voice call:</strong> call the current character.</li>
+    <li><strong>Website:</strong> enter a URL so the character can read accessible page content.</li>
+  </ul>
+  <h3 id="chat-transfers">Send a transfer with text</h3>
+  <p>In transfer, image, and Moments editors, image recognition instructions use the same font size as the Moments post editor. The focused input has a pink border. Choose saved instructions from the rounded dropdown. Scroll inside the window when its content exceeds the screen.</p>
+  <p>Select <strong>Plus → Transfer</strong> beside the chat composer. Enter an amount, a currency such as CNY, USD, JPY or a currency symbol, and an optional note, then send. Amounts must be positive with up to two decimal places, at most 999999999.99. Notes allow up to 80 characters without <code>[ ] | /</code> or line breaks. Transfers are virtual chat interactions, with no real payment.</p>
+  <p>Select a pending transfer card from a character to accept or return it. Sending, accepting, and returning transfers all support additional text. Your chat draft is copied into the window; use <code>/</code> to separate text bubbles, with the transfer card last. When languages differ, translate and edit the text in the window before confirming. Canceling neither sends nor resolves the transfer and keeps your chat draft. Failed sends keep the editor text; the original chat draft is cleared only after saving succeeds. Each transfer can be accepted or returned only once.</p>
+  <h3 id="character-images">Ask a character to generate an image</h3>
+  <p>In an online private or group chat, try asking, “Send me a selfie of you sitting on the sidelines after practice.” The character describes the shot from their phone camera’s point of view. You can specify the framing, angle, and subject position. For example, “Take it from just above eye level, shoulders up, with a bit of the court on the right.”</p>
+  <p>The character writes the English image prompt as if the image model has never seen them. Along with clothing, action, setting, and light, they describe the features that distinguish them in this shot. A waist-up portrait might show a character’s broad shoulders and upright posture. A hurt look might come through in slightly knitted brows and downturned lips. Anime, manga, and game characters default to their source illustration style. Characters based on real people default to realistic photography. You can ask for another style, such as black-and-white manga.</p>
+  <h3 id="vision-prompt-presets">Save image recognition instructions</h3>
+  <p>In the image editor, enter your description instructions and select <strong>Save instructions</strong>. Next time, use <strong>Choose saved instructions</strong> to fill the field and edit it if needed. <strong>Delete selected</strong> removes a saved entry. Each account can save up to 30 entries, each up to 2,000 characters, shared between chat and Moments. Saving or selecting instructions calls no model and does not send an image. Canceling an image does not undo instructions you already saved or deleted. Leave the field empty for the default instructions. Manual descriptions ignore these instructions.</p>
+  <h3 id="chat-images">Send an image with text</h3>
+  <p>These features work in both individual and group chats. Select one image at a time. AI recognition uses your configured vision model; a manual description does not call that model. Both modes support captions.</p>
+  <ol>
+    <li>Open <strong>Plus → Image</strong> beside the chat composer and choose an image. The “Send image” window opens, with any existing text from the composer copied into the caption field.</li>
+    <li>Select <strong>AI image recognition</strong> and optionally enter <strong>Description instructions</strong>, such as “Focus on clothing, expressions, and actions in three sentences.” Alternatively, select <strong>Manual description</strong> and describe the image yourself.</li>
+    <li>Use <strong>Say something with the image</strong> for the text you want to send to the character. Add <code>[IMAGE]</code> to choose where the image appears.</li>
+    <li>Expand <strong>Message preview</strong> to check the order, then select <strong>Send</strong>. Text and the image appear in separate bubbles, in order, as one user message.</li>
+  </ol>
+  <p>When your user language differs from the current character or group’s conversation language, the same yellow translation bar used in regular chat appears above the caption. Enter the original text and select <strong>Translate</strong> or press Enter; Shift+Enter adds a line break. The translation fills the caption and updates the preview, asking before replacing an existing draft. Image markers, <code>/</code> separators, and links are preserved. Select Send when ready. If you leave the translated caption unedited, the original text is shown beneath the sent message. Failed translations keep your draft, and canceling the image window leaves the regular chat draft unchanged.</p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Content</th><th>Purpose</th><th>Shown in chat bubbles?</th></tr></thead>
+    <tbody>
+      <tr><td>Description instructions</td><td>Tell the vision model how to summarize the image</td><td>No; they are not sent as your caption</td></tr>
+      <tr><td>AI or manual description</td><td>Help the character understand the image; AI up to 500 characters, manual up to 4,000</td><td>The image is shown, while its description is hidden</td></tr>
+      <tr><td>Caption</td><td>What you want to say to the character</td><td>Yes, as text bubbles</td></tr>
+    </tbody>
+  </table></div>
+  <h3 id="image-instructions">Enter instructions for this image</h3>
+  <p>Type directly into “Description instructions (optional)” to tell the AI what to focus on, such as clothing, text in the image, or the number of summary sentences. Use up to 2,000 characters, or leave the field blank for the system instructions. Your instructions apply only to this image.</p>
+  <h3 id="image-caption">Separate bubbles with / and place the image with [IMAGE]</h3>
+  <p>Type <code>/</code> in the caption to split text into bubbles. “Insert image position” adds a marker at the cursor; you can also type <code>[IMAGE]</code>. For example:</p>
+  <pre><code>I bought a new outfit/Take a look[IMAGE]What do you think?</code></pre>
+  <p>Separators are added automatically between the image and adjacent text, producing <strong>“I bought a new outfit” → “Take a look” → the image → “What do you think?”</strong>. Existing separators are reused, and slashes inside URLs are preserved.</p>
+  <ul>
+    <li>Without a marker, the image goes after the caption. Without a caption, only the image is sent.</li>
+    <li>Choose only one position for each image. Remove extra markers before sending. The markers <code>[IMAGE]</code>, <code>[图片]</code>, and <code>[画像]</code> are equivalent.</li>
+    <li>Position markers work in the caption window after choosing an image. Typing a marker in the regular chat composer does not upload an image.</li>
+  </ul>
+  <h3 id="image-retry">Cancel or retry a failed send</h3>
+  <p>Canceling preserves the original draft in the regular chat composer. Temporary caption edits, instructions, and unsent images in the image window are not restored after closing or refreshing.</p>
+  <p>If uploading, image recognition, or saving the message fails, the window keeps its contents so you can retry. When recognition fails, you can also select <strong>Use a manual description</strong>. After recognition succeeds, retrying in the same window reuses the result if you have not changed the description mode or instructions. If the image message was saved but the character’s reply failed, use <strong>Retry</strong> in the chat to generate the reply again, without uploading the image again.</p>
+</section>
+
+<section class="doc-section" id="groups">
+  <h2>7. Create and use group chats</h2>
+  <p>Use the magnifying glass on the Contacts page to search by character name, nickname, or group name. Separate terms with <code>;</code> or <code>；</code> to find groups containing all the requested characters. For example, <code>Chigiri; Reo</code> finds groups containing both characters even if neither name appears in the group name.</p>
+  <p>New or edited group names can use up to 15 full-width characters. Two half-width characters count as one.</p>
+  <p>A character can suggest a name when starting a group or simply choose the members. Without a suggestion, Saki joins the members’ names with “、”. If the name is too long, Saki uses the initiating character’s name followed by “ · Group chat”, or just “Group chat” if needed. A group with the same members keeps its existing name. If a new group would have the same name as another group on your account, Saki adds the first available number starting at 2, as in “Book Club 2” or “Book Club 3”. If needed, Saki shortens the end of the new name so the number fits within the 15-character full-width limit.</p>
+  <p>You can also <a href="#chat-images">send images with text</a> in groups. Description instructions, image position markers, and the message preview work as they do in individual chats.</p>
+  <ol>
+    <li>Select the plus button on Contacts and create a group chat.</li>
+    <li>Enter an ID using English letters, digits, and underscores, enter a group name, and select at least two characters. You do not select yourself during creation.</li>
+    <li>Open the group chat and use the top-right settings control to open Group memory.</li>
+    <li>In Basic information, set the group language, proactive messages, pinning, chat mode, and “Include user”. Including or excluding yourself changes the same group; it does not create a separate group chat.</li>
+  </ol>
+  <p class="notice"><strong>The group language overrides individual character languages.</strong> When set, every character uses it in that group. Existing group membership cannot currently be changed; create a new group to use different members.</p>
+  <h3>Choose who replies with @</h3>
+  <ul>
+    <li><strong>@everyone:</strong> all members reply in a random order.</li>
+    <li><strong>@one member:</strong> only that member replies.</li>
+    <li><strong>@multiple members:</strong> those members reply in mention order.</li>
+  </ul>
+</section>
+
+<section class="doc-section" id="calls">
+  <h2>8. Voice calls</h2>
+  <p>Calls currently support one-to-one conversations with a single character.</p>
+  <ol>
+    <li>Open the plus panel in a character chat and select “Voice call”.</li>
+    <li>If the character answers, they speak first. With a working voice configured, you will hear them. When their turn ends, the microphone starts listening so you can respond.</li>
+    <li>You can hang up at any time. The character can also end the call.</li>
+    <li>If a character calls while you are online, the incoming call screen appears. Choose whether to answer or decline.</li>
+  </ol>
+  <p>Allow microphone access on first use. Characters decide whether to answer based on their persona. See <a href="#voice">private ElevenLabs voices</a> to configure their sound.</p>
+</section>
+
+<section class="doc-section" id="memory">
+  <h2>9. How character memory works</h2>
+  <h3>When are memories summarized?</h3>
+  <p>Moving between direct chat, group chat, and Moments triggers relevant short-term memory summaries. During a continuous conversation, use the <strong>brain button</strong> at the top right of chat to summarize manually at suitable moments.</p>
+  <ul>
+    <li><strong>Every day at 04:00 Beijing time:</strong> the background job summarizes the previous Beijing day, turning short-term memory into medium-term memory. Group conversations are summarized and distributed first.</li>
+    <li><strong>Every Monday at 04:00 Beijing time:</strong> the previous week’s medium-term memories become long-term memory. All accounts use Beijing dates and weeks for memory archives.</li>
+  </ul>
+  <p>Dates and times in the memory editor use Beijing time (UTC+08:00). Group memories retain Beijing time when distributed to characters. When a character replies, timestamps are converted to their location’s time zone using the event date, including daylight saving time.</p>
+  <p>Automatic summaries depend on running background jobs and successful model calls. Empty periods are skipped. Daily summaries cover the day that has passed; they do not erase chat history.</p>
+  <h3>What does the character read for a reply?</h3>
+  <p>Alongside core settings such as the persona, the prompt normally includes the <strong>latest 20 context entries in the current scene, short-term memories from the last 24 hours, medium-term memories from the last seven days, and long-term memories selected through keyword and time searches</strong>. A lightweight model can help extract search information; memories are organized with their chronology in mind.</p>
+  <p class="notice">Stored chat history is not all reread for every reply. If a conversation exceeds 20 entries and earlier details have not been summarized, the character may temporarily “forget” them. Summarize after meaningful exchanges.</p>
+  <h3>View, edit, and regenerate memories</h3>
+  <ul>
+    <li>Edit or delete individual memories. Jump to a date to browse short-term memory.</li>
+    <li>Regenerating a day’s short-term memory replaces only that day’s direct-chat memory, leaving memories from groups and Moments intact.</li>
+    <li>Medium- and long-term memory can also be regenerated with AI. Check the error message before retrying a failed generation.</li>
+    <li>Group summaries are distributed to every character member’s short-term memory. Regenerating a group summary appends another distribution without deleting previous copies. Remove duplicates manually if needed.</li>
+  </ul>
+</section>
+
+<section class="doc-section" id="character-state">
+  <h2>10. Character states</h2>
+  <dl>
+    <dt>Emotion index</dt><dd>Affects the likelihood and frequency of proactive messages. The background task checks as often as once every 10 minutes; a check does not guarantee a message. In one-to-one chats, the background task skips proactive messages if there was a message in the last 10 minutes or the character is already replying. A new message during proactive generation discards the stale reply.</dd>
+    <dt>Personality index</dt><dd>Affects proactive Moments posts, checked as often as every 30 minutes. You can lock both the emotion and personality indices to prevent the character from changing them.</dd>
+    <dt>Intimacy</dt><dd>Can change with each conversation and affects the likelihood of characters liking or commenting on your Moments posts.</dd>
+    <dt>Chat mode</dt><dd>Online mode supports special messages and generally avoids describing actions or surroundings. Offline mode focuses on actions and surroundings without online special messages. Offline characters can respond during deep sleep but do not send proactive messages.</dd>
+    <dt>Light sleep</dt><dd>Prevents proactive messages. Enabled by default for new characters.</dd>
+    <dt>Character time zone</dt><dd>Shapes the character’s awareness of time. Deep sleep follows the configured time basis, which may be the character’s local time or the user’s time. Check the sleep schedule as well.</dd>
+    <dt>Deep sleep</dt><dd>Prevents replies in online mode and proactive Moments posts.</dd>
+    <dt>Bedtime summary</dt><dd>When enabled, entering deep sleep triggers a daily summary and an inner monologue. The master switch on Contacts must also be on; enabling it for the character alone is insufficient.</dd>
+  </dl>
+</section>
+
+<section class="doc-section" id="chat-records">
+  <h2>11. Select and export messages</h2>
+  <p>Use the middle selection button at the top right of chat to choose message bubbles. Select one bubble, then long-press another or Shift-click it to select the range between them.</p>
+  <ul>
+    <li><strong>Forward:</strong> send the selected messages to another character or group chat in Saki.</li>
+    <li><strong>Create a record:</strong> export text or an image. Image exports can show or hide character names.</li>
+    <li><strong>Delete in bulk:</strong> delete the selected messages after checking the selection.</li>
+  </ul>
+</section>
+
+<section class="doc-section" id="batch-chats">
+  <h2>12. Manage multiple chats</h2>
+  <p>On Contacts, use the third button from the right at the top to select direct or group chats. Queue the following operations, then select <strong>Save</strong> to apply them together.</p>
+  <ul>
+    <li><strong>All chats:</strong> mark as read, delete, pin, or unpin.</li>
+    <li><strong>Direct chats only:</strong> enable or disable light sleep, enable or disable deep sleep, set deep sleep hours, enable or disable bedtime summaries, or set the personality index.</li>
+    <li><strong>Groups only:</strong> enable or disable proactive messages.</li>
+  </ul>
+  <p>Deleting a character also clears associated chats, memories, Moments interactions, and map position. Read the confirmation shown before saving.</p>
+</section>
+
+<section class="doc-section" id="moments">
+  <h2>13. Moments</h2>
+  <ul>
+    <li>Select the text at the top left to filter posts by character.</li>
+    <li>The left of the two top-right buttons toggles proactive Moments.</li>
+    <li>The right button creates a post. Post as yourself, or choose a character and give them a suggestion for what to post.</li>
+  </ul>
+  <p>Posts support copying, likes, translation, comments, editing, and deletion. Comment as yourself or a character. Character posts also support regeneration and rebuilding their memory; your own posts do not have those two actions.</p>
+  <p>Comments support translation, replies, editing, and deletion. Reply as yourself or a character. Character comments can be regenerated or have their memory rebuilt; your own comments cannot. Translation is always available for posts and comments, using your user language. Click again to hide it; another click requests a fresh translation. Editing the source invalidates its old translation. Translating a draft before posting or replying uses your default conversation language and fills the draft for you to review and send.</p>
+  <h3 id="moment-visibility">Hide a post from characters</h3>
+  <p>When posting as yourself, select <strong>Hide from</strong>, check the characters, and confirm. The selection applies only to this post; after publishing, the next post defaults to being visible to all characters.</p>
+  <p>Characters can also hide their posts by adding <code>~~Character name~~</code> on a line by itself, one character per line. Remarks and character IDs are supported; use IDs for duplicate names. These lines are removed from the displayed post and stored as a visibility list.</p>
+  <p>Hidden characters cannot randomly like or comment, be brought in through @mentions, or be manually assigned comments or replies. They are marked <strong>Cannot see this post</strong> in the selector. IDs are saved, so renaming a character does not change visibility.</p>
+  <p>Select <strong>Hidden from some people</strong> at the bottom left of a post’s card to view the list. You can still see the post and its list. Editing preserves the list; regenerating preserves existing entries and adds any newly hidden characters.</p>
+  <p>If another action just changed the Moments content you are saving, refresh Moments and try again.</p>
+  <p>When creating your own Moments post, add images and enter <strong>Image recognition instructions (shared across this post)</strong>, or choose saved instructions. The same instructions apply to every AI-recognized image in this post, up to 2,000 characters. Leave the field empty for defaults. Images with manual descriptions ignore the instructions, which are never published as post text. The field hides when all images use manual descriptions. Failed publishing keeps the draft, images, and instructions for retry. Cancel clears this post draft but keeps saved instructions. On small screens or with the keyboard open, scroll inside the window; its action area appears above the bottom navigation.</p>
+</section>
+
+<section class="doc-section" id="world-map">
+  <h2>14. World map</h2>
+  <p>Create or edit places with a name, description, map coordinates, and a real-world location. The real location supplies weather and time-zone matching. Characters moving to a matched place adopt its time zone.</p>
+  <ul>
+    <li>Characters can move to places they know, move freely within a one-cell range, or create new places.</li>
+    <li>Select a character to move them manually or edit which places they know.</li>
+    <li>Visiting a place automatically adds it to that character’s knowledge.</li>
+    <li>When you and a character move to the same place, direct chat switches to offline mode. Moving apart switches it back to online mode.</li>
+  </ul>
+</section>
+
+<section class="doc-section" id="appearance">
+  <h2>15. Themes and backgrounds</h2>
+  <p>Go to <strong>Profile → Theme settings</strong> to choose a theme color and upload a default chat background.</p>
+  <p>Set an individual character or group background on the corresponding <strong>Character memory</strong> or <strong>Group memory</strong> page.</p>
+</section>
+
+<section class="doc-section" id="voice">
+  <h2>16. Set up private ElevenLabs voices</h2>
+  <p>Character TTS, previews, and voice cloning use your own ElevenLabs account. The API key, private voices, and plan quota belong to you. Speech-to-text for your voice messages uses Saki’s platform STT key and does not consume your personal quota. Voice IDs are not uploaded to Character Square.</p>
+  <h3>Step 1: create an ElevenLabs account and API key</h3>
+  <ol>
+    <li>Register or sign in through the <a href="https://try.elevenlabs.io/8f8ks0unlqsw" target="_blank" rel="noopener noreferrer sponsored">ElevenLabs referral link</a>.</li>
+    <li>Open API Keys in your account settings and create a key.</li>
+    <li>Allow Text to Speech and Voices/Voice Cloning. Your personal key does not need Speech-to-Text access.</li>
+    <li>Copy and store the new key securely. Do not share the complete key with anyone.</li>
+  </ol>
+  <h3>Step 2: save the key encrypted in Saki</h3>
+  <p>Open <strong>Profile → Account and notifications → ElevenLabs</strong>, paste the key, and select “Save / overwrite”. Afterwards, only its configuration status and last four characters are displayed.</p>
+  <h3>Step 3: create a character voice</h3>
+  <ol>
+    <li>Open the contact’s <strong>Memory &amp; character settings → Voice settings</strong>.</li>
+    <li>Enter a voice name and upload clear audio with one speaker, no larger than 20 MB.</li>
+    <li>Confirm that you own the right to use the voice or have explicit permission from the speaker.</li>
+    <li>Select “Upload and create voice”. On success, the Voice ID is filled in and saved for the character.</li>
+    <li>Preview the voice. Subsequent character speech uses your own ElevenLabs plan quota.</li>
+  </ol>
+  <p class="notice">Saki forwards this uploaded sample to ElevenLabs for voice creation without keeping the sample long term itself. You can also enter a Voice ID your current ElevenLabs account can access. Knowing another account’s private Voice ID does not grant access to it.</p>
+  <h3>Common voice errors</h3>
+  <ul>
+    <li><strong>Invalid or missing API key:</strong> save your personal ElevenLabs key again from Profile, without surrounding spaces.</li>
+    <li><strong>Insufficient permissions / IP allowlist rejection:</strong> check access to TTS and voice operations. Update any configured IP allowlist.</li>
+    <li><strong>Voice ID unavailable:</strong> confirm the voice belongs to this account or is shared with it.</li>
+    <li><strong>Quota exhausted or voice slots full:</strong> check your plan and saved voice count, remove unused voices, or adjust your plan as needed.</li>
+  </ul>
+</section>
+
+<section class="doc-section" id="square">
+  <h2>17. Character Square</h2>
+  <p>Search for characters, try a conversation, or add them to your own contacts. Publish your own characters too, optionally importing details from one you already have locally.</p>
+  <p>Uploads accept an ID (duplicates are handled automatically), character name, aliases, age with an option to keep it fixed, franchise, tags, relationship graph, and persona.</p>
+  <p>A character’s detail page also shows other characters from the same author. Like or bookmark characters, or leave anonymous comments.</p>
+</section>
+
+<section class="doc-section" id="forum">
+  <h2>18. Forums</h2>
+  <ol>
+    <li>Use the plus button on Contacts and choose forum generation.</li>
+    <li>Enter a topic, type, and post count. Load multiple chat excerpts if needed, or select a previous forum to continue it.</li>
+    <li>Choose the output language, add extra information, and generate. The result streams onto the page as it is written.</li>
+    <li>Copy the generated forum block code and send it in chat to display it in forum format.</li>
+  </ol>
+</section>
+
+<section class="doc-section" id="errors">
+  <h2>19. Errors and circuit breaker</h2>
+  <p>First check your active provider and model, then follow the message to inspect the key, balance, permissions, or connection. Saki may show a short translated error rather than the provider’s raw response.</p>
+  <h3>Which errors count toward the circuit breaker?</h3>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Call path</th><th>HTTP codes counted</th></tr></thead>
+    <tbody>
+      <tr><td>Ordinary direct Gemini model calls</td><td><code>400</code>, <code>403</code></td></tr>
+      <tr><td>ChatGPT, Claude, Grok, Custom, and streamed forum generation (including Gemini)</td><td><code>400</code>, <code>401</code>, <code>402</code>, <code>403</code></td></tr>
+      <tr><td>Legacy relay calls still in use</td><td><code>401</code>, <code>402</code>, <code>403</code>, <code>525</code>. These differ from the current Custom connection.</td></tr>
+    </tbody>
+  </table></div>
+  <p>This table covers general model calls such as chat and summaries, and streamed forum generation. Image generation, voice, and web access have their own error handling and limits; an identical number does not automatically imply the same circuit-breaker behavior.</p>
+  <h3>Counting, cooldown, and recovery</h3>
+  <ol>
+    <li>Errors are counted separately by <strong>user + connection + identical error code</strong>. The first occurrence produces a warning.</li>
+    <li>The second occurrence starts a <strong>10-minute cooldown</strong>. Protected calls on that connection are blocked during it.</li>
+    <li>If the same error occurs a third time after cooldown, before its counter resets, that connection is <strong>disabled</strong>. This does not freeze the whole account.</li>
+    <li>For a connection that is not disabled, a successful call clears its counters. More than <strong>30 minutes</strong> after the last error, with no active cooldown, stale counters are also cleared on the next check.</li>
+    <li>A disabled connection does not recover simply by waiting 30 minutes or replacing a key. Fix the configuration and contact an administrator to clear it, or use another correctly configured connection.</li>
+  </ol>
+  <h3>Troubleshooting common errors</h3>
+  <dl>
+    <dt>400 · Invalid request</dt><dd>Check the model ID, API format, input type, and parameters. For Custom, ensure the protocol matches the provider.</dd>
+    <dt>401 · Authentication failed</dt><dd>For an AI service error, check whether the API key is correct and still valid. If a Saki page reports an expired login instead, sign in to Saki again.</dd>
+    <dt>402 · Balance or billing issue</dt><dd>Check the provider’s API balance, plan, and billing status.</dd>
+    <dt>403 · Access denied</dt><dd>Check model permissions, account or regional restrictions, key permissions, and access policies. A wrong model name is not the only possible cause.</dd>
+    <dt>404 · Model or endpoint not found</dt><dd>Check for retired models, missing model access, or an incorrect API address. The general call paths above do not count 404 toward the circuit breaker.</dd>
+    <dt>429 · Rate or quota limit</dt><dd>Reduce concurrent requests and sending frequency; check quota and balance. The general call paths above do not count 429.</dd>
+    <dt>500 / 502 / 503 / 504 · Upstream failure or timeout</dt><dd>Retry later, shorten the input, or try a faster model. These do not count as fatal errors above. A Saki 503 can also mean a service is unconfigured or a circuit breaker is active; read the accompanying message.</dd>
+    <dt>524 / 525 · Proxy timeout or connection failure</dt><dd>Check the connection provider’s status. Current Custom calls count neither code; only legacy relay calls count 525.</dd>
+    <dt>Empty reply, parsing failure, truncated output, or interrupted stream</dt><dd>The model did not return a complete valid result. Check input size and model capability, then retry later. Partial output is not a completed generation.</dd>
+    <dt>Memory synchronization or summary failed</dt><dd>Check your memory model and connection, then summarize manually. A reply may lack freshly organized memories after a failure; follow the displayed message.</dd>
+  </dl>
+  <p class="notice">Fatal errors or circuit-breaker events in proactive tasks may enable a character’s light sleep, disable a group’s proactive messages, or turn off proactive Moments. Check and re-enable those switches as needed after fixing the connection.</p>
+  <p>When asking for help, provide the feature, provider, model, error code, time, and a screenshot with sensitive details hidden. Never send a full API key, password, or verification code. After a restriction is cleared, test with one short message.</p>
+</section>
+
+<section class="doc-section" id="pwa-install">
+  <h2>20. Install Saki as a PWA</h2>
+  <p>Add Saki to your home screen to open it like an ordinary app. This is the website’s PWA version: no APK download or app store is required.</p>
+  <p class="notice">A PWA still needs an internet connection for chat. Installing adds an entry point, not a new account. Continue using your existing email and password.</p>
+  <h3>Three steps</h3>
+  <ol><li>Open the <a href="/">Saki home page</a> in your mobile browser and let it load.</li><li>Open the menu on Android or Share in Safari on iPhone.</li><li>Select “Install app” or “Add to Home Screen” and confirm. Find the Saki icon on your home screen.</li></ol>
+  <h3>Android · Chrome</h3>
+  <ol><li>Open Saki in Chrome.</li><li>Tap the three-dot menu by the address bar or at the top right.</li><li>Choose “Add to Home screen → Install”; some versions show “Install app” directly.</li><li>Confirm and return to the home screen.</li></ol>
+  <h3>Android · Firefox (recommended)</h3>
+  <ol><li>Open Saki in Firefox.</li><li>Open the browser menu.</li><li>Choose “Install”, or “Add to Home screen” if that is the option shown.</li><li>Choose “Add automatically” or drag the icon to the home screen as instructed.</li></ol>
+  <h3>iPhone / iPad · Safari</h3>
+  <ol><li>Open Saki in Safari.</li><li>Tap Share, the square with an upward arrow. Some layouts put it under More.</li><li>Scroll down and choose “Add to Home Screen”.</li><li>Enable “Open as Web App” if shown, then tap Add.</li></ol>
+  <h3>Other Android browsers</h3>
+  <ol><li>Open the site and the three-dot or three-line menu.</li><li>Look for “Install app”, “Add to desktop”, or “Add to Home screen”.</li><li>Confirm the name and icon. Labels and positions vary by browser.</li></ol>
+  <h3 id="pwa-troubleshooting">Cannot find the installation option?</h3>
+  <ul>
+    <li><strong>No “Install app”:</strong> look for “Add to Home screen” or “Add to desktop”. Wait for loading, refresh, or update your browser.</li>
+    <li><strong>No “Add to Home Screen” on iPhone:</strong> confirm you are in Safari and add the action through “Edit Actions” at the bottom of the Share menu.</li>
+    <li><strong>An address bar remains after installation:</strong> you may have added a shortcut. Remove it and repeat, choosing installation or enabling “Open as Web App” where available.</li>
+    <li><strong>Offline chat does not work:</strong> this is expected. Chat, synchronization, and AI replies still require a connection.</li>
+  </ul>
+  <p class="notice">For push notifications on iPhone or iPad, add Saki to the home screen, open it from that icon, and enable permission under <strong>Profile → Browser notifications</strong>.</p>
+</section>
+
+<section class="doc-section" id="account-safety">
+  <h2>21. Account and usage safety</h2>
+  <p>These features help you manage your account and time without changing normal character conversations.</p>
+  <h3>Minimum age</h3>
+  <p>You must be at least 18 to use Saki. Check that you meet this requirement before requesting an account.</p>
+  <h3>Two-hour usage reminder</h3>
+  <p>After more than two hours of continuous use, a wellbeing reminder appears. It does not sign you out, pause chat, or affect AI replies.</p>
+  <h3>Safety notices</h3>
+  <p>If a conversation indicates a clear risk to personal safety, a centered gray notice may appear near the messages, suggesting someone you trust nearby or local emergency services. In China, it also mentions the national mental health helpline, 12356.</p>
+  <p class="notice">A notice cannot replace professional help. If you or someone nearby is in immediate danger, contact a trusted person nearby or local emergency services first.</p>
+  <h3>Delete your account</h3>
+  <p>Select “Delete account” at the bottom of <strong>Profile</strong>, read the impact notice, and continue. Enter your current password and type the exact confirmation phrase shown on the page before submitting.</p>
+  <ul>
+    <li><strong>Deletion scope:</strong> your account, personal settings, private chats and media, trial chats, attributable comments, and usage records are cleaned up. Save anything you need beforehand.</li>
+    <li><strong>Public submissions:</strong> public characters and sticker packs remain, with author account, email, and source-character links removed. Information you put in the content itself, unattributable older comments, copies saved by others, and third-party records are not automatically erased. Delete submissions before account deletion if you want them removed.</li>
+    <li><strong>Recovery:</strong> deleted data cannot be restored. If cloud cleanup fails, follow the page instructions to retry.</li>
+    <li><strong>Wrong password:</strong> deletion will not run unless both the password and confirmation phrase are accepted.</li>
+  </ul>
+</section>
+{% endmacro %}

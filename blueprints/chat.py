@@ -1,3 +1,6 @@
+from services.memory_store import memory_now, memory_timezone, memory_day_bounds, memory_event_instant, dated_memory_event, load_calendar_memory
+from core.message_tags import canonicalize_message_tags
+from core.runtime import LOCAL_TEST, DATA_ROOT
 # -*- coding: utf-8 -*-
 """Single-chat blueprint: /api/<char_id>/* routes extracted from app.py."""
 import os
@@ -13,7 +16,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from flask import (
-    Blueprint, request, jsonify, session, redirect, send_from_directory,
+    Blueprint, request, jsonify, session, redirect, send_from_directory, current_app,
 )
 from PIL import Image
 
@@ -22,6 +25,7 @@ from core.context import get_current_user_id, set_background_user
 from core.circuit_breaker import get_circuit_breaker_info
 from core.system_messages import should_suppress_reply_for_deep_sleep
 from core.utils import (
+    CHARACTER_NAME_HINT, CHARACTER_NAME_LIMIT, name_fits,
     get_paths, safe_save_json, _add_furigana_to_japanese,
     _get_characters_config_file, _get_read_status_file,
     _get_groups_config_file, _get_character_positions_file,
@@ -46,8 +50,15 @@ from services import (
 )
 from services.ai_client import ai_error_payload, is_ai_error_response
 from services.prompt_builder import build_messages_for_chat_v2, get_ai_language
-from services.memory_store import atomic_write_json, load_json_object, memory_file_lock
-from services.read_state import mark_conversations_read, remove_read_state
+from services.memory_editor import EditConflict, save_memory_edits
+from core.json_storage import StorageWriteError
+from services import chat_generation
+from contextlib import closing
+import errno
+from services.character_state import character_state_lock, remember_state_files, state_batch
+from functools import wraps
+from services.memory_store import MemoryStoreBusy, MemoryStoreError, atomic_write_json, load_json_object, memory_file_lock
+from services.read_state import chat_poll_header, mark_conversations_read, remove_read_state
 from services.schedule import ScheduleValidationError, normalize_schedule_data
 from services.persona_locks import PersonaLockError, validate_persona_locks
 from services.image_tags import split_message_bubbles
@@ -78,13 +89,13 @@ TRANSFER_RESOLVED_KINDS = {
     "return": ("退回转账", "已退回转账", "returned"),
 }
 TRANSFER_TAG_RE = re.compile(
-    r"\[(?P<kind>转账|已领取转账|已退回转账):(?P<body>[^\]\r\n]+)\]"
+    r"\[(?P<kind>转账|已领取转账|已退回转账|TRANSFER|TRANSFER_ACCEPTED|TRANSFER_RETURNED):(?P<body>[^\]\r\n]+)\]"
 )
 TRANSFER_DECISION_RE = re.compile(
-    r"^\[(?P<kind>领取转账|退回转账):(?P<amount>[^\]\r\n|]+)\]$"
+    r"^\[(?P<kind>领取转账|退回转账|TRANSFER_ACCEPT|TRANSFER_RETURN):(?P<amount>[^\]\r\n|]+)\]$"
 )
 ASSISTANT_TRANSFER_DECISION_RE = re.compile(
-    r"\[(?P<kind>领取转账|退回转账):(?P<amount>[^\]\r\n|]+)\]"
+    r"\[(?P<kind>领取转账|退回转账|TRANSFER_ACCEPT|TRANSFER_RETURN):(?P<amount>[^\]\r\n|]+)\]"
 )
 
 
@@ -133,7 +144,7 @@ def parse_transfer_tag(content):
     if len(note) > 80 or any(token in note for token in ("[", "]", "|", "/", "\n", "\r")):
         raise TransferActionError("转账备注格式无效")
     return {
-        "kind": match.group("kind"),
+        "kind": {"TRANSFER": "转账", "TRANSFER_ACCEPTED": "已领取转账", "TRANSFER_RETURNED": "已退回转账"}.get(match.group("kind"), match.group("kind")),
         "amount": amount,
         "note": note,
         "start": match.start(),
@@ -147,10 +158,12 @@ def apply_transfer_action(
     """Resolve an incoming transfer and return the canonical user-visible tag."""
     action = str(payload.get("transfer_action") or "").strip().lower()
     source_id = payload.get("transfer_source_id")
-    decision_match = TRANSFER_DECISION_RE.fullmatch(str(user_message or "").strip())
+    message_text = str(user_message or "").strip()
+    decisions = list(ASSISTANT_TRANSFER_DECISION_RE.finditer(message_text))
+    decision_match = decisions[0] if len(decisions) == 1 else None
 
     if not action and source_id in (None, ""):
-        if decision_match:
+        if decisions:
             raise TransferActionError("请点击转账卡片领取或退回")
         return user_message, None
     if action not in TRANSFER_RESOLVED_KINDS or source_id in (None, ""):
@@ -163,7 +176,7 @@ def apply_transfer_action(
         raise TransferActionError("转账操作格式无效")
 
     decision_kind, resolved_kind, status = TRANSFER_RESOLVED_KINDS[action]
-    if decision_match.group("kind") != decision_kind:
+    if canonicalize_message_tags("[" + decision_match.group("kind") + ":") != canonicalize_message_tags("[" + decision_kind + ":"):
         raise TransferActionError("转账操作与标签不一致")
 
     cursor.execute("SELECT role, content FROM messages WHERE id = ?", (source_id,))
@@ -194,10 +207,14 @@ def apply_transfer_action(
     if transfer["note"]:
         replacement += f'|{transfer["note"]}'
     replacement += "]"
+    replacement = canonicalize_message_tags(replacement)
     updated_content = source[1][:transfer["start"]] + replacement + source[1][transfer["end"]:]
     cursor.execute("UPDATE messages SET content = ? WHERE id = ?", (updated_content, source_id))
 
-    canonical_user_message = f'[{decision_kind}:{transfer["amount"]}]'
+    canonical_decision = canonicalize_message_tags(f'[{decision_kind}:{transfer["amount"]}]')
+    canonical_user_message = canonicalize_message_tags(
+        message_text[:decision_match.start()] + canonical_decision + message_text[decision_match.end():]
+    )
     return canonical_user_message, {
         "source_id": source_id,
         "status": status,
@@ -241,13 +258,14 @@ def apply_assistant_transfer_decision(cursor, assistant_message):
     if transfer is None:
         return assistant_message, None
 
-    action = "accept" if decision.group("kind") == "领取转账" else "return"
+    action = "accept" if decision.group("kind") in {"领取转账", "TRANSFER_ACCEPT"} else "return"
     decision_kind, resolved_kind, status = TRANSFER_RESOLVED_KINDS[action]
 
     source_replacement = f'[{resolved_kind}:{transfer["amount"]}'
     if transfer["note"]:
         source_replacement += f'|{transfer["note"]}'
     source_replacement += "]"
+    source_replacement = canonicalize_message_tags(source_replacement)
     updated_source = (
         source_content[:transfer["start"]]
         + source_replacement
@@ -258,7 +276,7 @@ def apply_assistant_transfer_decision(cursor, assistant_message):
         (updated_source, source_id),
     )
 
-    canonical_decision = f'[{decision_kind}:{transfer["amount"]}]'
+    canonical_decision = canonicalize_message_tags(f'[{decision_kind}:{transfer["amount"]}]')
     updated_assistant = text[:decision.start()] + canonical_decision + text[decision.end():]
     return updated_assistant, {
         "source_id": source_id,
@@ -389,6 +407,17 @@ def _resolve_reverse_relationship_graph(char_id, raw, all_chars):
     return resolved
 
 
+def _with_relationship_lock(func):
+    @wraps(func)
+    def locked(*args, **kwargs):
+        uid = get_current_user_id()
+        if not uid:
+            return func(*args, **kwargs)
+        with character_state_lock(_get_characters_config_file(user_id=uid)):
+            return func(*args, **kwargs)
+    return locked
+
+
 def _read_json_object(path):
     if not os.path.exists(path):
         return {}
@@ -400,18 +429,7 @@ def _read_json_object(path):
 
 
 def _write_json_atomic(path, value):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(dir=os.path.dirname(path), text=True)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(value, f, ensure_ascii=False, indent=2)
-        os.replace(temp_path, path)
-    except Exception:
-        try:
-            os.remove(temp_path)
-        except OSError:
-            pass
-        raise
+    atomic_write_json(path, value)
 
 
 def _reverse_response_value(source_cid, relation, all_chars):
@@ -542,13 +560,34 @@ def get_history(char_id):
     target_id = request.args.get('target_id', type=int)
     before_id = request.args.get('before_id', type=int)
     after_id = request.args.get('after_id', type=int)
+    target_date = request.args.get('target_date')
+    date_bounds = None
+    if target_date is not None:
+        from services.chat_history import history_date_bounds, find_date_message_id
+        from core.time_utils import get_user_timezone
+        from core.utils import _load_user_settings
+        if any(key in request.args for key in ('target_id', 'before_id', 'after_id')):
+            return jsonify({"error": "conflicting_history_target"}), 400
+        try:
+            date_bounds = history_date_bounds(target_date, get_user_timezone(_load_user_settings()))
+        except ValueError:
+            return jsonify({"error": "invalid_target_date"}), 400
 
     db_path, _ = get_paths(char_id, user_id=user_id)
+    extra = {}
+    header_mode = request.args.get('header')
+    if header_mode in ('1', 'only'):
+        extra['header'] = chat_poll_header(user_id, _get_read_status_file(), current=('chat', char_id))
+        if header_mode == 'only':
+            return jsonify(extra)
     if not os.path.exists(db_path): init_char_db(char_id)
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+
+    if date_bounds is not None:
+        target_id = find_date_message_id(cursor, date_bounds)
 
     messages = []
 
@@ -575,31 +614,37 @@ def get_history(char_id):
         after_msgs = [dict(row) for row in cursor.fetchall()]
         messages = before_msgs + target_msgs + after_msgs
 
+    # A date without messages must not fall back to the latest conversation.
+    elif date_bounds is not None:
+        messages = []
+
     # C. 默认加载
     else:
         cursor.execute("SELECT id, role, content, timestamp FROM messages ORDER BY id DESC LIMIT ?", (limit,))
         messages = [dict(row) for row in cursor.fetchall()][::-1]
 
     # 将 [表情]名称 解析为 [表情]path（搜索含该名称的表情→随机选一个地址）并写回 DB，刷新后不变，打开编辑时看到的也是改好的 path
-    for m in messages:
-        new_content = _sticker_content_from_ai(m["content"])
-        if new_content != m["content"]:
-            cursor.execute("UPDATE messages SET content = ? WHERE id = ?", (new_content, m["id"]))
-            m["content"] = new_content
-    conn.commit()
 
-    cursor.execute("SELECT COUNT(id) FROM messages")
-    total_messages = cursor.fetchone()[0]
+    # Separate aggregates let SQLite use its fast count and primary-key endpoints.
+    cursor.execute(
+        "SELECT (SELECT COUNT(*) FROM messages), "
+        "(SELECT MIN(id) FROM messages), (SELECT MAX(id) FROM messages)"
+    )
+    total_messages, first_id, last_id = cursor.fetchone()
     conn.close()
 
-    # 日语注音处理（不写回DB）
-    if get_ai_language(char_id, user_id=user_id) == "ja":
-        for m in messages:
-            m["content"] = _add_furigana_to_japanese(m["content"])
+    # 用户和角色消息使用同一显示策略；注音不写回 DB。
+    for m in messages:
+        m["raw_content"] = m["content"]
+        m["content"] = _add_furigana_to_japanese(m["content"])
 
     return jsonify({
+        **extra,
         "messages": messages,
-        "total": total_messages
+        "total": total_messages,
+        "target_id": target_id,
+        "has_before": bool(messages and first_id < messages[0]["id"]),
+        "has_after": bool(messages and last_id > messages[-1]["id"]),
     })
 
 
@@ -610,32 +655,38 @@ def create_user_message(char_id):
 
     user_id = get_current_user_id()
     data = request.json or {}
-    user_msg = str(data.get("message", "")).strip()
+    user_msg = canonicalize_message_tags(str(data.get("message", "")).strip())
     if not user_msg:
         return jsonify({"error": "empty message"}), 400
-    try:
-        validate_voice_message_for_scope(
-            user_id, user_msg, scope_type="chat", scope_id=char_id
-        )
-    except VoiceMessageError as exc:
-        return jsonify({"error": "voice_message_invalid", "message": str(exc)}), 400
-
     db_path, _ = get_paths(char_id, user_id=user_id)
     if not os.path.exists(db_path):
         init_char_db(char_id)
 
     user_ts = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
-    conn = sqlite3.connect(db_path)
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
-            ("user", user_msg, user_ts),
-        )
-        user_msg_id = cursor.lastrowid
-        conn.commit()
-    finally:
-        conn.close()
+    request_id = data.get("request_id")
+    if request_id is not None and (not isinstance(request_id, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{16,80}", request_id)):
+        return jsonify(error="invalid request_id"), 400
+    with closing(chat_generation.connect(db_path)) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        saved = conn.execute(
+            "SELECT m.id, m.content, m.timestamp FROM delivery.receipts r LEFT JOIN messages m "
+            "ON m.id=r.message_id AND m.role='user' WHERE r.request_id=?", (request_id,)
+        ).fetchone() if request_id else None
+        try:
+            validate_voice_message_for_scope(user_id, user_msg, scope_type="chat", scope_id=char_id,
+                                             message_id=saved[0] if saved else None)
+        except VoiceMessageError as exc:
+            return jsonify(error="voice_message_invalid", message=str(exc)), 400
+        if saved:
+            user_msg_id, content, user_ts = saved
+            if content != user_msg:
+                return jsonify(error="message request conflict"), 409
+        else:
+            user_msg_id = conn.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)",
+                                       ("user", user_msg, user_ts)).lastrowid
+            if request_id:
+                conn.execute("INSERT INTO delivery.receipts(message_id, request_id) VALUES (?,?)",
+                             (user_msg_id, request_id))
 
     attach_voice_message(
         user_id,
@@ -660,7 +711,7 @@ def chat(char_id):
 
     # 数据准备
     data = request.json or {}
-    user_msg_raw = data.get("message", "").strip()
+    user_msg_raw = canonicalize_message_tags(data.get("message", "").strip())
     if not user_msg_raw:
         return jsonify({"error": "empty message"}), 400
     try:
@@ -898,7 +949,7 @@ def chat(char_id):
 
         reply_bubbles = split_message_bubbles(cleaned_reply_text)
 
-        if get_ai_language(char_id, user_id=user_id) == "ja":
+        if True:  # Display policy is based on UI preference and actual text.
             reply_bubbles = [_add_furigana_to_japanese(b) for b in reply_bubbles]
 
         # 【重点】把 ID 返回给前端；记忆同步失败时附带提示
@@ -930,7 +981,7 @@ def chat(char_id):
 
 @chat_bp.route("/api/<char_id>/chat_v2", methods=["POST"])
 def chat_v2(char_id):
-    from app import init_char_db, sync_memory_before_single_chat, _memory_context_changed, process_ai_media_tags, _execute_directive, _strip_consecutive_tickle, _sticker_content_from_ai
+    from app import init_char_db
     """【测试版】使用新的时间线聚合System Prompt v2版本的聊天接口。"""
     user_id = get_current_user_id()
     # 1. 路径准备
@@ -940,7 +991,7 @@ def chat_v2(char_id):
 
     # 2. 获取用户输入
     data = request.json or {}
-    user_msg_raw = data.get("message", "").strip()
+    user_msg_raw = canonicalize_message_tags(data.get("message", "").strip())
     if not user_msg_raw:
         return jsonify({"error": "empty message"}), 400
     try:
@@ -1018,34 +1069,65 @@ def chat_v2(char_id):
             message_id=user_msg_id,
         )
 
+    # This lock is per conversation; no SQLite transaction spans a model call.
+    try:
+        with character_state_lock(str(db_path) + ".generation", timeout=0):
+            prior = chat_generation.begin_generation(db_path, user_msg_id, data.get("retry_generation") is True)
+            if prior:
+                state, assistant_id = prior
+                if state == "done":
+                    return jsonify(id=assistant_id, user_id=user_msg_id, replies=[], replayed=True)
+                uncertain = state == "started"
+                return jsonify(error="generation_unconfirmed" if uncertain else "generation_failed",
+                               user_id=user_msg_id, retryable=not uncertain,
+                               message="上次生成结果未确认，请查看聊天记录。" if uncertain else "上次生成失败，可手动重试。"), 409
+            return _generate_saved_reply(char_id, user_id, db_path, user_msg_id, user_msg_raw,
+                                         transfer_update, is_deep_sleep)
+    except StorageWriteError as exc:
+        if exc.errno != errno.EBUSY:
+            raise
+        return jsonify(error="generation_busy", message="角色正在回复，请稍后重试。", retryable=True,
+                       user_id=user_msg_id), 409
+
+
+def _generate_saved_reply(char_id, user_id, db_path, user_msg_id, user_msg_raw, transfer_update, is_deep_sleep):
+    from app import sync_memory_before_single_chat, _memory_context_changed, process_ai_media_tags, _execute_directive, _strip_consecutive_tickle, _sticker_content_from_ai
+    def record(state):
+        with closing(chat_generation.connect(db_path)) as db, db:
+            chat_generation.finish(db, user_msg_id, state)
+
     # 【Agent】若该用户的浏览器 Agent 正在等待用户回复（[ASK]/[WAIT] 暂停中），
     # 则把本条消息作为 Agent 回复写入 IPC 唤醒它，由 Agent 重新截取页面快照后续跑，
     # 而不是走普通聊天。这样即便前端状态轮询有延迟/不同步也能可靠转交。
     # （排除 Agent 自己发来的 [WEB_CRUISE] 快照消息，那类调用 Agent 处于 active 状态。）
     if "[WEB_CRUISE:" not in user_msg_raw:
         try:
-            state_path = _get_agent_state_path(user_id)
-            if os.path.exists(state_path):
-                with open(state_path, "r", encoding="utf-8") as f:
-                    _agent_state = json.load(f)
-                if _agent_state.get("running") and _agent_state.get("status") == "waiting_for_user":
-                    _ensure_agent_user_dir(user_id)
-                    with open(_get_agent_input_path(user_id), "w", encoding="utf-8") as f:
-                        json.dump({"command": "reply", "message": user_msg_raw}, f, ensure_ascii=False)
-                    print(f"--- [Chat v2] Agent 等待中，已将回复转交 Agent (user={user_id}) ---")
-                    return jsonify({
-                        "replies": [],
-                        "id": None,
-                        "user_id": user_msg_id,
-                        "agent_forwarded": True,
-                        "transfer_update": transfer_update,
-                    })
+            _agent_state = _live_agent_state(user_id)
+            if (_agent_state.get('running') and _agent_state.get('char_id') == char_id
+                    and _agent_state.get('status') == 'waiting_for_user'):
+                from core.web_agent import atomic_json
+                atomic_json(_get_agent_input_path(user_id), {'command': 'reply', 'message': user_msg_raw})
+                print(f"--- [Chat v2] Agent 等待中，已将回复转交 Agent (user={user_id}) ---")
+                forwarded = True
+            else:
+                forwarded = False
         except Exception as e:
             print(f"[Chat v2] Agent 转交检查失败: {e}")
+            forwarded = False
+        if forwarded:
+            record("done")
+            return jsonify({
+                    "replies": [],
+                    "id": None,
+                    "user_id": user_msg_id,
+                    "agent_forwarded": True,
+                    "transfer_update": transfer_update,
+                })
 
     # 5. 检查深睡眠
     if should_suppress_reply_for_deep_sleep(is_deep_sleep, user_msg_raw):
         print(f"--- [Deep Sleep v2] {char_id} 正在熟睡，不回复消息 ---")
+        record("done")
         return jsonify({
             "replies": [],
             "id": None,
@@ -1141,6 +1223,7 @@ def chat_v2(char_id):
 
         cb_resp = _circuit_breaker_json_response(user_msg_id=user_msg_id, model=current_model)
         if cb_resp:
+            record("failed")
             return cb_resp
 
         error_resp = _ai_error_json_response(
@@ -1149,6 +1232,7 @@ def chat_v2(char_id):
             model=current_model,
         )
         if error_resp:
+            record("failed")
             return error_resp
 
         # 清理回复
@@ -1190,7 +1274,7 @@ def chat_v2(char_id):
         cleaned_reply = _sticker_content_from_ai(cleaned_reply)
 
         # 存入 AI 回复；角色领取/退回时，处理金额与币种一致的最新待处理用户转账。
-        conn = sqlite3.connect(db_path)
+        conn = chat_generation.connect(db_path)
         cursor = conn.cursor()
         try:
             conn.execute("BEGIN IMMEDIATE")
@@ -1201,6 +1285,7 @@ def chat_v2(char_id):
             ai_ts = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
             cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", ("assistant", cleaned_reply, ai_ts))
             ai_msg_id = cursor.lastrowid
+            chat_generation.finish(conn, user_msg_id, "done", ai_msg_id)
             conn.commit()
         except Exception:
             conn.rollback()
@@ -1215,7 +1300,7 @@ def chat_v2(char_id):
         )
 
         reply_bubbles = split_message_bubbles(cleaned_reply)
-        if get_ai_language(char_id, user_id=user_id) == "ja" and "[WEB_CRUISE:" not in user_msg_raw:
+        if "[WEB_CRUISE:" not in user_msg_raw:
             reply_bubbles = [_add_furigana_to_japanese(b) for b in reply_bubbles]
 
         resp = {
@@ -1458,7 +1543,7 @@ def regenerate_message(char_id):
 
         reply_bubbles = split_message_bubbles(cleaned_reply_text)
 
-        if get_ai_language(char_id, user_id=user_id) == "ja":
+        if True:  # Display policy is based on UI preference and actual text.
             reply_bubbles = [_add_furigana_to_japanese(b) for b in reply_bubbles]
 
         resp_data = {
@@ -1684,7 +1769,7 @@ def save_chat_background(char_id):
 def serve_char_background(char_id, filename):
     """提供聊天背景图，重定向到 COS"""
     user_id = get_current_user_id()
-    bucket = os.getenv('COS_BUCKET')
+    bucket = None if LOCAL_TEST else os.getenv('COS_BUCKET')
     region = os.getenv('COS_REGION')
 
     if user_id and bucket and region:
@@ -1702,7 +1787,7 @@ def serve_char_background(char_id, filename):
 
 @chat_bp.route("/api/<char_id>/memory/snapshot", methods=["POST"])
 def snapshot_memory(char_id):  # <--- 1. 加上 char_id 参数
-    now = beijing_now()
+    now = memory_now()
     today_str = now.strftime('%Y-%m-%d')
 
     total_new_count = 0
@@ -1764,6 +1849,8 @@ def regenerate_medium_memory(char_id):
     target_date = request.json.get("date")
     if not target_date: return jsonify({"error": "日期不能为空"}), 400
     result = generate_medium_memory_for_date(char_id, target_date)
+    if result.status == "conflict":
+        return jsonify({"status": result.status, "error": result.message}), 409
     if result.status != "success":
         code = 400 if result.status == "no_messages" else (503 if result.status == "busy" else 502)
         return jsonify({
@@ -1787,6 +1874,8 @@ def regenerate_long_memory(char_id):
     if result.status != "success":
         if result.status in {"invalid_request", "no_messages"}:
             code = 400
+        elif result.status == "conflict":
+            code = 409
         elif result.status == "busy":
             code = 503
         else:
@@ -1807,8 +1896,9 @@ def force_maintenance(char_id):
 
 
 @chat_bp.route("/api/<char_id>/prompts_data")
+@_with_relationship_lock
 def get_prompts_data(char_id):
-    data = {}
+    data = {"_editor_user": str(get_current_user_id())}
     files = {
         "base": "1_base_persona.json",
         "relation": "2_relationship.json",
@@ -1818,6 +1908,9 @@ def get_prompts_data(char_id):
         "schedule": "7_schedule.json"
     }
 
+    # Explicit legacy template initialization; ordinary path lookup never copies.
+    from core.user_resources import initialize_character_template
+    initialize_character_template(char_id, get_current_user_id())
     # 1. 使用 get_paths 获取 per-user 路径（支持多用户）
     _, prompts_dir = get_paths(char_id)
 
@@ -1829,7 +1922,7 @@ def get_prompts_data(char_id):
         print(f"   ❌ 文件夹不存在！请检查路径拼写或是否移动了文件")
         # 这种情况下返回错误信息给前端，方便您在页面上看到
         for key in files:
-            data[key] = f"Error: 找不到文件夹 {prompts_dir}"
+            data[key] = None if key in {"short", "medium", "long"} else "（文件不存在或为空）"
         return jsonify(data)
 
     # 3. 读取文件
@@ -1839,6 +1932,18 @@ def get_prompts_data(char_id):
         found_path = os.path.join(prompts_dir, filename)
         if not os.path.exists(found_path):
             found_path = None
+
+        if key in {"short", "medium", "long"}:
+            try:
+                if key == "short":
+                    short_path = os.path.join(prompts_dir, filename)
+                    with memory_file_lock(short_path, timeout=2):
+                        data[key] = load_calendar_memory(short_path, memory_timezone())
+                else:
+                    data[key] = load_json_object(os.path.join(prompts_dir, filename))
+            except (MemoryStoreError, OSError, TypeError, ValueError):
+                data[key] = None
+            continue
 
         if found_path:
             try:
@@ -1872,6 +1977,7 @@ def get_prompts_data(char_id):
 
 
 @chat_bp.route("/api/<char_id>/relationship_reverse")
+@_with_relationship_lock
 def get_relationship_reverse(char_id):
     """
     反向模式：遍历所有其他角色，查看他们对 char_id 的关系定义
@@ -1986,6 +2092,7 @@ def ai_generate_relationship_reverse(char_id):
                 "remark": info.get("remark") or "",
                 "persona": _load_base_persona_excerpt(source_cid, user_id),
                 "current_view": current_reverse.get(source_cid, {}),
+                "output_language": get_ai_language(source_cid, user_id=user_id),
             })
 
         prompt = (
@@ -1994,6 +2101,7 @@ def ai_generate_relationship_reverse(char_id):
             "不要机械复制或反转目标角色对他们的看法；必须符合每个来源角色自己的人设。\n"
             "只允许输出下列来源角色，不要虚构新角色。JSON 顶层键必须使用来源角色 ID。\n"
             "每项格式必须为 {\"role\":字符串,\"score\":0到5数字,\"description\":字符串}。\n"
+            "每条关系的role和description必须使用该来源角色资料中的output_language，不使用目标角色语言。\n"
             "只输出纯 JSON，不要代码块或解释。\n\n"
             f"目标角色人设：\n{_load_base_persona_excerpt(char_id, user_id)}\n\n"
             f"来源角色资料：\n{json.dumps(sources, ensure_ascii=False)}"
@@ -2020,6 +2128,7 @@ def ai_generate_relationship_reverse(char_id):
 
 
 @chat_bp.route("/api/<char_id>/relationships/save_all", methods=["POST"])
+@_with_relationship_lock
 def save_all_relationship_views(char_id):
     """Atomically save the current character graph and reverse entries in source files."""
     user_id = get_current_user_id()
@@ -2048,6 +2157,13 @@ def save_all_relationship_views(char_id):
         updates = {}
         _, target_prompts = get_paths(char_id, user_id=user_id)
         target_file = os.path.join(target_prompts, "2_relationship.json")
+        baseline = payload.get("baseline")
+        conflict = {"error": "关系图谱已被其他操作修改，请保留草稿并刷新后核对。"}
+        if baseline is not None:
+            if not isinstance(baseline, dict) or not isinstance(baseline.get("reverse"), dict):
+                raise ValueError("无效的关系草稿版本")
+            if normalize_relationship_graph(baseline.get("normal")) != normalize_relationship_graph(_read_json_object(target_file)):
+                return jsonify(conflict), 409
         updates[target_file] = normal
 
         target_info = all_chars[char_id] or {}
@@ -2057,32 +2173,23 @@ def save_all_relationship_views(char_id):
             source_file = os.path.join(source_prompts, "2_relationship.json")
             source_graph = dict(_read_json_object(source_file))
             found_key = _find_relationship_key(source_graph, char_id, target_info)
+            if baseline is not None:
+                previous = baseline["reverse"].get(source_cid)
+                current = _normalize_single_relationship(source_graph[found_key], source_cid) if found_key else None
+                if previous is not None:
+                    previous = _normalize_single_relationship(previous, source_cid)
+                if current != previous:
+                    return jsonify(conflict), 409
             if source_cid in reverse:
                 source_graph[found_key or target_name] = reverse[source_cid]
             elif found_key:
                 del source_graph[found_key]
             updates[source_file] = source_graph
 
-        backups = {
-            path: _read_json_object(path) if os.path.exists(path) else None
-            for path in updates
-        }
-        written = []
-        try:
+        with state_batch(_get_characters_config_file(user_id=user_id)):
+            remember_state_files(updates)
             for path, value in updates.items():
                 _write_json_atomic(path, value)
-                written.append(path)
-        except Exception:
-            for path in reversed(written):
-                backup = backups[path]
-                if backup is None:
-                    try:
-                        os.remove(path)
-                    except OSError:
-                        pass
-                else:
-                    _write_json_atomic(path, backup)
-            raise
 
         reverse_response = {
             source_cid: _reverse_response_value(source_cid, relation, all_chars)
@@ -2101,6 +2208,7 @@ def save_all_relationship_views(char_id):
 
 
 @chat_bp.route("/api/<char_id>/save_relationship_reverse", methods=["POST"])
+@_with_relationship_lock
 def save_relationship_reverse(char_id):
     """
     保存反向关系：其实就是去修改“对方”的角色关系文件
@@ -2159,10 +2267,18 @@ def save_relationship_reverse(char_id):
 
 
 
+@chat_bp.route("/api/<char_id>/memory/edits", methods=["POST"])
 @chat_bp.route("/api/<char_id>/save_prompt", methods=["POST"])
 def save_prompt_file(char_id):
-    payload = request.json or {}
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get("key"), str):
+        return jsonify(status="error", code="invalid_edit"), 400
     key = payload.get("key")
+    if 'changes' in payload or request.path.endswith('/memory/edits'):
+        if key not in ('short', 'medium', 'long') or 'changes' not in payload:
+            return jsonify(status="error", code="invalid_edit"), 400
+        if payload.get("owner") != str(get_current_user_id()):
+            return jsonify(status="error", code="account_changed"), 403
     new_content = payload.get("content")
 
     # 获取该角色的 Prompt 目录
@@ -2187,6 +2303,10 @@ def save_prompt_file(char_id):
     try:
         if key == "relation":
             new_content = normalize_relationship_graph(new_content)
+            with character_state_lock(_get_characters_config_file(user_id=get_current_user_id())):
+                _, owned_prompts = get_paths(char_id)
+                _write_json_atomic(os.path.join(owned_prompts, filename), new_content)
+            return jsonify({"status": "success"})
         elif key == "schedule":
             new_content = normalize_schedule_data(new_content)
 
@@ -2205,74 +2325,25 @@ def save_prompt_file(char_id):
                 atomic_write_json(json_path, {"system_prompt": persona_text})
             return jsonify({"status": "success"})
 
-        # --- 【核心新增】如果是保存短期记忆，自动校准 last_id ---
-        if key == "short" and isinstance(new_content, dict):
-            # 必须使用当前用户、当前角色自己的聊天数据库。旧代码连接了
-            # 项目根目录的 chat_history.db，会读到错误角色甚至直接报错。
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-
-            for date_str, day_data in new_content.items():
-                # 1. 获取用户编辑后的事件列表
-                events = []
-                if isinstance(day_data, dict):
-                    events = day_data.get("events", [])
-                elif isinstance(day_data, list):
-                    events = day_data # 兼容旧格式
-
-                # 2. 如果列表被清空了，last_id 直接重置为 0 (全量重读)
-                if not events:
-                    if isinstance(day_data, dict): day_data['last_id'] = 0
-                    else: new_content[date_str] = {"events": [], "last_id": 0}
-                    print(f"[{date_str}] 事件被清空，进度重置为 0")
-                    continue
-
-                # 3. 如果还有事件，找到【最后一条事件】的时间
-                last_event_time = events[-1].get('time', '00:00')
-
-                # 4. 去数据库查这个时间点对应的最后一条消息 ID
-                # 构造查询时间：精确到当天的这一分钟的最后一秒
-                query_ts = f"{date_str} {last_event_time}:59"
-
-                # 查找 <= 这个时间的最大 ID
-                day_start = f"{date_str} 00:00:00"
-                cursor.execute(
-                    "SELECT MAX(id) FROM messages WHERE timestamp >= ? AND timestamp <= ?",
-                    (day_start, query_ts),
-                )
-                res = cursor.fetchone()
-
-                if res and res[0]:
-                    calibrated_id = res[0]
-                    # 更新 last_id
-                    if isinstance(day_data, dict):
-                        day_data['last_id'] = calibrated_id
-                    else:
-                        new_content[date_str] = {"events": events, "last_id": calibrated_id}
-                    print(f"[{date_str}] 智能回滚: 锚定时间 {last_event_time} -> 重置 ID 为 {calibrated_id}")
-                else:
-                    # 查不到 ID (可能时间填错了)，保险起见不改，或者设为0
-                    pass
-
-            conn.close()
-        # ----------------------------------------------------
-
-        if key in {"short", "schedule"} and isinstance(new_content, dict):
-            with memory_file_lock(path):
-                atomic_write_json(path, new_content)
-        else:
-            with open(path, "w", encoding="utf-8") as f:
-                if filename.endswith(".json") and isinstance(new_content, (dict, list)):
-                    json.dump(new_content, f, ensure_ascii=False, indent=2)
-                else:
-                    f.write(str(new_content))
+        if key in {"short", "medium", "long"}:
+            applied = save_memory_edits(key, path, db_path, payload)
+            return jsonify(status="success", applied=applied) if "changes" in payload else jsonify(status="success")
+        with memory_file_lock(path):
+            atomic_write_json(path, new_content)
         return jsonify({"status": "success"})
     except ScheduleValidationError as e:
         return jsonify({"status": "error", "message": str(e)}), 400
     except PersonaLockError as e:
         return jsonify({"status": "error", "code": e.code, "message": str(e)}), 400
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+    except EditConflict:
+        return jsonify(status="error", code="memory_conflict"), 409
+    except MemoryStoreBusy:
+        return jsonify(status="error", code="memory_busy"), 503, {"Retry-After": "2"}
+    except (MemoryStoreError, OSError, sqlite3.Error):
+        return jsonify(status="error", code="storage_write_failed"), 503
+    except (TypeError, ValueError):
+        return jsonify(status="error", code="invalid_edit"), 400
+
 
 
 @chat_bp.route("/api/<char_id>/search", methods=["POST"])
@@ -2316,13 +2387,14 @@ def get_char_details(char_id):
         return jsonify({})
 
     try:
-        with open(cfg_file, "r", encoding="utf-8") as f:
-            all_config = json.load(f)
+        with character_state_lock(cfg_file):
+            with open(cfg_file, "r", encoding="utf-8") as f:
+                all_config = json.load(f)
 
-        char_info = all_config.get(char_id)
-        if char_info:
-            if ensure_character_time_defaults(char_info, existing_character=True):
+            char_info = all_config.get(char_id)
+            if char_info and ensure_character_time_defaults(char_info, existing_character=True):
                 safe_save_json(cfg_file, all_config)
+        if char_info:
             # 【新增】定义默认配置字典
             defaults = {
                 "emotion": 1,
@@ -2356,6 +2428,8 @@ def get_char_details(char_id):
         else:
             return jsonify({"error": "Character not found"}), 404
 
+    except StorageWriteError:
+        raise
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -2368,8 +2442,10 @@ def update_char_meta(char_id):
         return jsonify({"error": "Config file not found"}), 404
 
     try:
-        with memory_file_lock(CONFIG_FILE):
+        with character_state_lock(CONFIG_FILE):
             return _update_char_meta_locked(char_id, CONFIG_FILE)
+    except StorageWriteError:
+        raise
     except Exception as e:
         print(f"Update Meta Error: {e}")
         return jsonify({"error": str(e)}), 500
@@ -2399,7 +2475,13 @@ def _update_char_meta_locked(char_id, CONFIG_FILE):
 
         # 允许改为空字符串，所以用 is not None 判断
         if new_remark is not None:
-            all_config[char_id]["remark"] = new_remark.strip()
+            previous_name = info.get("remark") or info.get("name") or char_id
+            if not isinstance(new_remark, str):
+                return jsonify(error=CHARACTER_NAME_HINT), 400
+            new_remark = new_remark.strip()
+            if new_remark != previous_name.strip() and not name_fits(new_remark, CHARACTER_NAME_LIMIT):
+                return jsonify(error=CHARACTER_NAME_HINT), 400
+            info["remark"] = new_remark
 
         if new_avatar is not None:
             all_config[char_id]["avatar"] = new_avatar.strip()
@@ -2410,17 +2492,9 @@ def _update_char_meta_locked(char_id, CONFIG_FILE):
 
         # 【新增】更新语言设置
         if new_language is not None:
-            info["language"] = new_language.strip()
-            if info.get("timezone_source") in {
-                "system_default",
-                "language_default",
-            }:
-                info["timezone"] = default_character_timezone(new_language)
-                info["timezone_source"] = (
-                    "language_default"
-                    if info["timezone"] == "Asia/Tokyo"
-                    else "system_default"
-                )
+            from core.languages import normalize_language
+            try: info["language"] = normalize_language(new_language)
+            except ValueError: return jsonify(error="Invalid language"), 400
 
         if data.get("timezone") is not None:
             timezone_name = str(data.get("timezone") or "").strip()
@@ -2533,6 +2607,8 @@ def _update_char_meta_locked(char_id, CONFIG_FILE):
             ),
         })
 
+    except StorageWriteError:
+        raise
     except Exception as e:
         print(f"Update Meta Error: {e}")
         return jsonify({"error": str(e)}), 500
@@ -2597,18 +2673,19 @@ def upload_char_avatar(char_id):
 
             new_url = f"{cos_url}?t={timestamp}"
 
-            # 3. 更新 characters.json 里的路径（per-user）
+            # COS upload finishes before the catalog is locked.
             cfg_file = _get_characters_config_file()
-            with open(cfg_file, "r", encoding="utf-8") as f:
-                all_config = json.load(f)
-
-            all_config[char_id]["avatar"] = new_url
-
-            with open(cfg_file, "w", encoding="utf-8") as f:
-                json.dump(all_config, f, ensure_ascii=False, indent=2)
+            with character_state_lock(cfg_file):
+                all_config = load_json_object(cfg_file, missing_ok=False)
+                if char_id not in all_config:
+                    return jsonify(error="Character not found"), 404
+                all_config[char_id]["avatar"] = new_url
+                atomic_write_json(cfg_file, all_config)
 
             return jsonify({"status": "success", "url": new_url})
 
+        except StorageWriteError:
+            raise
         except Exception as e:
             print(f"Upload Error: {e}")
             return jsonify({"error": str(e)}), 500
@@ -2653,6 +2730,11 @@ def delete_character_api(char_id):
     if not os.path.exists(config_file):
         return jsonify({"error": "Config not found"}), 404
 
+    with character_state_lock(config_file):
+        return _delete_character_locked(char_id, user_id, config_file)
+
+
+def _delete_character_locked(char_id, user_id, config_file):
     def load_json(path, default):
         if not os.path.exists(path):
             return default
@@ -2680,6 +2762,8 @@ def delete_character_api(char_id):
         if char_id not in all_config:
             return jsonify({"error": "Character not found"}), 404
 
+        db_path, _ = get_paths(char_id, user_id=user_id)
+        char_dir = os.path.dirname(db_path)
         deleted_info = all_config[char_id]
         deleted_names = {
             char_id,
@@ -2816,8 +2900,6 @@ def delete_character_api(char_id):
                     write_json_or_raise(path, backup)
             raise
 
-        db_path, _ = get_paths(char_id, user_id=user_id)
-        char_dir = os.path.dirname(db_path)
         if os.path.exists(char_dir):
             shutil.rmtree(char_dir)
         remove_read_state(_get_read_status_file(), "chat", char_id)
@@ -2826,6 +2908,8 @@ def delete_character_api(char_id):
             delete_calls_for_character(user_id, char_id)
         return jsonify({"status": "success", "deleted": stats})
 
+    except StorageWriteError:
+        raise
     except Exception as e:
         print(f"Delete Character Error: {e}")
         return jsonify({"error": str(e)}), 500
@@ -2889,153 +2973,155 @@ def _ensure_agent_user_dir(user_id):
     return user_dir
 
 
-@chat_bp.route("/api/agent/chat", methods=["POST"])
+def _agent_owner(data=None, require_character=False):
+    """Only the authenticated account can control its browser or chat records."""
+    from flask import abort
+    uid = session.get('user_id')
+    if not isinstance(uid, int) or uid <= 0:
+        abort(401)
+    data = data or {}
+    if not hasattr(data, 'get'):
+        abort(400)
+    supplied = data.get('user_id')
+    if supplied is not None and str(supplied) != str(uid):
+        abort(403)
+    if require_character:
+        char_id = data.get('char_id')
+        if (not isinstance(char_id, str) or not re.fullmatch(r'[A-Za-z0-9_]+', char_id)
+                or char_id not in _load_relationship_characters(uid)):
+            abort(404)
+    return uid
+
+
+def _live_agent_state(uid):
+    from core.web_agent import read_json
+    state = read_json(_get_agent_state_path(uid))
+    heartbeat = read_json(os.path.join(DATA_ROOT, '.agent-runtime', 'heartbeat.json'))
+    if not state.get('running'):
+        return state or {'running': False, 'status': 'stopped'}
+    if time.time() - float(heartbeat.get('updated', 0)) > 20:
+        return {'running': False, 'status': 'interrupted', 'char_id': state.get('char_id')}
+    return state
+
+
+@chat_bp.route('/api/run_agent', methods=['POST'])
+def run_web_agent():
+    from core.web_agent import enqueue, AgentBusy, AgentUnavailable
+    from core.localization import user_language
+    from core.languages import character_language
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify(error='请求无效，请检查输入后重试。'), 400
+    uid = _agent_owner(data, require_character=True)
+    if LOCAL_TEST:
+        return jsonify(error='网页浏览服务暂不可用，请稍后重试。'), 503
+    cookie_name = current_app.config.get('SESSION_COOKIE_NAME', 'session')
+    cookie_value = request.cookies.get(cookie_name, '')
+    try:
+        enqueue(DATA_ROOT, user_id=uid, char_id=data['char_id'], url=data.get('url'),
+                cookie=f'{cookie_name}={cookie_value}' if cookie_value else '',
+                ui_language=user_language(uid), output_language=character_language(data['char_id'], uid))
+    except AgentBusy:
+        return jsonify(error='网页浏览服务正在忙，请稍后再试。'), 409
+    except AgentUnavailable:
+        return jsonify(error='网页浏览服务暂不可用，请稍后重试。'), 503
+    except ValueError:
+        return jsonify(error='请输入公开的 HTTP 或 HTTPS 网页地址。'), 400
+    return jsonify(status='sent_to_background'), 202
+
+
+@chat_bp.route('/api/agent/chat', methods=['POST'])
 def agent_chat():
-    """Agent专用AI调用 - 不存DB, 返回原始回复"""
-    data = request.json
-    if not data:
-        return jsonify({"error": "missing body"}), 400
-    messages = data.get("messages")
-    char_id = data.get("char_id", "unknown")
-    user_id = data.get("user_id")
-
-    if not messages or not isinstance(messages, list):
-        return jsonify({"error": "messages required"}), 400
-    if not user_id:
-        user_id = get_current_user_id()
-
-    set_background_user(user_id)
-
-    try:
-        route, current_model = get_model_config("chat", user_id=user_id)
-        if route == "relay":
-            reply = call_openrouter(messages, char_id=char_id, model_name=current_model, user_id=user_id)
-        else:
-            reply = call_gemini(messages, char_id=char_id, model_name=current_model, user_id=user_id)
-        return jsonify({"reply": reply, "model": current_model})
-    except Exception as e:
-        print(f"Agent Chat Error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+    # The supported runtime uses chat_v2, with persona, model routing and storage.
+    _agent_owner()
+    return jsonify(error='此接口已停用，请刷新页面后重试。'), 410
 
 
-@chat_bp.route("/api/agent/notify_user", methods=["POST"])
+def _agent_insert_message(uid, char_id, role, content):
+    db_path, _ = get_paths(char_id, user_id=uid)
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.execute('INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)',
+                              (role, canonicalize_message_tags(content), beijing_now().strftime('%Y-%m-%d %H:%M:%S')))
+        return cursor.lastrowid
+
+
+@chat_bp.route('/api/agent/notify_user', methods=['POST'])
 def agent_notify_user():
-    """Agent发送可见消息给用户 - 存入chat DB"""
-    data = request.json
-    if not data:
-        return jsonify({"error": "missing body"}), 400
-    char_id = data.get("char_id")
-    content = data.get("content", "")
-    user_id = data.get("user_id")
-
-    if not char_id:
-        return jsonify({"error": "char_id required"}), 400
-    if not user_id:
-        user_id = get_current_user_id()
-
-    set_background_user(user_id)
-
-    try:
-        db_path, _ = get_paths(char_id, user_id=user_id)
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        ai_ts = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
-        cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", ("assistant", content, ai_ts))
-        msg_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        return jsonify({"status": "ok", "id": msg_id})
-    except Exception as e:
-        print(f"Agent Notify Error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+    data = request.get_json(silent=True) or {}
+    uid = _agent_owner(data, require_character=True)
+    content = data.get('content', '')
+    if not isinstance(content, str) or not content or len(content) > 4000:
+        return jsonify(error='请求无效，请检查输入后重试。'), 400
+    return jsonify(status='ok', id=_agent_insert_message(uid, data['char_id'], 'assistant', content))
 
 
-@chat_bp.route("/api/agent/reply", methods=["POST"])
+@chat_bp.route('/api/agent/reply', methods=['POST'])
 def agent_reply():
-    """用户回复Agent的ASK/WAIT - 写入IPC文件, 同时存用户消息到DB"""
-    data = request.json
-    if not data:
-        return jsonify({"error": "missing body"}), 400
-    message = data.get("message", "")
-    user_id = data.get("user_id")
-    char_id = data.get("char_id")
-
-    if not user_id:
-        user_id = get_current_user_id()
-
-    _ensure_agent_user_dir(user_id)
-
-    input_data = {
-        "command": "reply",
-        "message": message
-    }
-
-    with open(_get_agent_input_path(user_id), "w", encoding="utf-8") as f:
-        json.dump(input_data, f, ensure_ascii=False)
-
-    if char_id and message:
-        try:
-            set_background_user(user_id)
-            db_path, _ = get_paths(char_id, user_id=user_id)
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            user_ts = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
-            cursor.execute("INSERT INTO messages (role, content, timestamp) VALUES (?, ?, ?)", ("user", message, user_ts))
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            print(f"Agent reply save user msg error: {e}")
-
-    return jsonify({"status": "ok"})
+    from core.web_agent import atomic_json
+    data = request.get_json(silent=True) or {}
+    uid = _agent_owner(data, require_character=True)
+    state = _live_agent_state(uid)
+    if not state.get('running') or state.get('char_id') != data['char_id']:
+        return jsonify(error='网页浏览已结束，请重新发起。'), 409
+    message = data.get('message', '')
+    if not isinstance(message, str) or not message.strip() or len(message) > 20000:
+        return jsonify(error='请求无效，请检查输入后重试。'), 400
+    _agent_insert_message(uid, data['char_id'], 'user', message)
+    atomic_json(_get_agent_input_path(uid), {'command': 'reply', 'message': message})
+    return jsonify(status='ok')
 
 
-@chat_bp.route("/api/agent/stop", methods=["POST"])
+@chat_bp.route('/api/agent/stop', methods=['POST'])
 def agent_stop():
-    """用户停止Agent - 写入IPC停止信号"""
-    data = request.json or {}
-    user_id = data.get("user_id") or get_current_user_id()
-
-    _ensure_agent_user_dir(user_id)
-
-    input_data = {"command": "stop", "message": ""}
-    with open(_get_agent_input_path(user_id), "w", encoding="utf-8") as f:
-        json.dump(input_data, f, ensure_ascii=False)
-
-    return jsonify({"status": "ok"})
+    from core.web_agent import atomic_json
+    uid = _agent_owner(request.get_json(silent=True) or {})
+    atomic_json(_get_agent_input_path(uid), {'command': 'stop'})
+    return jsonify(status='ok')
 
 
-@chat_bp.route("/api/agent/web_action", methods=["POST"])
+@chat_bp.route('/api/agent/web_action', methods=['POST'])
 def agent_web_action():
-    """前端检测到网页指令时通知Agent - 写入IPC文件"""
-    data = request.json or {}
-    user_id = data.get("user_id") or get_current_user_id()
-    tags = data.get("tags", [])
+    from core.web_agent import atomic_json
+    data = request.get_json(silent=True) or {}
+    uid = _agent_owner(data, require_character=True)
+    state = _live_agent_state(uid)
+    if not state.get('running') or state.get('char_id') != data['char_id']:
+        return jsonify(error='网页浏览已结束，请重新发起。'), 409
+    tags = data.get('tags', [])
+    if not isinstance(tags, list) or len(tags) > 10 or any(not isinstance(t, str) or len(t) > 4000 for t in tags):
+        return jsonify(error='请求无效，请检查输入后重试。'), 400
+    atomic_json(_get_agent_input_path(uid), {'command': 'web_action', 'tags': tags})
+    return jsonify(status='ok')
 
-    _ensure_agent_user_dir(user_id)
 
-    input_data = {"command": "web_action", "tags": tags, "source": data.get("source", "user")}
-    with open(_get_agent_input_path(user_id), "w", encoding="utf-8") as f:
-        json.dump(input_data, f, ensure_ascii=False)
-
-    return jsonify({"status": "ok"})
-
-
-@chat_bp.route("/api/agent/state", methods=["GET"])
+@chat_bp.route('/api/agent/state', methods=['GET'])
 def agent_state():
-    """查询Agent当前状态"""
-    user_id = request.args.get("user_id") or get_current_user_id()
-    state_path = _get_agent_state_path(user_id)
+    return jsonify(_live_agent_state(_agent_owner(request.args)))
 
-    if not os.path.exists(state_path):
-        return jsonify({"running": False, "status": "stopped"})
 
-    try:
-        with open(state_path, "r", encoding="utf-8") as f:
-            state = json.load(f)
-        return jsonify(state)
-    except Exception as e:
-        return jsonify({"running": False, "status": "error", "error": str(e)})
+@chat_bp.route("/api/<char_id>/relationship_prompt", methods=["POST"])
+def copy_relationship_prompt(char_id):
+    from core.generation_prompts import relationship_prompt
+    from core.languages import character_language
+    from core.localization import user_language
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify(error="请先登录"), 401
+    payload = request.get_json(silent=True) or {}
+    perspective = payload.get("perspective", "normal")
+    graph = payload.get("current_graph", {})
+    if perspective not in ("normal", "reverse") or not isinstance(graph, dict):
+        return jsonify(error="请求无效，请检查输入后重试。"), 400
+    characters = _load_relationship_characters(user_id)
+    if char_id not in characters:
+        return jsonify(error="角色不存在"), 404
+    records = [
+        {"id": cid, "name": info.get("name") or cid,
+         "output_language": character_language(cid, user_id)}
+        for cid, info in characters.items() if cid != char_id
+    ]
+    prompt = relationship_prompt(
+        characters[char_id].get("name") or char_id, records, graph, perspective,
+        user_language(user_id), character_language(char_id, user_id),
+    )
+    return jsonify(status="success", prompt=prompt)

@@ -1,6 +1,7 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="{{ ui_language }}" data-ai-brand-line="{{ ui_t('ai_brand_line', brand=saki_brand) }}">
 <head>
+  {% include "ui_language_head.html" %}
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>角色试聊</title>
@@ -8,7 +9,7 @@
   <script src="/static/auth-guard.js"></script>
   <link rel="stylesheet" href="/static/ai-disclosure.css">
   <script defer src="/static/ai-disclosure.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous"></script>
+  {% if not SAKI_LOCAL_TEST %}<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous"></script>{% endif %}
   <style>
     :root {
       --primary-color: #ffb6b9; --primary-dark: #f09598; --primary-light: #fff1f2;
@@ -70,9 +71,11 @@
     .field { margin: 13px 0; }
     .field label { display: block; margin-bottom: 6px; color: #667; font-size: 13px; font-weight: 650; }
     .field input, .field textarea { width: 100%; border: 1px solid var(--border-color); border-radius: 11px; padding: 10px 12px; outline: none; }
+    .field input:focus, .field textarea:focus { border-color: var(--primary-color); background: #fff; }
     .field textarea { min-height: 92px; resize: vertical; }
     .score-line { display: flex; align-items: center; gap: 12px; }
-    .score-line input { flex: 1; padding: 0; }
+    .score-line input { flex: 1; padding: 0; accent-color: var(--primary-color); }
+    #trialServiceHost { display: block; color: var(--text-muted); font-size: 11px; margin: -8px 0 10px; }
     .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
     .export-card { height: min(76vh, 680px); display: flex; flex-direction: column; }
     .export-tabs { display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); }
@@ -101,7 +104,7 @@
     </button>
     <div class="header-title">
       <div class="header-name" id="headerName">加载中…</div>
-      <div class="trial-meta"><button class="relationship-pill" id="relationshipPill">试聊模式</button> · <strong id="turnCounter">0/10</strong></div>
+      <div class="trial-meta" title="{{ ui_t('试聊使用平台配置的 AI 服务，不使用你的个人线路或 Key；你的输入、试聊历史和关系设定会发送给该服务。') }}"><button class="relationship-pill" id="relationshipPill">试聊模式</button> · <strong id="turnCounter">0/10</strong></div>
     </div>
     <button class="header-btn" id="selectBtn" aria-label="多选导出" title="多选导出">
       <svg viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2m0 4h2v-2H3v2m0-8h2V7H3v2m4 4h14v-2H7v2m0 4h14v-2H7v2M7 7v2h14V7H7z"/></svg>
@@ -113,6 +116,7 @@
   <div class="ai-disclosure ai-disclosure--chat" role="note"><span>内容由 AI 生成</span></div>
 
   <div class="input-wrap" id="inputWrap">
+
     <textarea id="messageInput" maxlength="2000" rows="1" placeholder="输入消息…"></textarea>
     <button id="sendBtn">发送</button>
   </div>
@@ -128,6 +132,8 @@
   <div class="modal-mask" id="relationshipModal">
     <div class="modal-card">
       <div class="modal-title">设定你们的关系</div>
+    <small id="trialServiceHost"></small>
+    <p class="privacy-note" role="note">{{ ui_t('试聊使用平台配置的 AI 服务，不使用你的个人线路或 Key；你的输入、试聊历史和关系设定会发送给该服务。') }}</p>
       <div style="color:var(--text-muted);font-size:13px;line-height:1.6">这条关系会用于全部10轮试聊；以后添加角色到本地时也会自动保存。</div>
       <div class="field"><label for="relationshipRole">关系定位</label><input id="relationshipRole" maxlength="50" list="relationshipPresets" placeholder="例如：朋友、恋人、同事、陌生人"><datalist id="relationshipPresets"><option value="朋友"><option value="恋人"><option value="同事"><option value="同学"><option value="青梅竹马"><option value="陌生人"></datalist></div>
       <div class="field"><label for="relationshipScore">关系指数</label><div class="score-line"><input type="range" id="relationshipScore" min="0" max="5" step="1" value="1"><strong id="relationshipScoreValue">1</strong></div></div>
@@ -173,7 +179,7 @@
 
     function updateCounter() {
       $('turnCounter').textContent = `${state.completedTurns}/${state.maxTurns}`;
-      $('relationshipPill').textContent = state.relationship ? `${state.relationship.role} · 试聊模式` : '试聊模式';
+      $('relationshipPill').textContent = state.relationship ? SakiI18n.ui`${state.relationship.role} · 试聊模式` : SakiI18n.t('试聊模式');
     }
 
     function renderMessages() {
@@ -188,7 +194,7 @@
         container.appendChild(createMessageGroup(message, index));
       });
       if (!state.messages.length) {
-        const empty = document.createElement('div'); empty.className = 'loading-note'; empty.textContent = '关系设定完成后，就可以开始最多10轮试聊。'; container.appendChild(empty);
+        const empty = document.createElement('div'); empty.className = 'loading-note'; empty.textContent = SakiI18n.t('关系设定完成后，就可以开始最多10轮试聊。'); container.appendChild(empty);
       }
       if (state.completedTurns >= state.maxTurns) {
         container.appendChild($('finishedTemplate').content.cloneNode(true));
@@ -212,7 +218,7 @@
       const avatar = document.createElement('img'); avatar.className = 'avatar-img'; avatar.alt = ''; avatar.src = isUser ? `/user_avatar?t=${Date.now()}` : avatarUrl(state.character?.avatar); avatar.onerror = () => avatar.src = '/static/default_avatar.png';
       const stack = document.createElement('div'); stack.className = 'message-stack';
       const name = document.createElement('div'); name.className = 'sender-name'; name.textContent = isUser ? state.user.name : state.character.name;
-      const bubble = document.createElement('div'); bubble.className = 'bubble'; bubble.textContent = message.content;
+      const bubble = document.createElement('div'); bubble.className = 'bubble'; bubble.textContent = message.content; if (!isUser) bubble.setAttribute("data-model-output", "");
       const time = document.createElement('div'); time.className = 'message-time'; time.textContent = displayTime(message.created_at);
       stack.append(name, bubble, time); group.append(avatar, stack);
       group.addEventListener('click', event => { if (!state.selecting) return; event.preventDefault(); toggleGroupSelection(group, event.shiftKey); });
@@ -235,21 +241,22 @@
     function toggleGroupSelection(group, range) { if (range && state.lastSelectedIndex !== null) selectRange(group); else { group.classList.toggle('selected'); state.lastSelectedIndex = messageGroups().indexOf(group); updateSelectionCount(); } }
     function selectRange(group) { const groups = messageGroups(); const index = groups.indexOf(group); if (state.lastSelectedIndex === null) group.classList.add('selected'); else for (let i=Math.min(index,state.lastSelectedIndex); i<=Math.max(index,state.lastSelectedIndex); i++) groups[i].classList.add('selected'); state.lastSelectedIndex=index; updateSelectionCount(); if (navigator.vibrate) navigator.vibrate(40); }
     function selectedGroups() { return messageGroups().filter(group => group.classList.contains('selected')); }
-    function updateSelectionCount() { $('selectCount').textContent = `已选择 ${selectedGroups().length} 条`; }
+    function updateSelectionCount() { $('selectCount').textContent = SakiI18n.ui`已选择 ${selectedGroups().length} 条`; }
 
     async function loadTrial() {
       const response = await fetchWithAuthGuard(`/api/square/character/${encodeURIComponent(charId)}/trial/bootstrap`, {cache:'no-store'});
-      if (!response.ok) { const data = await response.json().catch(()=>({})); alert(data.error || '试聊加载失败'); location.href = detailUrl(); return; }
+      if (!response.ok) { const data = await response.json().catch(()=>({})); alert(data.error || SakiI18n.t('试聊加载失败')); location.href = detailUrl(); return; }
       const data = await response.json();
+      $('trialServiceHost').textContent = SakiI18n.t('实际接收地址：{url}', {url:data.service_host || '—'});
       Object.assign(state, { character:data.character, user:data.user, relationship:data.relationship, messages:data.messages || [], completedTurns:data.completed_turns || 0, maxTurns:data.max_turns || 10 });
-      $('headerName').textContent = state.character.name; document.title = `与${state.character.name}试聊`; renderMessages();
+      $('headerName').textContent = state.character.name; document.title = SakiI18n.ui`与${state.character.name}试聊`; renderMessages();
       if (!state.relationship) openRelationshipModal(true); else fillRelationshipForm();
     }
     function fillRelationshipForm() { const rel=state.relationship||{}; $('relationshipRole').value=rel.role||''; $('relationshipScore').value=rel.score ?? 1; $('relationshipScoreValue').textContent=$('relationshipScore').value; $('relationshipDescription').value=rel.description||''; }
-    function openRelationshipModal(required=false) { fillRelationshipForm(); $('relationshipModal').classList.add('show'); $('cancelRelationshipBtn').textContent = required ? '返回简介' : '取消'; $('relationshipModal').dataset.required = required ? '1' : '0'; }
+    function openRelationshipModal(required=false) { fillRelationshipForm(); $('relationshipModal').classList.add('show'); $('cancelRelationshipBtn').textContent = required ? SakiI18n.t('返回简介') : SakiI18n.t('取消'); $('relationshipModal').dataset.required = required ? '1' : '0'; }
     async function saveRelationship() {
       const relationship = { role:$('relationshipRole').value.trim(), score:Number($('relationshipScore').value), description:$('relationshipDescription').value.trim() };
-      if (!relationship.role) return alert('请填写关系定位');
+      if (!relationship.role) return alert(SakiI18n.t('请填写关系定位'));
       $('saveRelationshipBtn').disabled=true;
       try {
         const response=await fetchWithAuthGuard(`/api/square/character/${encodeURIComponent(charId)}/trial/relationship`,{method:'PUT',headers:apiHeaders,body:JSON.stringify({relationship})});
@@ -258,41 +265,42 @@
     }
     async function sendMessage() {
       const text=$('messageInput').value.trim(); if(!text||!state.relationship||state.completedTurns>=state.maxTurns) return;
-      $('sendBtn').disabled=true; $('sendBtn').textContent='等待回复…';
+      $('sendBtn').disabled=true; $('sendBtn').textContent=SakiI18n.t('等待回复…');
       try {
         const requestId=(crypto.randomUUID?crypto.randomUUID():`${Date.now()}_${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g,'');
         const response=await fetchWithAuthGuard(`/api/square/character/${encodeURIComponent(charId)}/trial/chat`,{method:'POST',headers:apiHeaders,body:JSON.stringify({message:text,request_id:requestId})});
         const data=await response.json(); if(!response.ok) throw new Error(data.message||data.error||'回复生成失败');
         $('messageInput').value=''; $('messageInput').style.height='auto'; state.messages.push(data.user_message,data.assistant_message); state.completedTurns=data.turn; renderMessages();
-      } catch(error) { alert(error.message); } finally { $('sendBtn').disabled=false; $('sendBtn').textContent='发送'; }
+      } catch(error) { alert(error.message); } finally { $('sendBtn').disabled=false; $('sendBtn').textContent=SakiI18n.t('发送'); }
     }
 
-    function openAddLocalModal() { $('addLocalText').textContent=`将「${state.character.name}」添加到本地，并自动保存你们的关系。`; $('importHistoryLabel').style.display=state.messages.length?'flex':'none'; $('addLocalModal').classList.add('show'); }
+    function openAddLocalModal() { $('addLocalText').textContent=SakiI18n.ui`将「${state.character.name}」添加到本地，并自动保存你们的关系。`; $('importHistoryLabel').style.display=state.messages.length?'flex':'none'; $('addLocalModal').classList.add('show'); }
     async function addToLocal() {
-      $('confirmAddBtn').disabled=true; $('confirmAddBtn').textContent='添加中…';
+      $('confirmAddBtn').disabled=true; $('confirmAddBtn').textContent=SakiI18n.t('添加中…');
       try {
         const response=await fetchWithAuthGuard('/api/square/add_to_local',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:charId,import_trial_history:$('importHistoryCheckbox').checked})});
         const data=await response.json(); if(!response.ok||data.error) throw new Error(data.error||'添加失败');
-        const imported=data.imported_message_count||0; alert(data.status==='already_added'?'该角色已经在本地联系人中':`添加成功${imported?`，已导入${imported}条试聊消息`:''}`); location.href=`/chat/${encodeURIComponent(data.local_id)}`;
-      } catch(error) { alert(error.message); } finally { $('confirmAddBtn').disabled=false; $('confirmAddBtn').textContent='添加到本地'; }
+        const imported=data.imported_message_count||0; alert(data.status==='already_added'?SakiI18n.t('该角色已经在本地联系人中'):SakiI18n.ui`添加成功${imported?SakiI18n.ui`，已导入${imported}条试聊消息`:''}`); location.href=`/chat/${encodeURIComponent(data.local_id)}`;
+      } catch(error) { alert(error.message); } finally { $('confirmAddBtn').disabled=false; $('confirmAddBtn').textContent=SakiI18n.t('添加到本地'); }
     }
 
     function generateExport() {
-      const groups=selectedGroups(); if(!groups.length) return alert('请先选择消息');
+      const groups=selectedGroups(); if(!groups.length) return alert(SakiI18n.t('请先选择消息'));
       let text=`以下是和${state.character.name}的聊天记录\n`, lastDate='';
       groups.forEach(group=>{ const date=recordDate(group.dataset.timestamp); if(date!==lastDate){text+=`\n${date}\n`;lastDate=date;} const sender=group.dataset.sender==='user'?state.user.name:state.character.name; text+=`${sender}：${group.querySelector('.bubble').innerText.replace(/\n/g,' ')}（${displayTime(group.dataset.timestamp)}）\n`; });
       const disclosure=window.KunigamiAiDisclosure;
       $('exportText').value=disclosure
         ? disclosure.appendCopyFooter(text)
-        : `${text.trim()}\n\n——\n由 Sakura樱语🌸 AI 生成\nhttps://kunigami-project-api.online`;
+        : `${text.trim()}\n\n——\n由 {{ saki_brand }}🌸 AI 生成\n${window.location.origin}`;
       buildExportImage(); $('exportModal').classList.add('show');
     }
     function buildExportImage() {
+      const themePrimary=(getComputedStyle(document.documentElement).getPropertyValue('--primary-color')||'').trim()||'#ffb6b9';
       const root=$('exportImageContent'); root.innerHTML=''; const hide=$('hideChatNameCheckbox').checked;
-      const header=document.createElement('div'); header.style.cssText='padding:20px;border-bottom:1px solid #eee;text-align:center;font-weight:700;font-size:17px;'; header.textContent=hide?'聊天记录':`与${state.character.name}的聊天记录`; root.appendChild(header);
+      const header=document.createElement('div'); header.style.cssText='padding:20px;border-bottom:1px solid #eee;text-align:center;font-weight:700;font-size:17px;'; header.textContent=hide?SakiI18n.t('聊天记录'):SakiI18n.ui`与${state.character.name}的聊天记录`; root.appendChild(header);
       const body=document.createElement('div'); body.style.cssText='padding:18px 16px;'; let lastDate='';
-      selectedGroups().forEach(group=>{ const date=displayDate(group.dataset.timestamp); if(date!==lastDate){const sep=document.createElement('div');sep.style.cssText='margin:5px 0 15px;text-align:center;color:#98a4af;font-size:11px;';sep.textContent=date;body.appendChild(sep);lastDate=date;} const isUser=group.dataset.sender==='user'; const hideCharIdentity=hide&&!isUser; const row=document.createElement('div');row.style.cssText=`display:flex;gap:8px;align-items:flex-start;margin:12px 0;${isUser?'flex-direction:row-reverse;':''}`; const avatar=document.createElement('img');avatar.src=isUser?`/user_avatar?t=${Date.now()}`:avatarUrl(state.character.avatar);avatar.style.cssText='width:34px;height:34px;border-radius:50%;object-fit:cover;'; const stack=document.createElement('div');stack.style.cssText='max-width:72%;'; const name=document.createElement('div');name.style.cssText=`font-size:10px;color:#8ca0b3;margin:0 3px 4px;${isUser?'text-align:right;':''}`;name.textContent=isUser?state.user.name:state.character.name; const bubble=document.createElement('div');bubble.style.cssText=`padding:9px 12px;border-radius:15px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.5;${isUser?'background:#ffb6b9;color:#fff;':'background:#f1f3f5;color:#333;'}`;bubble.textContent=group.querySelector('.bubble').innerText; const time=document.createElement('div');time.style.cssText=`font-size:9px;color:#9aa5af;margin:3px;${isUser?'text-align:right;':''}`;time.textContent=displayTime(group.dataset.timestamp); if(!hideCharIdentity)stack.appendChild(name);stack.append(bubble,time);if(!hideCharIdentity)row.appendChild(avatar);row.appendChild(stack);body.appendChild(row); });
-      root.appendChild(body); const disclosure=window.KunigamiAiDisclosure||{brandLine:'由 Sakura樱语🌸 AI 生成',siteUrl:'https://kunigami-project-api.online'}; const footer=document.createElement('div');footer.style.cssText='padding:12px;text-align:center;color:#9aa5af;font-size:10px;line-height:1.6;white-space:pre-line;border-top:1px solid #eee;';footer.textContent=`${disclosure.brandLine}\n${disclosure.siteUrl}`;root.appendChild(footer); scaleExportPreview();
+      selectedGroups().forEach(group=>{ const date=displayDate(group.dataset.timestamp); if(date!==lastDate){const sep=document.createElement('div');sep.style.cssText='margin:5px 0 15px;text-align:center;color:#98a4af;font-size:11px;';sep.textContent=date;body.appendChild(sep);lastDate=date;} const isUser=group.dataset.sender==='user'; const hideCharIdentity=hide&&!isUser; const row=document.createElement('div');row.style.cssText=`display:flex;gap:8px;align-items:flex-start;margin:12px 0;${isUser?'flex-direction:row-reverse;':''}`; const avatar=document.createElement('img');avatar.src=isUser?`/user_avatar?t=${Date.now()}`:avatarUrl(state.character.avatar);avatar.style.cssText='width:34px;height:34px;border-radius:50%;object-fit:cover;'; const stack=document.createElement('div');stack.style.cssText='max-width:72%;'; const name=document.createElement('div');name.style.cssText=`font-size:10px;color:#8ca0b3;margin:0 3px 4px;${isUser?'text-align:right;':''}`;name.textContent=isUser?state.user.name:state.character.name; const bubble=document.createElement('div');bubble.style.cssText=`padding:9px 12px;border-radius:15px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.5;${isUser?'background:'+themePrimary+';color:#fff;':'background:#f1f3f5;color:#333;'}`;bubble.textContent=group.querySelector('.bubble').innerText; const time=document.createElement('div');time.style.cssText=`font-size:9px;color:#9aa5af;margin:3px;${isUser?'text-align:right;':''}`;time.textContent=displayTime(group.dataset.timestamp); if(!hideCharIdentity)stack.appendChild(name);stack.append(bubble,time);if(!hideCharIdentity)row.appendChild(avatar);row.appendChild(stack);body.appendChild(row); });
+      root.appendChild(body); const disclosure=window.KunigamiAiDisclosure||{brandLine:'由 {{ saki_brand }}🌸 AI 生成',siteUrl:window.location.origin}; const footer=document.createElement('div');footer.style.cssText='padding:12px;text-align:center;color:#9aa5af;font-size:10px;line-height:1.6;white-space:pre-line;border-top:1px solid #eee;';footer.textContent=`${disclosure.brandLine}\n${disclosure.siteUrl}`;root.appendChild(footer); scaleExportPreview();
     }
     function scaleExportPreview(){ const preview=$('exportImagePreview'),content=$('exportImageContent'); content.style.transform=''; content.style.width='430px'; const scale=Math.min(1,(preview.clientWidth-20)/430); content.style.transformOrigin='top left'; content.style.transform=`scale(${scale})`; content.style.marginBottom=`-${content.scrollHeight*(1-scale)}px`; }
     async function exportCanvas(){ if(!window.html2canvas) throw new Error('图片导出组件加载失败'); const content=$('exportImageContent'); const old=content.style.transform; content.style.transform='none'; try{return await html2canvas(content,{scale:2,useCORS:true,backgroundColor:'#fff'});}finally{content.style.transform=old;} }
@@ -303,11 +311,11 @@
     $('cancelAddBtn').onclick=()=>$('addLocalModal').classList.remove('show'); $('confirmAddBtn').onclick=addToLocal;
     document.querySelectorAll('.export-tab').forEach(btn=>btn.onclick=()=>{document.querySelectorAll('.export-tab').forEach(x=>x.classList.toggle('active',x===btn));$('textPane').classList.toggle('active',btn.dataset.tab==='text');$('imagePane').classList.toggle('active',btn.dataset.tab==='image');if(btn.dataset.tab==='image')setTimeout(buildExportImage,0);});
     document.querySelectorAll('.close-export').forEach(btn=>btn.onclick=()=>$('exportModal').classList.remove('show')); $('hideChatNameCheckbox').onchange=buildExportImage;
-    $('copyTextBtn').onclick=async()=>{await navigator.clipboard.writeText($('exportText').value);$('copyTextBtn').textContent='已复制';setTimeout(()=>$('copyTextBtn').textContent='复制全部',1200);};
+    $('copyTextBtn').onclick=async()=>{await navigator.clipboard.writeText($('exportText').value);$('copyTextBtn').textContent=SakiI18n.t('已复制');setTimeout(()=>$('copyTextBtn').textContent=SakiI18n.t('复制全部'),1200);};
     $('downloadImageBtn').onclick=async()=>{try{const canvas=await exportCanvas();const link=document.createElement('a');link.download=`与${state.character.name}的试聊记录.png`;link.href=canvas.toDataURL('image/png');link.click();}catch(error){alert(error.message);}};
-    $('copyImageBtn').onclick=async()=>{try{const canvas=await exportCanvas();canvas.toBlob(async blob=>{if(!blob)return;await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);$('copyImageBtn').textContent='已复制';setTimeout(()=>$('copyImageBtn').textContent='复制图片',1200);},'image/png');}catch(error){alert('当前浏览器不支持复制图片，请使用下载图片');}};
+    $('copyImageBtn').onclick=async()=>{try{const canvas=await exportCanvas();canvas.toBlob(async blob=>{if(!blob)return;await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);$('copyImageBtn').textContent=SakiI18n.t('已复制');setTimeout(()=>$('copyImageBtn').textContent=SakiI18n.t('复制图片'),1200);},'image/png');}catch(error){alert(SakiI18n.t('当前浏览器不支持复制图片，请使用下载图片'));}};
     window.addEventListener('resize',()=>{if($('imagePane').classList.contains('active'))scaleExportPreview();});
-    loadTrial().catch(error=>{console.error(error);alert('试聊页面加载失败');location.href=detailUrl();});
+    loadTrial().catch(error=>{console.error(error);alert(SakiI18n.t('试聊页面加载失败'));location.href=detailUrl();});
   </script>
 </body>
 </html>

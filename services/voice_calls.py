@@ -16,7 +16,12 @@ VOICE_CALL_TAG_RE = re.compile(r"^\[voice_call\]\((call_[a-f0-9]{32})\)$", re.I)
 CALL_CONTROL_RE = re.compile(
     r"\[(CALL_USER|CALL_ACCEPT|CALL_REJECT|END_CALL)\]", re.I
 )
-CALL_USER_RE = re.compile(r"\[CALL_USER\]", re.I)
+# Models sometimes use VOICE_CALL for the action. Only accept it as a
+# separate reply segment; [voice_call](call_id) denotes a stored call.
+CALL_USER_RE = re.compile(
+    r"\[CALL_USER\]|(?:^|(?<=/))[ \t]*\[VOICE_CALL\][ \t]*(?=/|\r?$)",
+    re.I | re.M,
+)
 LIVE_STATUSES = ("ringing", "active")
 END_REASONS = {
     "rejected", "missed", "canceled", "hangup", "character_hangup",
@@ -231,10 +236,9 @@ def parse_call_model_output(content: str) -> dict:
 def consume_call_user_tag(content: str) -> tuple[str, bool]:
     """Remove proactive-call action tags from a normal character reply."""
     raw = str(content or "")
-    requested = bool(CALL_USER_RE.search(raw))
-    cleaned = CALL_USER_RE.sub("", raw)
+    cleaned, count = CALL_USER_RE.subn("", raw)
     cleaned = re.sub(r"\s*\/\s*(?=\/|$)", "", cleaned).strip(" /\r\n\t")
-    return cleaned, requested
+    return cleaned, bool(count)
 
 
 def tts_text_with_tone(text: str, tone: str) -> str:
@@ -469,6 +473,8 @@ def end_call(user_id, call_id: str, *, reason: str) -> dict:
         conn.commit()
     finally:
         conn.close()
+    # Call lifecycle changes only persist state. Transcript memory is handled by
+    # the regular scheduled/manual memory flow, never on hangup itself.
     return get_call(user_id, call_id)
 
 
@@ -551,6 +557,41 @@ def list_turns(user_id, call_id: str) -> list[dict]:
         conn.close()
 
 
+def list_memory_turns(user_id, char_id: str, *, start=None, end=None, ended_only=False):
+    """Read full call text for memory, independently of chat anchors/UI limits.
+
+    Return chat-shaped rows with call-turn IDs and Beijing timestamps. Reading
+    memory must not create a calls database for users who have never called.
+    """
+    if user_id is None or not os.path.exists(_db_path(user_id)):
+        return []
+    from core.time_utils import format_beijing_timestamp, parse_beijing_timestamp
+
+    query = (
+        "SELECT t.id, t.created_at, t.role, t.content FROM voice_call_turns t "
+        "JOIN voice_calls c ON c.call_id = t.call_id WHERE c.char_id = ?"
+    )
+    params = [str(char_id)]
+    if ended_only:
+        query += " AND c.status = 'ended'"
+    if start is not None:
+        query += " AND julianday(t.created_at) >= julianday(?)"
+        params.append(parse_beijing_timestamp(start).isoformat())
+    if end is not None:
+        query += " AND julianday(t.created_at) < julianday(?)"
+        params.append(parse_beijing_timestamp(end).isoformat())
+    query += " ORDER BY t.id ASC"
+    conn = sqlite3.connect(_db_path(user_id))
+    try:
+        conn.execute("PRAGMA query_only = ON")
+        return [
+            (row[0], format_beijing_timestamp(datetime.fromisoformat(row[1])), row[2], row[3])
+            for row in conn.execute(query, params).fetchall()
+        ]
+    finally:
+        conn.close()
+
+
 def delete_calls_for_character(user_id, char_id: str) -> int:
     conn = _connect(user_id)
     try:
@@ -588,6 +629,8 @@ def expire_stale_ringing_calls(user_id, *, timeout_seconds: int = 30) -> int:
 
 def expire_stale_active_calls(user_id, *, timeout_seconds: int = 45) -> list[dict]:
     """End calls whose browser heartbeat disappeared and return affected calls."""
+    if not os.path.exists(_db_path(user_id)):
+        return []
     threshold = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat(
         timespec="seconds"
     )
@@ -609,6 +652,7 @@ def expire_stale_active_calls(user_id, *, timeout_seconds: int = 45) -> list[dic
                 (now, now, threshold),
             )
         conn.commit()
-        return [dict(row) for row in rows]
     finally:
         conn.close()
+    # This also runs while opening/polling calls; cleanup must not launch models.
+    return [dict(row) for row in rows]

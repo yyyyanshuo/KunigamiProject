@@ -1,6 +1,7 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="{{ ui_language }}" data-ai-brand-line="{{ ui_t('ai_brand_line', brand=saki_brand) }}">
 <head>
+  {% include "ui_language_head.html" %}
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>角色 Ego 八维测评报告</title>
@@ -53,7 +54,7 @@
 <body>
   <main class="shell">
     <header class="top">
-      <div><div class="eyebrow">Kunigami Character Assessment</div><h1>Ego 八维测评</h1><div id="runMeta" class="muted"></div></div>
+      <div><div class="eyebrow">{{ saki_brand }} Character Assessment</div><h1>Ego 八维测评</h1><div id="runMeta" class="muted"></div></div>
       <div class="controls"><select id="characterSelect" aria-label="选择角色"></select><button id="printButton" type="button">打印 / 导出 PDF</button></div>
     </header>
 
@@ -115,7 +116,7 @@
       add(ending,node('div','eyebrow','Hidden Ending'),node('h2','',character.hidden_ending.title),node('p','muted',character.hidden_ending.message));
     }
     function renderAnswers(character) {
-      answersRoot.replaceChildren(); answerCount.textContent = `${character.answers.length} 条回答`;
+      answersRoot.replaceChildren(); answerCount.textContent = SakiI18n.ui`${character.answers.length} 条回答`;
       if (!character.answers.length) { answersRoot.appendChild(node('div','card empty muted','这个角色还没有成功保存的回答。')); return; }
       character.answers.forEach(answer => {
         const question = questions.get(answer.question_id);
@@ -142,10 +143,10 @@
       const character = DATA.characters.find(item => item.char_id === charId);
       if (!character) return;
       renderHero(character); renderDimensions(character); renderEnding(character); renderAnswers(character);
-      document.title = `${character.char_name || character.char_id} · Ego 八维测评`;
+      document.title = SakiI18n.ui`${character.char_name || character.char_id} · Ego 八维测评`;
     }
 
-    document.getElementById('runMeta').textContent = `运行 ${DATA.run_id} · 题库 ${DATA.questionnaire.questionnaire_version}`;
+    document.getElementById('runMeta').textContent = SakiI18n.ui`运行 ${DATA.run_id} · 题库 ${DATA.questionnaire.questionnaire_version}`;
     DATA.characters.forEach(character => { const option = node('option','',character.char_name || character.char_id); option.value = character.char_id; select.appendChild(option); });
     select.addEventListener('change',event => render(event.target.value));
     document.getElementById('printButton').addEventListener('click',() => window.print());
